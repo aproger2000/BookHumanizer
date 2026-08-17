@@ -128,7 +128,17 @@ def revise_chapter(chapter_text: str, intensity: str = "balanced") -> dict:
     }
 
     try:
-        resp = requests.post(ANTHROPIC_API_URL, headers=headers, json=payload, timeout=120)
+        # (connect timeout, read timeout) -- generating a full chapter can
+        # legitimately take a couple of minutes, especially for long
+        # chapters or "thorough" intensity, so the read timeout is generous.
+        resp = requests.post(
+            ANTHROPIC_API_URL, headers=headers, json=payload, timeout=(10, 300)
+        )
+    except requests.exceptions.ReadTimeout as exc:
+        raise ChapterEditError(
+            "The Anthropic API took too long to respond (over 5 minutes). "
+            "Try a shorter chapter or a lighter intensity, then try again."
+        ) from exc
     except requests.RequestException as exc:
         raise ChapterEditError(f"Network error calling the Anthropic API: {exc}") from exc
 

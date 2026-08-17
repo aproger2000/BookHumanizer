@@ -40,7 +40,7 @@ python app.py
    автоматически (план `free`).
    - Либо вручную: **New → Web Service**, подключите репозиторий,
      Build Command — `pip install -r requirements.txt`, Start Command —
-     `gunicorn app:app --bind 0.0.0.0:$PORT --timeout 180`.
+     `gunicorn app:app --bind 0.0.0.0:$PORT --timeout 340`.
 3. В настройках сервиса (**Environment**) добавьте переменную
    `ANTHROPIC_API_KEY` со своим ключом с https://console.anthropic.com.
    Переменная `ANTHROPIC_MODEL` уже задана в `render.yaml`, но её можно
