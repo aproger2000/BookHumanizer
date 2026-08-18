@@ -409,20 +409,19 @@ def api_revise():
             502,
         )
 
-    hint = INTENSITY_HINTS.get(intensity, INTENSITY_HINTS["balanced"])
-    style_hint = STYLE_PRESETS.get(style, "")
-    payload = {
-        "model": ANTHROPIC_MODEL,
-        "max_tokens": MAX_OUTPUT_TOKENS,
-        "system": SYSTEM_PROMPT,
-        "stream": True,
-        "messages": [
-            {
-                "role": "user",
-                "content": f"{hint}{style_hint}\n\n---\nCHAPTER TEXT:\n---\n{chapter_text}",
-            }
-        ],
-    }
+style_hint = STYLE_PRESETS.get(style, "")
+payload = {
+    "model": ANTHROPIC_MODEL,
+    "max_tokens": MAX_OUTPUT_TOKENS,
+    "system": SYSTEM_PROMPT,
+    "stream": True,
+    "messages": [
+        {
+            "role": "user",
+            "content": f"{style_hint}\n\n---\nCHAPTER TEXT:\n---\n{chapter_text}",
+        }
+    ],
+}
     headers = {
         "x-api-key": api_key,
         "anthropic-version": ANTHROPIC_VERSION,
