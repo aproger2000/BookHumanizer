@@ -3,19 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chapter Editor v2.2</title>
+    <title>Chapter Editor v2.5</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
-            background: #0b0d10;
-            color: #e8edf2;
+            background: #f0f4fa;
+            color: #1a2634;
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             min-height: 100vh;
             display: flex;
             flex-direction: column;
             padding: 24px;
         }
+
         .container {
             max-width: 1200px;
             margin: 0 auto;
@@ -24,39 +30,39 @@
             display: flex;
             flex-direction: column;
         }
+
         header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 16px 0 32px;
-            border-bottom: 1px solid #1f2429;
+            padding: 16px 0 24px;
+            border-bottom: 1px solid #d0d9e4;
             flex-wrap: wrap;
             gap: 12px;
         }
+
         .logo h1 {
             font-size: 22px;
             font-weight: 600;
-            background: linear-gradient(135deg, #8ab4f8, #c084fc);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            color: #1a2634;
             letter-spacing: -0.3px;
         }
+
         .logo .sub {
             font-size: 13px;
-            color: #6b7a8f;
+            color: #6b7f94;
             font-weight: 400;
-            -webkit-text-fill-color: #6b7a8f;
-            background: none;
         }
+
         .version-badge {
-            background: #1a2026;
+            background: #e4eaf2;
             padding: 6px 14px;
             border-radius: 20px;
             font-size: 12px;
-            color: #8b9bb0;
-            border: 1px solid #2a323a;
+            color: #3d546a;
             font-weight: 500;
         }
+
         .main-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -64,45 +70,54 @@
             margin-top: 28px;
             flex: 1;
         }
+
         @media (max-width: 768px) {
-            .main-grid { grid-template-columns: 1fr; }
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
             body { padding: 16px; }
         }
+
         .panel {
-            background: #12161b;
+            background: #ffffff;
             border-radius: 16px;
-            border: 1px solid #1f2429;
+            border: 1px solid #d0d9e4;
             padding: 24px;
             display: flex;
             flex-direction: column;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
         }
+
         .panel-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 16px;
         }
+
         .panel-header h2 {
             font-size: 15px;
             font-weight: 500;
-            color: #bcc9d9;
+            color: #2c3e50;
             letter-spacing: 0.3px;
         }
+
         .panel-header .count {
             font-size: 12px;
-            color: #6b7a8f;
-            background: #1a2026;
+            color: #6b7f94;
+            background: #eef3f8;
             padding: 4px 12px;
             border-radius: 12px;
         }
+
         textarea {
             width: 100%;
             flex: 1;
             min-height: 300px;
-            background: #0d1115;
-            border: 1px solid #1f2429;
+            background: #f7fafc;
+            border: 1px solid #d0d9e4;
             border-radius: 12px;
-            color: #d4dce6;
+            color: #1a2634;
             font-family: 'Inter', monospace;
             font-size: 14px;
             line-height: 1.7;
@@ -110,37 +125,48 @@
             resize: vertical;
             transition: border-color 0.2s;
         }
+
         textarea:focus {
             outline: none;
-            border-color: #8ab4f8;
+            border-color: #6c8fc7;
         }
+
         textarea::placeholder {
-            color: #3d4855;
+            color: #8fa2b8;
         }
+
+        textarea:disabled {
+            background: #eef3f8;
+            color: #6b7f94;
+        }
+
         .controls {
             display: flex;
             gap: 12px;
             flex-wrap: wrap;
             margin-top: 16px;
             padding-top: 16px;
-            border-top: 1px solid #1a2026;
+            border-top: 1px solid #e4eaf2;
         }
+
         .controls select {
-            background: #0d1115;
-            border: 1px solid #1f2429;
+            background: #f7fafc;
+            border: 1px solid #d0d9e4;
             border-radius: 10px;
             padding: 10px 16px;
-            color: #d4dce6;
+            color: #1a2634;
             font-family: 'Inter', sans-serif;
             font-size: 13px;
             cursor: pointer;
             flex: 1;
             min-width: 120px;
         }
+
         .controls select:focus {
             outline: none;
-            border-color: #8ab4f8;
+            border-color: #6c8fc7;
         }
+
         .btn {
             padding: 10px 28px;
             border: none;
@@ -155,107 +181,179 @@
             gap: 8px;
             white-space: nowrap;
         }
+
         .btn-primary {
-            background: linear-gradient(135deg, #8ab4f8, #7c6df0);
-            color: #0b0d10;
+            background: #2c3e50;
+            color: #ffffff;
         }
+
         .btn-primary:hover {
+            background: #1a2a3a;
             transform: translateY(-1px);
-            box-shadow: 0 4px 20px rgba(138, 180, 248, 0.25);
+            box-shadow: 0 4px 16px rgba(44, 62, 80, 0.2);
         }
+
         .btn-primary:disabled {
-            opacity: 0.4;
+            background: #8fa2b8;
             cursor: not-allowed;
             transform: none;
+            box-shadow: none;
         }
+
         .btn-secondary {
-            background: #1f2429;
-            color: #bcc9d9;
+            background: #e4eaf2;
+            color: #2c3e50;
         }
+
         .btn-secondary:hover {
-            background: #2a323a;
+            background: #d0d9e4;
         }
+
         .progress-container {
             margin-top: 12px;
-            background: #0d1115;
+            background: #eef3f8;
             border-radius: 8px;
-            height: 4px;
+            height: 6px;
             overflow: hidden;
             opacity: 0;
             transition: opacity 0.3s;
         }
+
         .progress-container.active {
             opacity: 1;
         }
+
         .progress-bar {
             height: 100%;
             width: 0%;
-            background: linear-gradient(90deg, #8ab4f8, #c084fc);
+            background: #2c3e50;
             border-radius: 8px;
-            transition: width 0.3s ease;
+            transition: width 0.2s ease;
         }
+
         .status-text {
             font-size: 13px;
-            color: #6b7a8f;
+            color: #6b7f94;
             margin-top: 10px;
             min-height: 20px;
         }
-        .status-text.success { color: #6fcf97; }
-        .status-text.error { color: #f28b82; }
+
+        .status-text.success {
+            color: #1e7e34;
+        }
+
+        .status-text.error {
+            color: #b3362a;
+        }
+
         .checklist {
             margin-top: 12px;
             padding: 12px 16px;
-            background: #0d1115;
+            background: #f7fafc;
             border-radius: 10px;
-            border: 1px solid #1a2026;
+            border: 1px solid #d0d9e4;
             display: none;
         }
-        .checklist.visible { display: block; }
+
+        .checklist.visible {
+            display: block;
+        }
+
         .checklist-item {
             display: flex;
             align-items: center;
             gap: 10px;
             padding: 4px 0;
             font-size: 13px;
-            color: #bcc9d9;
+            color: #2c3e50;
         }
+
         .checklist-item .icon {
             font-size: 16px;
             width: 20px;
             text-align: center;
         }
-        .checklist-item .icon.pass { color: #6fcf97; }
-        .checklist-item .icon.fail { color: #f28b82; }
-        .checklist-item .icon.unknown { color: #6b7a8f; }
+
+        .checklist-item .icon.pass {
+            color: #1e7e34;
+        }
+
+        .checklist-item .icon.fail {
+            color: #b3362a;
+        }
+
+        .checklist-item .icon.unknown {
+            color: #8fa2b8;
+        }
+
         .footer {
             margin-top: 32px;
             padding-top: 16px;
-            border-top: 1px solid #1a2026;
+            border-top: 1px solid #d0d9e4;
             display: flex;
             justify-content: space-between;
             font-size: 12px;
-            color: #3d4855;
+            color: #8fa2b8;
             flex-wrap: wrap;
             gap: 8px;
         }
+
         .footer a {
-            color: #6b7a8f;
+            color: #6b7f94;
             text-decoration: none;
         }
-        .footer a:hover { color: #8ab4f8; }
+
+        .footer a:hover {
+            color: #2c3e50;
+        }
+
         .copy-btn {
-            background: none;
-            border: 1px solid #2a323a;
-            color: #8b9bb0;
+            background: #eef3f8;
+            border: 1px solid #d0d9e4;
+            color: #2c3e50;
             padding: 4px 12px;
             border-radius: 6px;
             font-size: 12px;
             cursor: pointer;
             transition: all 0.2s;
         }
+
         .copy-btn:hover {
-            background: #1f2429;
-            color: #d4dce6;
+            background: #d0d9e4;
+        }
+
+        .step-indicator {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+            font-size: 12px;
+            color: #6b7f94;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .step-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #d0d9e4;
+            transition: all 0.3s;
+        }
+
+        .step-dot.active {
+            background: #2c3e50;
+            transform: scale(1.2);
+        }
+
+        .step-dot.done {
+            background: #1e7e34;
+        }
+
+        .step-label {
+            font-size: 12px;
+            color: #6b7f94;
+            margin-left: 4px;
         }
     </style>
 </head>
@@ -266,11 +364,11 @@
         <div class="logo">
             <h1>Chapter Editor <span class="sub">— текст как живой</span></h1>
         </div>
-        <span class="version-badge">v2.2.0</span>
+        <span class="version-badge">v2.5.0</span>
     </header>
 
     <div class="main-grid">
-        <!-- Левая панель: исходный текст -->
+        <!-- Левая панель -->
         <div class="panel">
             <div class="panel-header">
                 <h2>📄 Исходный текст</h2>
@@ -288,11 +386,22 @@
             <div class="progress-container" id="progressContainer">
                 <div class="progress-bar" id="progressBar"></div>
             </div>
+            <div class="step-indicator" id="stepIndicator">
+                <span>Шаги:</span>
+                <span class="step-dot" id="step1"></span>
+                <span class="step-label" id="step1Label">Отправка</span>
+                <span class="step-dot" id="step2"></span>
+                <span class="step-label" id="step2Label">Генерация</span>
+                <span class="step-dot" id="step3"></span>
+                <span class="step-label" id="step3Label">Пост-обработка</span>
+                <span class="step-dot" id="step4"></span>
+                <span class="step-label" id="step4Label">Готово</span>
+            </div>
             <div class="status-text" id="statusText">Готов к работе</div>
             <input type="file" id="fileInput" accept=".txt,.md,.docx" style="display:none">
         </div>
 
-        <!-- Правая панель: результат -->
+        <!-- Правая панель -->
         <div class="panel result-panel">
             <div class="panel-header">
                 <h2>✨ Отредактированный текст</h2>
@@ -304,7 +413,6 @@
             <div class="panel-body">
                 <textarea id="resultText" placeholder="Результат появится здесь..." readonly></textarea>
             </div>
-            <!-- Чек-лист -->
             <div class="checklist" id="checklist">
                 <div id="checklistItems"></div>
             </div>
@@ -312,8 +420,8 @@
     </div>
 
     <div class="footer">
-        <span>Chapter Editor v2.2.0 — обработка через Claude</span>
-        <span><a href="https://github.com" target="_blank">GitHub</a> · <a href="#" onclick="location.reload()">Перезагрузить</a></span>
+        <span>Chapter Editor v2.5.0 — обработка через Claude</span>
+        <span><a href="#" onclick="location.reload()">Перезагрузить</a></span>
     </div>
 </div>
 
@@ -334,12 +442,43 @@
     const checklistItems = document.getElementById('checklistItems');
     const copyBtn = document.getElementById('copyBtn');
 
-    // Подсчёт символов в исходнике
+    // Шаги
+    const steps = {
+        step1: document.getElementById('step1'),
+        step2: document.getElementById('step2'),
+        step3: document.getElementById('step3'),
+        step4: document.getElementById('step4'),
+    };
+
+    function resetSteps() {
+        Object.values(steps).forEach(s => {
+            s.className = 'step-dot';
+        });
+    }
+
+    function setStep(step, label) {
+        resetSteps();
+        const names = ['step1', 'step2', 'step3', 'step4'];
+        for (let i = 0; i < names.length; i++) {
+            if (i < step) {
+                steps[names[i]].className = 'step-dot done';
+            } else if (i === step) {
+                steps[names[i]].className = 'step-dot active';
+            } else {
+                steps[names[i]].className = 'step-dot';
+            }
+        }
+        if (label) {
+            statusText.textContent = '⏳ ' + label;
+        }
+    }
+
+    // Подсчёт символов
     sourceText.addEventListener('input', function() {
         sourceCount.textContent = this.value.length + ' симв.';
     });
 
-    // Кнопка "Загрузить"
+    // Загрузка файла
     loadBtn.addEventListener('click', function() {
         fileInput.click();
     });
@@ -362,7 +501,7 @@
         reader.readAsText(file, 'UTF-8');
     });
 
-    // Кнопка "Копировать"
+    // Копирование
     copyBtn.addEventListener('click', function() {
         if (!resultText.value) {
             statusText.textContent = '⚠️ Нет текста для копирования';
@@ -372,12 +511,7 @@
         navigator.clipboard.writeText(resultText.value).then(() => {
             statusText.textContent = '✅ Текст скопирован в буфер обмена';
             statusText.className = 'status-text success';
-            setTimeout(() => {
-                if (!resultText.value) return;
-                statusText.textContent = '✅ Готово!';
-            }, 2000);
         }).catch(() => {
-            // fallback
             resultText.select();
             document.execCommand('copy');
             statusText.textContent = '✅ Текст скопирован';
@@ -385,7 +519,7 @@
         });
     });
 
-    // Кнопка "Редактировать"
+    // Редактирование
     editBtn.addEventListener('click', function() {
         const text = sourceText.value.trim();
         if (!text) {
@@ -397,17 +531,21 @@
         const style = styleSelect.value;
         editBtn.disabled = true;
         editBtn.textContent = '⏳ Обработка...';
-        statusText.textContent = '⏳ Редактирование...';
+        statusText.textContent = '⏳ Начинаем обработку...';
         statusText.className = 'status-text';
         progressContainer.classList.add('active');
         progressBar.style.width = '0%';
         checklistDiv.classList.remove('visible');
         resultText.value = '';
         resultCount.textContent = '0 симв.';
+        resetSteps();
 
         const formData = new FormData();
         formData.append('text', text);
         formData.append('style', style);
+
+        let step = 0;
+        setStep(0, 'Отправка запроса...');
 
         fetch('/api/revise', {
             method: 'POST',
@@ -419,9 +557,11 @@
                     throw new Error(err.detail || 'Ошибка сервера');
                 });
             }
+            setStep(1, 'Генерация текста...');
             return handleStream(response);
         })
         .then(data => {
+            setStep(3, 'Готово!');
             resultText.value = data.revised_text;
             resultCount.textContent = data.revised_text.length + ' симв.';
             statusText.textContent = '✅ Готово! ' + (data.summary || '');
@@ -435,6 +575,7 @@
         .catch(err => {
             statusText.textContent = '❌ ' + err.message;
             statusText.className = 'status-text error';
+            setStep(-1, 'Ошибка');
         })
         .finally(() => {
             editBtn.disabled = false;
@@ -444,57 +585,44 @@
         });
     });
 
-function handleStream(response) {
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let resolved = false;
-    let timeoutId = null;
+    function handleStream(response) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let resolved = false;
 
-    // Таймаут на случай, если стрим зависнет
-    const timeoutPromise = new Promise((_, reject) => {
-        timeoutId = setTimeout(() => {
-            reject(new Error('Превышено время ожидания ответа от сервера'));
-        }, 300000); // 5 минут
-    });
-
-    const readPromise = new Promise((resolve, reject) => {
-        function read() {
-            reader.read().then(({ done, value }) => {
-                if (done) {
-                    if (!resolved) reject(new Error('Соединение закрыто сервером'));
-                    return;
-                }
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-
-                for (const line of lines) {
-                    if (!line.startsWith('data: ')) continue;
-                    const payload = line.slice(6).trim();
-                    if (!payload) continue;
-
-                    try {
-                        const event = JSON.parse(payload);
-                        handleEvent(event, resolve, reject, () => { resolved = true; });
-                    } catch (e) {
-                        // игнорируем битые JSON
+        return new Promise((resolve, reject) => {
+            function read() {
+                reader.read().then(({ done, value }) => {
+                    if (done) {
+                        if (!resolved) reject(new Error('Соединение закрыто'));
+                        return;
                     }
-                }
 
-                read();
-            }).catch(reject);
-        }
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
 
-        read();
-    });
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        const payload = line.slice(6).trim();
+                        if (!payload) continue;
 
-    return Promise.race([readPromise, timeoutPromise])
-        .finally(() => {
-            if (timeoutId) clearTimeout(timeoutId);
+                        try {
+                            const event = JSON.parse(payload);
+                            handleEvent(event, resolve, reject, () => { resolved = true; });
+                        } catch (e) {
+                            // игнорируем битые JSON
+                        }
+                    }
+
+                    read();
+                }).catch(reject);
+            }
+
+            read();
         });
-}
+    }
 
     function handleEvent(event, resolve, reject, markResolved) {
         switch (event.type) {
@@ -503,10 +631,16 @@ function handleStream(response) {
                 const pct = Math.min(100, (event.chars / total) * 100);
                 progressBar.style.width = pct + '%';
                 statusText.textContent = '⏳ Генерация... ' + Math.round(pct) + '%';
+                setStep(1, 'Генерация... ' + Math.round(pct) + '%');
+                break;
+
+            case 'ping':
+                // Просто держим соединение живым
                 break;
 
             case 'done':
                 markResolved();
+                setStep(2, 'Пост-обработка...');
                 resolve(event);
                 break;
 
@@ -548,7 +682,7 @@ function handleStream(response) {
 
             if (item.note) {
                 const note = document.createElement('span');
-                note.style.cssText = 'color: #6b7a8f; font-size: 12px; margin-left: 8px;';
+                note.style.cssText = 'color: #6b7f94; font-size: 12px; margin-left: 8px;';
                 note.textContent = '— ' + item.note;
                 div.appendChild(icon);
                 div.appendChild(label);
@@ -562,12 +696,12 @@ function handleStream(response) {
         });
 
         const header = document.createElement('div');
-        header.style.cssText = 'font-weight: 500; margin-bottom: 8px; color: #bcc9d9; font-size: 13px;';
+        header.style.cssText = 'font-weight: 500; margin-bottom: 8px; color: #2c3e50; font-size: 13px;';
         header.textContent = `📋 Чек-лист: ${passedCount}/${total} пунктов выполнено`;
         checklistItems.prepend(header);
     }
 
-    // Проверка соединения с сервером при загрузке
+    // Проверка соединения
     fetch('/api/health')
         .then(res => res.json())
         .then(data => {
