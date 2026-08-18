@@ -19,7 +19,7 @@ STATIC_DIR = BASE_DIR / "static"
 
 # Bump this with every deployed change -- it's shown in the UI footer so you
 # can tell at a glance which version is actually live on Render.
-APP_VERSION = "1.11.0"
+APP_VERSION = "2.1.0"
 
 ANTHROPIC_API_URL = os.environ.get(
     "ANTHROPIC_API_URL", "https://api.anthropic.com/v1/messages"
@@ -203,10 +203,8 @@ def _normalize_output_formatting(text: str) -> str:
 
 import random
 
-import random
-
 def _add_human_noise(text: str) -> str:
-    """Агрессивная финишная правка: ломает оставшиеся AI-паттерны."""
+    """Агрессивная финишная правка: принудительно ломает оставшиеся AI-паттерны."""
     lines = text.splitlines()
     new_lines = []
     
@@ -226,7 +224,7 @@ def _add_human_noise(text: str) -> str:
             new_lines.append(line)
             continue
             
-        # Если 8-12 слов — ломаем через вставку
+        # 1. Если 8-12 слов — разбиваем через вставку
         if 8 <= len(words) <= 12:
             mid = len(words) // 2
             first_part = ' '.join(words[:mid])
@@ -235,15 +233,16 @@ def _add_human_noise(text: str) -> str:
             new_lines.append(first_part + random.choice(fillers) + second_part)
             continue
             
-        # Если начинается с имени — меняем порядок
+        # 2. Если начинается с имени — меняем порядок
         first_word = words[0].lower()
-        if first_word in ["алексей", "он", "она", "они", "анна", "масарик", "кросс"]:
+        if first_word in ["алексей", "он", "она", "они", "анна", "масарик", "кросс", "илья"]:
             if len(words) >= 4:
+                # Берём 2-е и 3-е слова в начало, остальное переставляем
                 new_lines.append(words[2] + ' ' + words[3] + ', ' + ' '.join(words[:2]) + ' ' + ' '.join(words[4:]))
                 continue
                 
-        # Добавляем междометие с вероятностью 35%
-        if random.random() < 0.35:
+        # 3. Добавляем междометие в начало с вероятностью 40%
+        if random.random() < 0.4:
             fillers = ["Ну, ", "Вот, ", "И, знаешь, ", "Честно говоря, ", "Так вот, "]
             first_char = stripped[0]
             rest = stripped[1:]
@@ -252,7 +251,6 @@ def _add_human_noise(text: str) -> str:
             new_lines.append(line)
     
     return '\n'.join(new_lines)
-
 
 def _normalize_checklist(model_checklist, chapter_text: str, revised_text: str) -> list:
     """Собирает чек-лист из ответа модели, добавляя вычисляемый пункт о длине."""
