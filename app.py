@@ -206,10 +206,9 @@ def _normalize_output_formatting(text: str) -> str:
 
 
 import random
+import random
 
 def _add_human_noise(text: str) -> str:
-    import random
-    
     lines = text.splitlines()
     new_lines = []
     
@@ -219,25 +218,50 @@ def _add_human_noise(text: str) -> str:
             new_lines.append(line)
             continue
         
-        # Пропускаем диалоги
+        # Пропускаем диалоги и служебные строки
         if stripped[0] in ('"', '«', '—', '-', '*', '•'):
             new_lines.append(line)
             continue
         
         words = stripped.split()
-        if len(words) > 15:  # Если предложение длинное (>15 слов)
-            # Разбиваем на 2-3 части
+        if not words:
+            new_lines.append(line)
+            continue
+        
+        # 1. Если длинное предложение — разбиваем
+        if len(words) > 15:
             mid1 = len(words) // 3
             mid2 = 2 * len(words) // 3
             part1 = ' '.join(words[:mid1]) + '.'
             part2 = ' '.join(words[mid1:mid2]) + '.'
             part3 = ' '.join(words[mid2:])
-            # Собираем с человеческим мусором
-            new_lines.append(f"Ну, {part1} {part2} И, знаешь, {part3}")
+            fillers = ["Да, ", "Ну, ", "Кстати, ", "Вообще, ", "Вот, "]
+            new_lines.append(random.choice(fillers) + part1 + ' ' + part2 + ' И, знаешь, ' + part3)
             continue
         
-        # Остальная логика (междометия, смена порядка)
-        # ...
+        # 2. Если начинается с имени — меняем порядок
+        first_word = words[0].lower()
+        if first_word in ["алексей", "он", "она", "они", "анна", "масарик", "кросс"]:
+            if len(words) >= 4:
+                new_lines.append(words[2] + ' ' + words[3] + ', ' + ' '.join(words[:2]) + ' ' + ' '.join(words[4:]))
+                continue
+        
+        # 3. Добавляем «шум» только в 25% случаев (было 40%)
+        if random.random() < 0.25:
+            fillers = [
+                "Ну, ", "Вот, ", "И, знаешь, ", "Честно говоря, ",
+                "Так вот, ", "Кстати, ", "Слушай, ", "А вообще, "
+            ]
+            # В 30% случаев вставляем в середину, а не в начало
+            if random.random() < 0.3 and len(words) > 4:
+                mid = len(words) // 2
+                new_lines.append(' '.join(words[:mid]) + ', ' + random.choice(fillers).lower().strip() + ' ' + ' '.join(words[mid:]))
+            else:
+                first_char = stripped[0]
+                rest = stripped[1:]
+                new_lines.append(random.choice(fillers) + first_char.lower() + rest)
+        else:
+            new_lines.append(line)
     
     return '\n'.join(new_lines)
 
