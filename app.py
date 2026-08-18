@@ -9,6 +9,7 @@ import json
 import os
 import re
 import random
+import time
 from pathlib import Path
 
 import requests
@@ -267,16 +268,16 @@ def _add_human_noise(text: str) -> str:
 
 def _aggressive_rewrite(text: str) -> str:
 
+    """Принудительно ломает идеальную структуру предложений."""
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    new_sentences = []
+    
     # Если текст слишком длинный, обрабатываем только первые 20 000 символов
     # чтобы не замедлять ответ
     if len(text) > 20000:
         head = text[:20000]
         tail = text[20000:]
         return _aggressive_rewrite(head) + tail
-        
-    """Принудительно ломает идеальную структуру предложений."""
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    new_sentences = []
     
     for sent in sentences:
         words = sent.split()
@@ -550,6 +551,7 @@ def api_revise():
     def generate():
         full_text = ""
         stream_state = {}
+        last_ping = time.time() 
         try:
             for cumulative_text in _parse_anthropic_text_stream(anthropic_resp, stream_state):
                 full_text = cumulative_text
