@@ -20,7 +20,7 @@ STATIC_DIR = BASE_DIR / "static"
 
 # Bump this with every deployed change -- it's shown in the UI footer so you
 # can tell at a glance which version is actually live on Render.
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.3.0"
 
 ANTHROPIC_API_URL = os.environ.get(
     "ANTHROPIC_API_URL", "https://api.anthropic.com/v1/messages"
@@ -28,7 +28,7 @@ ANTHROPIC_API_URL = os.environ.get(
 ANTHROPIC_VERSION = "2023-06-01"
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
 MAX_CHARS = 60_000
-MAX_OUTPUT_TOKENS = 64_000
+MAX_OUTPUT_TOKENS = 16_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20 MB upload cap
@@ -462,7 +462,7 @@ def api_revise():
         try:
             for cumulative_text in _parse_anthropic_text_stream(anthropic_resp, stream_state):
                 full_text = cumulative_text
-                yield _sse(
+                yield _sse("progress", {"chars": len(full_text), "estimated_total": estimated_total_chars})
                     "progress",
                     {"chars": len(full_text), "estimated_total": estimated_total_chars},
                 )
