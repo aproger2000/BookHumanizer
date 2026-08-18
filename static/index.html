@@ -425,31 +425,114 @@ function diffTokens(oldTokens, newTokens) {
   return result;
 }
 
+function splitParagraphsWithSeps(text) {
+  // Captures the separators too, so the revised text can be reproduced
+  // byte-for-byte (just wrapped in <mark>s) regardless of how paragraph
+  // breaks in the edit compare to the original.
+  const parts = text.split(/(\n{2,})/);
+  const paras = [];
+  const seps = [];
+  for (let i = 0; i < parts.length; i++) {
+    if (i % 2 === 0) paras.push(parts[i]);
+    else seps.push(parts[i]);
+  }
+  return { paras, seps };
+}
+
+function wordSet(text) {
+  const words = text.toLowerCase().match(/[a-zа-яё0-9ё]+/gi) || [];
+  return new Set(words);
+}
+
+function jaccardSim(a, b) {
+  if (a.size === 0 && b.size === 0) return 1;
+  const [small, big] = a.size <= b.size ? [a, b] : [b, a];
+  let inter = 0;
+  for (const w of small) if (big.has(w)) inter++;
+  const union = a.size + b.size - inter;
+  return union === 0 ? 1 : inter / union;
+}
+
+// Aligns old paragraphs to new paragraphs by content similarity (Needleman-
+// Wunsch over paragraphs, scored by word-overlap), not by position or exact
+// count. This keeps the highlight working even when the edit splits, merges,
+// or reorders paragraphs, which the editing pass does routinely (breaking up
+// long paragraphs, pulling dialogue onto its own line, etc.) and which broke
+// the old "counts must match exactly" alignment.
+function alignParagraphs(oldParas, newParas) {
+  const m = oldParas.length;
+  const n = newParas.length;
+  const GAP = -0.15;
+
+  // Guard against a pathological paragraph count -- shouldn't happen for a
+  // normal chapter, but fall back to naive positional pairing rather than
+  // hang the browser.
+  if ((m + 1) * (n + 1) > 2_000_000) {
+    const alignment = [];
+    const len = Math.max(m, n);
+    for (let k = 0; k < len; k++) {
+      alignment.push({ oldIdx: k < m ? k : null, newIdx: k < n ? k : null });
+    }
+    return alignment;
+  }
+
+  const oldSets = oldParas.map(wordSet);
+  const newSets = newParas.map(wordSet);
+  const simRow = (i) => {
+    const row = new Float64Array(n);
+    for (let j = 0; j < n; j++) row[j] = jaccardSim(oldSets[i], newSets[j]);
+    return row;
+  };
+  const sim = oldSets.map((_, i) => simRow(i));
+
+  const dp = new Array(m + 1);
+  for (let i = 0; i <= m; i++) dp[i] = new Float64Array(n + 1);
+  for (let i = 1; i <= m; i++) dp[i][0] = dp[i - 1][0] + GAP;
+  for (let j = 1; j <= n; j++) dp[0][j] = dp[0][j - 1] + GAP;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const matchScore = dp[i - 1][j - 1] + sim[i - 1][j - 1];
+      const delScore = dp[i - 1][j] + GAP;
+      const insScore = dp[i][j - 1] + GAP;
+      dp[i][j] = Math.max(matchScore, delScore, insScore);
+    }
+  }
+
+  const alignment = [];
+  let i = m, j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && dp[i][j] === dp[i - 1][j - 1] + sim[i - 1][j - 1]) {
+      alignment.push({ oldIdx: i - 1, newIdx: j - 1 });
+      i--; j--;
+    } else if (i > 0 && dp[i][j] === dp[i - 1][j] + GAP) {
+      alignment.push({ oldIdx: i - 1, newIdx: null });
+      i--;
+    } else {
+      alignment.push({ oldIdx: null, newIdx: j - 1 });
+      j--;
+    }
+  }
+  alignment.reverse();
+  return alignment;
+}
+
 function diffParagraphs(originalText, revisedText) {
-  let sepRegex = /\n{2,}/;
-  let sepText = '\n\n';
-  let originalParts = originalText.split(sepRegex);
-  let revisedParts = revisedText.split(sepRegex);
-
-  if (originalParts.length !== revisedParts.length) {
-    sepRegex = /\n/;
-    sepText = '\n';
-    originalParts = originalText.split(sepRegex);
-    revisedParts = revisedText.split(sepRegex);
-  }
-
-  if (originalParts.length !== revisedParts.length) {
-    // Couldn't align paragraphs/lines 1:1 -- show the revised text plain
-    // rather than risk a misleading diff.
-    return tokenize(revisedText).map((t) => ({ text: t, changed: false }));
-  }
+  const oldParas = originalText.split(/\n{2,}/);
+  const { paras: newParas, seps: newSeps } = splitParagraphsWithSeps(revisedText);
+  const alignment = alignParagraphs(oldParas, newParas);
 
   const out = [];
-  for (let p = 0; p < revisedParts.length; p++) {
-    const oldTokens = tokenize(originalParts[p]);
-    const newTokens = tokenize(revisedParts[p]);
-    out.push(...diffTokens(oldTokens, newTokens));
-    if (p < revisedParts.length - 1) out.push({ text: sepText, changed: false });
+  for (const { oldIdx, newIdx } of alignment) {
+    if (newIdx === null) continue; // paragraph only existed in the original -- nothing to show
+    if (oldIdx === null) {
+      // Paragraph has no real counterpart in the original -- show it fully highlighted.
+      out.push(...tokenize(newParas[newIdx]).map((t) => ({ text: t, changed: true })));
+    } else {
+      const oldTokens = tokenize(oldParas[oldIdx]);
+      const newTokens = tokenize(newParas[newIdx]);
+      out.push(...diffTokens(oldTokens, newTokens));
+    }
+    if (newIdx < newSeps.length) out.push({ text: newSeps[newIdx], changed: false });
   }
   return out;
 }
@@ -465,7 +548,16 @@ function mergeAdjacentWhitespace(tokens) {
 }
 
 function renderDiffHighlighted(container, originalText, revisedText) {
-  const tokens = mergeAdjacentWhitespace(diffParagraphs(originalText, revisedText));
+  let tokens;
+  try {
+    tokens = mergeAdjacentWhitespace(diffParagraphs(originalText, revisedText));
+  } catch (err) {
+    // Never let a diffing edge case break the results view -- fall back to
+    // showing the plain revised text with no highlighting.
+    console.error('Diff highlighting failed, showing plain text instead:', err);
+    container.textContent = revisedText;
+    return;
+  }
   container.innerHTML = '';
   const frag = document.createDocumentFragment();
   tokens.forEach((tok) => {

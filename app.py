@@ -7,6 +7,7 @@ Single-file Flask app on purpose -- this is meant to stay a simple service.
 import io
 import json
 import os
+import re
 from pathlib import Path
 
 import requests
@@ -18,7 +19,7 @@ STATIC_DIR = BASE_DIR / "static"
 
 # Bump this with every deployed change -- it's shown in the UI footer so you
 # can tell at a glance which version is actually live on Render.
-APP_VERSION = "1.9.1"
+APP_VERSION = "1.11.0"
 
 ANTHROPIC_API_URL = os.environ.get(
     "ANTHROPIC_API_URL", "https://api.anthropic.com/v1/messages"
@@ -139,23 +140,30 @@ rhythm. Not every sentence needs to be plain subject-verb-object.
 - Word choice: cut clichéd, bureaucratic, or overly bookish phrasing (stock \
 words like "process," "situation," "ultimately," "accordingly," and their \
 equivalents in the chapter's own language) for concrete, vivid, colloquial \
-alternatives. Where the draft reaches for an ornate or overly "literary" \
-synonym and a simpler, more natural word would read better in context, use \
-the simpler one. If a comparison or image is a worn-out cliché, replace it \
-with something more specific and fitting to this scene -- don't just leave \
-it or swap it for another generic one. Bring in a fresh comparison or image \
-where it fits naturally -- don't force one into every paragraph.
+alternatives. Reach for the word a person would actually use talking to a \
+friend, not the word a textbook or an official document would use -- plain, \
+everyday, sometimes folksy vocabulary over formal or "literary" synonyms, \
+as long as it still fits the narrator's and each character's voice. Where \
+the draft reaches for an ornate or overly "literary" synonym and a simpler, \
+more natural word would read better in context, use the simpler one. If a \
+comparison or image is a worn-out cliché, replace it with something more \
+specific and fitting to this scene -- don't just leave it or swap it for \
+another generic one. Bring in a fresh comparison or image where it fits \
+naturally -- don't force one into every paragraph.
 - Interiority: where a character is already present in a scene, you may \
 surface a sensory detail or reaction that's implied but left flat in the \
 draft (a sound, a smell, a flicker of feeling) -- but stay anchored to what \
 the scene already supports. Do not invent new plot-relevant experiences, \
 opinions, or events that aren't implied by the original.
-- Rhythm: make sentence length swing noticeably -- a longer, flowing \
-sentence, then something short and blunt, maybe another short one, before \
-flowing out again. Don't let three or more sentences in a row land at \
-roughly the same length and shape; break that pattern up. Use dashes, \
-colons, and ellipses where a human writer would reach for them -- \
-including, occasionally, a deliberately unfinished thought.
+- Rhythm: make sentence length swing noticeably, and let the swing itself \
+feel proportioned rather than metronomic -- a short, blunt sentence, then \
+one that runs distinctly longer (think a loose golden-ratio feel, roughly \
+half again to two-thirds more length, not a formula to calculate), then \
+the rhythm contracts back down before building out again. Don't let three \
+or more sentences in a row land at roughly the same length and shape; \
+break that pattern up. Use dashes, colons, and ellipses where a human \
+writer would reach for them -- including, occasionally, a deliberately \
+unfinished thought.
 - Paragraph shape: don't open every paragraph with the grammatical subject \
 -- lead with a setting, a gesture, a participial phrase sometimes. Let \
 transitions between sentences be a little less tidy than a textbook \
@@ -190,6 +198,14 @@ like it needs nothing, that's a sign to look harder -- swap one word, break \
 one sentence, add one dash -- not a reason to leave it byte-for-byte as \
 written. A revised chapter that is identical, or nearly identical, to the \
 original anywhere is a failed edit.
+
+Formatting conventions -- apply these mechanically, throughout the whole \
+chapter, regardless of what the draft used:
+- Use a plain hyphen "-" wherever you'd otherwise reach for an em dash "—", \
+including for dialogue lines and asides.
+- Leave exactly one blank line between paragraphs -- never two or more.
+- If the chapter has scene-break markers between sections (a bare "---" or \
+similar), render them as "*************" instead.
 
 After editing, honestly self-assess the revised text against these twelve \
 checks (do not just mark everything true -- if something genuinely doesn't \
@@ -333,6 +349,24 @@ def _extract_json(raw: str) -> dict:
             return json.loads(raw[start : end + 1])
         except json.JSONDecodeError as exc:
             raise ChapterEditError("The model did not return valid JSON.") from exc
+
+
+_SCENE_BREAK_RE = re.compile(r"(?m)^[ \t]*-{3,}[ \t]*$")
+_MULTI_BLANK_LINE_RE = re.compile(r"\n{3,}")
+
+
+def _normalize_output_formatting(text: str) -> str:
+    """Deterministic punctuation/whitespace cleanup applied to whatever the
+    model returns, so these house-style conventions hold regardless of how
+    consistently the model itself followed the prompt:
+    - em dash "—" -> plain hyphen "-"
+    - a "---"-style scene-break line -> "*************"
+    - never more than one blank line between paragraphs
+    """
+    text = text.replace("—", "-")  # em dash -> plain hyphen
+    text = _SCENE_BREAK_RE.sub("*************", text)
+    text = _MULTI_BLANK_LINE_RE.sub("\n\n", text)
+    return text
 
 
 def _normalize_checklist(model_checklist, chapter_text: str, revised_text: str) -> list:
@@ -560,11 +594,15 @@ def api_revise():
                 # defeats the whole point of the tool, so surface it as a
                 # clear failure instead of quietly "succeeding" with a
                 # checklist that likely claims things passed that didn't.
+                # (Checked before formatting normalization below, so a
+                # punctuation-only rewrite doesn't mask a genuine no-op.)
                 raise ChapterEditError(
                     "The model returned the chapter with no changes at all. "
                     "Try again, or switch to a stronger intensity (e.g. "
                     "\"Thorough\") or a different style."
                 )
+
+            revised_text = _normalize_output_formatting(revised_text)
 
             checklist = _normalize_checklist(parsed.get("checklist"), chapter_text, revised_text)
             yield _sse(
