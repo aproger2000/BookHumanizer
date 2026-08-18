@@ -322,6 +322,7 @@ def _normalize_checklist(model_checklist, chapter_text: str, revised_text: str) 
 
 
 def _parse_anthropic_text_stream(resp, state):
+    app.logger.info("Starting Anthropic stream")
     buffer = []
     for raw_line in resp.iter_lines(decode_unicode=True):
         if not raw_line or not raw_line.startswith("data:"):
@@ -457,6 +458,7 @@ def api_revise():
     estimated_total_chars = max(int(len(chapter_text) * 1.15), 200)
 
     def generate():
+        app.logger.info("generate() started")
         full_text = ""
         stream_state = {}
         try:
