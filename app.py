@@ -516,7 +516,12 @@ def api_revise():
             yield _sse("error", {"detail": f"Unexpected server error: {exc}"})
         finally:
             anthropic_resp.close()
-
+    
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 @app.get("/")
 def index():
