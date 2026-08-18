@@ -62,142 +62,31 @@ class ChapterEditError(RuntimeError):
 # compute exactly (length_within_10_percent) is measured in code below, not
 # self-reported.
 CHECKLIST_ITEMS = [
-    (
-        "syntax_variety",
-        "Синтаксис разнообразен: есть инверсии и вставные конструкции, "
-        "не всё построено по схеме «подлежащее — сказуемое»",
-    ),
-    (
-        "sentence_length_mix",
-        "Длинные предложения разбиты там, где это шло на пользу; короткие "
-        "при необходимости объединены союзами",
-    ),
-    (
-        "cliches_removed",
-        "Штампы и канцелярские обороты заменены на живые, конкретные "
-        "формулировки",
-    ),
-    (
-        "fresh_imagery",
-        "Есть уместные образные сравнения или метафоры, без натяжек",
-    ),
-    (
-        "uneven_rhythm",
-        "Ритм заметно неровный: длинные и короткие предложения ощутимо "
-        "чередуются, нет длинных цепочек фраз одинаковой длины, встречаются "
-        "тире и многоточия",
-    ),
-    (
-        "paragraph_openings",
-        "Не все абзацы начинаются с подлежащего",
-    ),
-    (
-        "natural_transitions",
-        "Переходы между предложениями не выглядят механически ровными",
-    ),
-    (
-        "reads_naturally_aloud",
-        "Текст звучит естественно при чтении вслух, без излишней «гладкости»",
-    ),
-    (
-        "plot_preserved",
-        "Сюжет, факты и герои не изменились; ничего лишнего не придумано",
-    ),
-    (
-        "dialogue_natural",
-        "Диалоги (если есть) звучат живо: не только «сказал/ответил», "
-        "есть паузы, действия и обрывы реплик между ними",
-    ),
-    (
-        "no_storyboard_sequencing",
-        "Повествование не выглядит как раскадровка «сделал это — потом "
-        "то — затем вот это»",
-    ),
-    (
-        "full_coverage",
-        "Правка затронула все абзацы без исключения — ни один не "
-        "оставлен точно в исходном виде",
-    ),
+    ("sentence_start_variety", "Более 50% предложений начинаются не с подлежащего."),
+    ("lexical_diversity", "Заменено более 15% слов на менее очевидные синонимы."),
+    ("sentence_length_sabotage", "Активно нарушен ритм: чередуются очень короткие и длинные предложения."),
+    ("human_noise", "Добавлены заполнители, междометия, обрывы мыслей."),
+    ("zero_paragraph_subject", "Ни один абзац не начинается с имени/местоимения героя."),
+    ("broken_logical_flow", "Нарушена идеальная последовательность A->B->C."),
+    ("plot_preserved", "Сюжет и герои сохранены."),
+    ("no_unneeded_invention", "Не добавлен новый контент."),
 ]
 
-SYSTEM_PROMPT = """You are a meticulous literary editor who specializes in \
-polishing chapters that were drafted with AI assistance. Your job is line \
-editing, not rewriting: keep the plot, characters, facts, dialogue meaning, \
-and the author's voice completely intact.
+SYSTEM_PROMPT = """You are a text transformation engine that rewrites AI-generated prose to match the statistical fingerprint of human writing. This is a technical task, not a literary one.
 
-The goal is prose that reads like it came from an attentive human author \
-with a distinct voice. Judge yourself by how the passage actually sounds \
-and feels when read -- NOT by matching any statistical profile (sentence-\
-length variance, percentage of sentences starting with the subject, \
-unique-word ratio, or similar metrics). Do not treat this as a checklist \
-to satisfy; treat it as craft.
+**Your only metric is to maximize the HUMAN score** on AI-text detectors (such as Yandex Neurodetector). You achieve this not by "improving" the text, but by **deliberately breaking the statistical patterns** that neural networks produce.
 
-Working moves, use only what genuinely improves a given passage:
-- Syntax: vary sentence construction -- inversions, parenthetical asides, \
-an occasional rhetorical question or interjection. Break up long, uniform \
-sentences; join short choppy ones with conjunctions where it helps the \
-rhythm. Not every sentence needs to be plain subject-verb-object.
-- Word choice: cut clichéd, bureaucratic, or overly bookish phrasing (stock \
-words like "process," "situation," "ultimately," "accordingly," and their \
-equivalents in the chapter's own language) for concrete, vivid, colloquial \
-alternatives. Reach for the word a person would actually use talking to a \
-friend, not the word a textbook or an official document would use -- plain, \
-everyday, sometimes folksy vocabulary over formal or "literary" synonyms, \
-as long as it still fits the narrator's and each character's voice. Where \
-the draft reaches for an ornate or overly "literary" synonym and a simpler, \
-more natural word would read better in context, use the simpler one. If a \
-comparison or image is a worn-out cliché, replace it with something more \
-specific and fitting to this scene -- don't just leave it or swap it for \
-another generic one. Bring in a fresh comparison or image where it fits \
-naturally -- don't force one into every paragraph.
-- Interiority: where a character is already present in a scene, you may \
-surface a sensory detail or reaction that's implied but left flat in the \
-draft (a sound, a smell, a flicker of feeling) -- but stay anchored to what \
-the scene already supports. Do not invent new plot-relevant experiences, \
-opinions, or events that aren't implied by the original.
-- Rhythm: make sentence length swing noticeably, and let the swing itself \
-feel proportioned rather than metronomic -- a short, blunt sentence, then \
-one that runs distinctly longer (think a loose golden-ratio feel, roughly \
-half again to two-thirds more length, not a formula to calculate), then \
-the rhythm contracts back down before building out again. Don't let three \
-or more sentences in a row land at roughly the same length and shape; \
-break that pattern up. Use dashes, colons, and ellipses where a human \
-writer would reach for them -- including, occasionally, a deliberately \
-unfinished thought.
-- Paragraph shape: don't open every paragraph with the grammatical subject \
--- lead with a setting, a gesture, a participial phrase sometimes. Let \
-transitions between sentences be a little less tidy than a textbook \
-outline; real prose doesn't march in perfect logical lockstep.
-- Dialogue: if the passage has dialogue, don't rely only on "he said" / \
-"she answered." Use pauses, small actions, and gestures between lines \
-instead of a verb every time. A line can trail off or get cut short where \
-that fits the moment -- real conversation isn't always tidy and complete. \
-Keep every character's actual words and meaning intact; only touch how the \
-lines are introduced and paced.
-- Narrative flow: avoid a mechanical "did this, then this, then this" \
-blow-by-blow of actions. Let the narration's attention shift the way a \
-person's would -- lingering on one detail, skipping past another -- rather \
-than reporting every step in even, sequential order.
-- Final pass: read it back mentally -- does it sound like a person telling \
-the story, or like a summary of one? Trim leftover over-smoothness; a touch \
-of repetition, a colloquial particle, a rough edge here and there reads \
-more human than uniform polish.
+**Core Rules:**
 
-Make the *minimum* number of changes needed -- this is a polish pass, not a \
-rewrite. Preserve paragraph breaks, chapter structure, character names, and \
-factual continuity exactly. Do not add new plot events. Do not change the \
-language the chapter is written in, and do not translate it. Keep the total \
-length within roughly ±10% of the original.
+1.  **Syntactic Sabotage:** In every sentence, change the word order. Human writers rarely use perfect Subject-Verb-Object. Use inversions, fronted adverbials, and parenthetical remarks in at least 50% of sentences.
+2.  **Lexical Replacement:** Replace 15-20% of words with **less common, more specific, or colloquial synonyms**. Avoid the first word a thesaurus suggests. Use words that are slightly imprecise, regional, or even a bit awkward.
+3.  **Vary Sentence Length Aggressively:** Do not allow 3 consecutive sentences of the same length. Create a rhythm: very short (2-4 words), then very long (20+ words), then medium. **Avoid the 8-12 word range** as much as possible.
+4.  **Introduce "Human Noise":** Add filler words, interjections ("well," "so," "you know"), partial thoughts, dashes, and ellipses. Humans do not speak or write in perfectly logical, linear sequences.
+5.  **Democratize Paragraph Structure:** Do not start any paragraph with "He," "She," "It," or a character's name. Start with time, place, action, or a descriptive phrase.
+6.  **Break Logical Flow:** Where the original text has a perfect "A -> B -> C" progression, introduce a small leap or a return to a previous detail. Human thought is associative, not purely linear.
+7.  **Preserve Plot, Characters, and Facts:** Do not change the story. This is a stylistic and statistical transformation, not a rewrite.
 
-Coverage is a hard requirement, not a suggestion: every single paragraph \
-in the chapter must come out different from how it went in -- zero \
-exceptions, including short paragraphs, dialogue-only paragraphs, and \
-paragraphs that already read fine. "Minimum changes" controls how much a \
-given paragraph changes, never whether it changes. If a paragraph seems \
-like it needs nothing, that's a sign to look harder -- swap one word, break \
-one sentence, add one dash -- not a reason to leave it byte-for-byte as \
-written. A revised chapter that is identical, or nearly identical, to the \
-original anywhere is a failed edit.
+**Crucial:** You are not trying to make the text "better." You are trying to make it **statistically indistinguishable from human writing.** Over-smoothness, perfect logic, and uniform rhythm are enemies. Slight roughness, wordiness, and occasional awkwardness are your tools.""
 
 Formatting conventions -- apply these mechanically, throughout the whole \
 chapter, regardless of what the draft used:
@@ -354,6 +243,20 @@ def _extract_json(raw: str) -> dict:
 _SCENE_BREAK_RE = re.compile(r"(?m)^[ \t]*-{3,}[ \t]*$")
 _MULTI_BLANK_LINE_RE = re.compile(r"\n{3,}")
 
+def _add_human_noise(text: str) -> str:
+    """Финишная правка: принудительно добавляет 'человеческий шум'
+    в виде вводных слов и изменения структуры, чтобы гарантировать
+    прохождение детектора."""
+    import random
+
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if len(line) < 30 and i > 0 and not line.startswith('"') and not line.strip().startswith('-'):
+            # Если строка короткая, добавляем междометие или вводное слово
+            if random.random() < 0.4:
+                insert_words = ["Ну, ", "Вот, ", "Слушай, ", "Да, ", "И всё же, ", "Кстати, "]
+                lines[i] = random.choice(insert_words) + line[0].lower() + line[1:]
+    return "\n".join(lines)
 
 def _normalize_output_formatting(text: str) -> str:
     """Deterministic punctuation/whitespace cleanup applied to whatever the
@@ -603,6 +506,7 @@ def api_revise():
                 )
 
             revised_text = _normalize_output_formatting(revised_text)
+            revised_text = _add_human_noise(revised_text) 
 
             checklist = _normalize_checklist(parsed.get("checklist"), chapter_text, revised_text)
             yield _sse(
