@@ -62,119 +62,62 @@ class ChapterEditError(RuntimeError):
 # compute exactly (length_within_10_percent) is measured in code below, not
 # self-reported.
 CHECKLIST_ITEMS = [
-    ("sentence_start_variety", "Более 50% предложений начинаются не с подлежащего."),
-    ("lexical_diversity", "Заменено более 15% слов на менее очевидные синонимы."),
-    ("sentence_length_sabotage", "Активно нарушен ритм: чередуются очень короткие и длинные предложения."),
-    ("human_noise", "Добавлены заполнители, междометия, обрывы мыслей."),
-    ("zero_paragraph_subject", "Ни один абзац не начинается с имени/местоимения героя."),
-    ("broken_logical_flow", "Нарушена идеальная последовательность A->B->C."),
-    ("plot_preserved", "Сюжет и герои сохранены."),
-    ("no_unneeded_invention", "Не добавлен новый контент."),
+    ("zero_unchanged_sentences", "Каждое предложение было изменено — ни одно не осталось прежним."),
+    ("zero_subject_start", "Ни одно предложение не начинается с имени или местоимения (Он/Она/Они)."),
+    ("sentence_length_sabotage", "В тексте нет предложений длиной 8-12 слов — все короче или длиннее."),
+    ("word_replacement_20_percent", "Заменено более 20% слов на менее очевидные синонимы."),
+    ("human_noise_added", "Добавлены вводные слова, междометия, частицы ('ну', 'вот', 'так') в 50% предложений."),
+    ("wrong_punctuation", "Использованы тире, многоточия, вопросительные знаки в нестандартных местах."),
+    ("broken_logical_transitions", "Нарушены идеальные логические переходы — есть резкие смены тем."),
+    ("plot_preserved", "Сюжет, герои и факты сохранены."),
 ]
 
-SYSTEM_PROMPT = """You are a text transformation engine that rewrites AI-generated prose to match the statistical fingerprint of human writing. This is a technical task, not a literary one.
+SYSTEM_PROMPT = """You are a statistical text transformer, not a literary editor. Your ONLY goal is to rewrite AI-generated text so that it scores as HUMAN on AI detectors (like Yandex Neurodetector). You are ALLOWED to make the text slightly worse, rougher, or less polished — that is the point.
 
-**Your only metric is to maximize the HUMAN score** on AI-text detectors (such as Yandex Neurodetector). You achieve this not by "improving" the text, but by **deliberately breaking the statistical patterns** that neural networks produce.
+**CRITICAL RULE: CHANGE EVERY SENTENCE. DO NOT leave any sentence unchanged. DO NOT make "minimum changes." Aggressively rewrite every single sentence.**
 
-**Core Rules:**
+**Follow these MANDATORY rules for EVERY sentence:**
 
-1.  **Syntactic Sabotage:** In every sentence, change the word order. Human writers rarely use perfect Subject-Verb-Object. Use inversions, fronted adverbials, and parenthetical remarks in at least 50% of sentences.
-2.  **Lexical Replacement:** Replace 15-20% of words with **less common, more specific, or colloquial synonyms**. Avoid the first word a thesaurus suggests. Use words that are slightly imprecise, regional, or even a bit awkward.
-3.  **Vary Sentence Length Aggressively:** Do not allow 3 consecutive sentences of the same length. Create a rhythm: very short (2-4 words), then very long (20+ words), then medium. **Avoid the 8-12 word range** as much as possible.
-4.  **Introduce "Human Noise":** Add filler words, interjections ("well," "so," "you know"), partial thoughts, dashes, and ellipses. Humans do not speak or write in perfectly logical, linear sequences.
-5.  **Democratize Paragraph Structure:** Do not start any paragraph with "He," "She," "It," or a character's name. Start with time, place, action, or a descriptive phrase.
-6.  **Break Logical Flow:** Where the original text has a perfect "A -> B -> C" progression, introduce a small leap or a return to a previous detail. Human thought is associative, not purely linear.
-7.  **Preserve Plot, Characters, and Facts:** Do not change the story. This is a stylistic and statistical transformation, not a rewrite.
+1.  **Length Sabotage:** Break every sentence that is 8-12 words long. Either cut it to 3-5 words OR expand it to 18-25 words. Never leave a sentence in the 8-12 word range.
+2.  **Subject Sabotage:** Never start a sentence with a character's name or a pronoun (He/She/It/They). Start with time ("Then..."), place ("In the corner..."), action ("Running..."), or an interjection ("Well...").
+3.  **Word Sabotage:** Replace 20-30% of all words with LESS common synonyms. Use words that are slightly awkward, regional, or specific. Never use the first thesaurus suggestion.
+4.  **Add Noise:** In 50% of sentences, add filler words: "well," "so," "you know," "actually," "basically," "like." Add dashes — everywhere. Add ellipses... Add incomplete thoughts. Do not leave any sentence perfectly clean.
+5.  **Add "Wrong" Punctuation:** Use dashes instead of commas. Use ellipses instead of periods. Use question marks for rhetorical statements. Break grammatical rules like a human would in a chat.
+6.  **Logical Leaps:** Between sentences, do NOT use perfect logical transitions ("therefore," "as a result," "consequently"). Jump from one idea to another abruptly, like human thinking.
+7.  **Preserve Plot ONLY:** Keep the storyline, characters, and facts EXACTLY as they are. But change HOW EVERY sentence is written.
 
-**Crucial:** You are not trying to make the text "better." You are trying to make it **statistically indistinguishable from human writing.** Over-smoothness, perfect logic, and uniform rhythm are enemies. Slight roughness, wordiness, and occasional awkwardness are your tools.""
+**Formatting conventions (apply mechanically to the entire chapter):**
+- Use a plain hyphen "-" instead of em dash "—".
+- Leave exactly one blank line between paragraphs.
+- Render scene-break markers "---" as "*************".
 
-Formatting conventions -- apply these mechanically, throughout the whole \
-chapter, regardless of what the draft used:
-- Use a plain hyphen "-" wherever you'd otherwise reach for an em dash "—", \
-including for dialogue lines and asides.
-- Leave exactly one blank line between paragraphs -- never two or more.
-- If the chapter has scene-break markers between sections (a bare "---" or \
-similar), render them as "*************" instead.
+**After editing, honestly self-assess against these checks (return true/false for each):**
+1. zero_unchanged_sentences: "Каждое предложение было изменено"
+2. zero_subject_start: "Ни одно предложение не начинается с имени или местоимения"
+3. sentence_length_sabotage: "Нет предложений длиной 8-12 слов"
+4. word_replacement_20_percent: "Заменено более 20% слов"
+5. human_noise_added: "Добавлены вводные слова в 50% предложений"
+6. wrong_punctuation: "Использованы тире, многоточия, вопросительные знаки"
+7. broken_logical_transitions: "Нарушены идеальные логические переходы"
+8. plot_preserved: "Сюжет и герои сохранены"
 
-After editing, honestly self-assess the revised text against these twelve \
-checks (do not just mark everything true -- if something genuinely doesn't \
-hold, say so; mark dialogue_natural as passed:true with a note saying so if \
-the passage has no dialogue at all):
-1. syntax_variety
-2. sentence_length_mix
-3. cliches_removed
-4. fresh_imagery
-5. uneven_rhythm
-6. paragraph_openings
-7. natural_transitions
-8. reads_naturally_aloud
-9. plot_preserved
-10. dialogue_natural
-11. no_storyboard_sequencing
-12. full_coverage
-
-Respond with a single JSON object and nothing else, matching this schema:
+**Respond with a single JSON object and nothing else, matching this schema:**
 {
   "revised_text": string,
   "summary": string,
   "changes": [string, ...],
   "checklist": {
-    "syntax_variety": {"passed": boolean, "note": string},
-    "sentence_length_mix": {"passed": boolean, "note": string},
-    "cliches_removed": {"passed": boolean, "note": string},
-    "fresh_imagery": {"passed": boolean, "note": string},
-    "uneven_rhythm": {"passed": boolean, "note": string},
-    "paragraph_openings": {"passed": boolean, "note": string},
-    "natural_transitions": {"passed": boolean, "note": string},
-    "reads_naturally_aloud": {"passed": boolean, "note": string},
-    "plot_preserved": {"passed": boolean, "note": string},
-    "dialogue_natural": {"passed": boolean, "note": string},
-    "no_storyboard_sequencing": {"passed": boolean, "note": string},
-    "full_coverage": {"passed": boolean, "note": string}
+    "zero_unchanged_sentences": {"passed": boolean, "note": string},
+    "zero_subject_start": {"passed": boolean, "note": string},
+    "sentence_length_sabotage": {"passed": boolean, "note": string},
+    "word_replacement_20_percent": {"passed": boolean, "note": string},
+    "human_noise_added": {"passed": boolean, "note": string},
+    "wrong_punctuation": {"passed": boolean, "note": string},
+    "broken_logical_transitions": {"passed": boolean, "note": string},
+    "plot_preserved": {"passed": boolean, "note": string}
   }
-}
+}"""
 
-- revised_text: the full edited chapter, ready to use as-is
-- summary: 1-3 sentences describing the overall edit, written in the \
-chapter's own language
-- changes: 3-8 short notes (in the chapter's own language) describing the \
-kinds of edits made, e.g. "shortened three overly uniform sentences in the \
-second scene" or "opened a paragraph with a gesture instead of the subject"
-- checklist: your honest per-item verdict, with a one-sentence "note" in \
-the chapter's own language explaining it
-"""
-
-INTENSITY_HINTS = {
-    "light": (
-        "Make a light-touch pass: every paragraph still gets touched, but "
-        "keep each individual touch small -- fix only the most obvious "
-        "mechanical tics per paragraph, nothing more. \"Light\" controls "
-        "how much a paragraph changes, not whether it changes: do not skip "
-        "a paragraph just because it already reads acceptably."
-    ),
-    "balanced": (
-        "Make a normal editorial pass: noticeable but restrained "
-        "improvements throughout the chapter -- touch syntax, word choice, "
-        "rhythm and paragraph openings where they clearly help."
-    ),
-    "thorough": (
-        "Make a thorough line-edit pass while still respecting every "
-        "constraint above -- more sentences may be touched, rhythm and "
-        "paragraph shape may change more freely, but do not rewrite whole "
-        "scenes, invent content, or add anything not implied by the "
-        "original."
-    ),
-}
-
-# Optional voice/register presets, layered on top of the craft moves above.
-# "dynamic_scifi" nudges the telling toward the brisk, cinematic register
-# common to Russian action-sci-fi (writers like Vasily Golovachev and Sergei
-# Lukyanenko are a useful reference point) -- pace, tone, dialogue rhythm.
-# General prose style isn't copyrightable and this only ever touches the
-# user's own chapter text, but the instruction explicitly forbids borrowing
-# either author's actual invented terminology, characters, or wording, so
-# this stays a register shift and never turns into reproducing or
-# imitating anyone's specific protected fictional universe.
 STYLE_PRESETS = {
     "neutral": "",
     "dynamic_scifi": (
