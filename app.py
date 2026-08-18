@@ -18,7 +18,7 @@ STATIC_DIR = BASE_DIR / "static"
 
 # Bump this with every deployed change -- it's shown in the UI footer so you
 # can tell at a glance which version is actually live on Render.
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.5.0"
 
 ANTHROPIC_API_URL = os.environ.get(
     "ANTHROPIC_API_URL", "https://api.anthropic.com/v1/messages"
@@ -37,14 +37,19 @@ class ChapterEditError(RuntimeError):
 
 # The qualitative craft checklist the model self-assesses after every edit.
 # These map to the genuine editorial-craft items from the brief (syntax
-# variety, lexical freshness, rhythm, paragraph shape, natural read-aloud
-# quality, preserved plot). Deliberately excluded: the brief's statistical
-# self-check thresholds (% of sentences starting with the subject,
-# sentence-length coefficient of variation, unique-word ratio, "no signs of
-# machine generation") -- those target the same features AI-text detectors
-# use, and this tool is meant to make prose genuinely better, not tuned to
-# beat a specific classifier. The one checklist item we *do* compute exactly
-# (length_within_10_percent) is measured in code below, not self-reported.
+# variety, lexical freshness, rhythm, paragraph shape, dialogue mechanics,
+# narrative flow, natural read-aloud quality, preserved plot). Deliberately
+# excluded, across multiple revisions of the brief: statistical self-check
+# thresholds (% of sentences starting with the subject, sentence-length
+# coefficient of variation, explicitly avoiding "8-12 word sentences because
+# that's characteristic of neural networks", unique-word ratio, a quota of
+# non-verbal dialogue intros, "no signs of machine generation") -- those
+# target the exact features AI-text detectors use, and this tool is meant to
+# make prose genuinely better, not tuned to beat a specific classifier. Also
+# excluded: inventing character experiences "unrelated to the plot" -- that's
+# content invention, not style editing. The one checklist item we *do*
+# compute exactly (length_within_10_percent) is measured in code below, not
+# self-reported.
 CHECKLIST_ITEMS = [
     (
         "syntax_variety",
@@ -86,6 +91,16 @@ CHECKLIST_ITEMS = [
         "plot_preserved",
         "Сюжет, факты и герои не изменились; ничего лишнего не придумано",
     ),
+    (
+        "dialogue_natural",
+        "Диалоги (если есть) звучат живо: не только «сказал/ответил», "
+        "есть паузы, действия и обрывы реплик между ними",
+    ),
+    (
+        "no_storyboard_sequencing",
+        "Повествование не выглядит как раскадровка «сделал это — потом "
+        "то — затем вот это»",
+    ),
 ]
 
 SYSTEM_PROMPT = """You are a meticulous literary editor who specializes in \
@@ -108,8 +123,12 @@ rhythm. Not every sentence needs to be plain subject-verb-object.
 - Word choice: cut clichéd, bureaucratic, or overly bookish phrasing (stock \
 words like "process," "situation," "ultimately," "accordingly," and their \
 equivalents in the chapter's own language) for concrete, vivid, colloquial \
-alternatives. Bring in a fresh comparison or image where it fits naturally \
--- don't force one into every paragraph.
+alternatives. Where the draft reaches for an ornate or overly "literary" \
+synonym and a simpler, more natural word would read better in context, use \
+the simpler one. If a comparison or image is a worn-out cliché, replace it \
+with something more specific and fitting to this scene -- don't just leave \
+it or swap it for another generic one. Bring in a fresh comparison or image \
+where it fits naturally -- don't force one into every paragraph.
 - Interiority: where a character is already present in a scene, you may \
 surface a sensory detail or reaction that's implied but left flat in the \
 draft (a sound, a smell, a flicker of feeling) -- but stay anchored to what \
@@ -122,6 +141,16 @@ including, occasionally, a deliberately unfinished thought.
 -- lead with a setting, a gesture, a participial phrase sometimes. Let \
 transitions between sentences be a little less tidy than a textbook \
 outline; real prose doesn't march in perfect logical lockstep.
+- Dialogue: if the passage has dialogue, don't rely only on "he said" / \
+"she answered." Use pauses, small actions, and gestures between lines \
+instead of a verb every time. A line can trail off or get cut short where \
+that fits the moment -- real conversation isn't always tidy and complete. \
+Keep every character's actual words and meaning intact; only touch how the \
+lines are introduced and paced.
+- Narrative flow: avoid a mechanical "did this, then this, then this" \
+blow-by-blow of actions. Let the narration's attention shift the way a \
+person's would -- lingering on one detail, skipping past another -- rather \
+than reporting every step in even, sequential order.
 - Final pass: read it back mentally -- does it sound like a person telling \
 the story, or like a summary of one? Trim leftover over-smoothness; a touch \
 of repetition, a colloquial particle, a rough edge here and there reads \
@@ -133,9 +162,10 @@ factual continuity exactly. Do not add new plot events. Do not change the \
 language the chapter is written in, and do not translate it. Keep the total \
 length within roughly ±10% of the original.
 
-After editing, honestly self-assess the revised text against these nine \
+After editing, honestly self-assess the revised text against these eleven \
 checks (do not just mark everything true -- if something genuinely doesn't \
-hold, say so):
+hold, say so; mark dialogue_natural as passed:true with a note saying so if \
+the passage has no dialogue at all):
 1. syntax_variety
 2. sentence_length_mix
 3. cliches_removed
@@ -145,6 +175,8 @@ hold, say so):
 7. natural_transitions
 8. reads_naturally_aloud
 9. plot_preserved
+10. dialogue_natural
+11. no_storyboard_sequencing
 
 Respond with a single JSON object and nothing else, matching this schema:
 {
@@ -160,7 +192,9 @@ Respond with a single JSON object and nothing else, matching this schema:
     "paragraph_openings": {"passed": boolean, "note": string},
     "natural_transitions": {"passed": boolean, "note": string},
     "reads_naturally_aloud": {"passed": boolean, "note": string},
-    "plot_preserved": {"passed": boolean, "note": string}
+    "plot_preserved": {"passed": boolean, "note": string},
+    "dialogue_natural": {"passed": boolean, "note": string},
+    "no_storyboard_sequencing": {"passed": boolean, "note": string}
   }
 }
 
