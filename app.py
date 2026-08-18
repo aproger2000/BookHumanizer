@@ -20,7 +20,7 @@ STATIC_DIR = BASE_DIR / "static"
 
 # Bump this with every deployed change -- it's shown in the UI footer so you
 # can tell at a glance which version is actually live on Render.
-APP_VERSION = "2.3.0"
+APP_VERSION = "2.4.0"
 
 ANTHROPIC_API_URL = os.environ.get(
     "ANTHROPIC_API_URL", "https://api.anthropic.com/v1/messages"
@@ -78,9 +78,9 @@ SYSTEM_PROMPT = """You are a statistical text transformer, not a literary editor
 7. broken_logical_transitions: "Нарушены идеальные логические переходы"
 8. plot_preserved: "Сюжет и герои сохранены"
 
-**EXAMPLE of a good rewrite:**
-Original: "The old factory smelled of rust and machine oil. Alex stepped inside and turned on his flashlight."
-Rewrite: "Rust. Machine oil. That's what hit Alex first. He stepped inside — flashlight clicked on."
+**EXAMPLE of a good rewrite (Russian):**
+Original: "Он не вздрогнул. Он узнал голос сразу, а ещё его старый научный руководитель, профессор Масарик, всегда появлялся бесшумно, как призрак плохой научной гипотезы."
+Rewrite: "Не вздрогнул. Причины две: голос он узнал сразу, да и профессор Масарик - его старый научный руководитель - всегда возникал бесшумно. Как призрак, ей-богу. Неудачной гипотезы."
 
 **CRITICAL:**
 - Use interjections ("well," "you know," "actually") in AT MOST 15% of sentences.
@@ -264,6 +264,58 @@ def _add_human_noise(text: str) -> str:
     return '\n'.join(final_lines)
 
 
+def _aggressive_rewrite(text: str) -> str:
+    """Принудительно ломает идеальную структуру предложений."""
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    new_sentences = []
+    
+    for sent in sentences:
+        words = sent.split()
+        if not words:
+            new_sentences.append(sent)
+            continue
+            
+        # 1. Если предложение 8-12 слов — ломаем
+        if 8 <= len(words) <= 12:
+            mid = len(words) // 2
+            part1 = ' '.join(words[:mid])
+            part2 = ' '.join(words[mid:])
+            insert = random.choice([
+                ' — ну, как бы — ',
+                ' — честно говоря, — ',
+                ' — и вообще, — ',
+                ' — знаешь, — ',
+            ])
+            new_sentences.append(part1 + insert + part2)
+            continue
+            
+        # 2. Если начинается с имени/местоимения — меняем порядок
+        first = words[0].lower()
+        if first in ["он", "она", "они", "алексей", "анна", "масарик", "кросс", "илья"]:
+            if len(words) >= 4:
+                new_sentences.append(
+                    words[2] + ' ' + words[3] + ', ' + 
+                    ' '.join(words[:2]) + ' ' + 
+                    ' '.join(words[4:])
+                )
+                continue
+                
+        # 3. Добавляем вводное слово в 15% случаев
+        if random.random() < 0.15:
+            fillers = [
+                "Ну, ", "Вот, ", "И, знаешь, ", 
+                "Честно говоря, ", "Слушай, ", "Кстати, "
+            ]
+            first_char = sent[0] if sent else ''
+            rest = sent[1:] if len(sent) > 1 else ''
+            new_sentences.append(random.choice(fillers) + first_char.lower() + rest)
+            continue
+            
+        new_sentences.append(sent)
+    
+    return '. '.join(new_sentences)
+
+
 def _normalize_checklist(model_checklist, chapter_text: str, revised_text: str) -> list:
     items = []
     expected_keys = [
@@ -322,7 +374,6 @@ def _normalize_checklist(model_checklist, chapter_text: str, revised_text: str) 
 
 
 def _parse_anthropic_text_stream(resp, state):
-    app.logger.info("Starting Anthropic stream")
     buffer = []
     for raw_line in resp.iter_lines(decode_unicode=True):
         if not raw_line or not raw_line.startswith("data:"):
@@ -458,7 +509,6 @@ def api_revise():
     estimated_total_chars = max(int(len(chapter_text) * 1.15), 200)
 
     def generate():
-        app.logger.info("generate() started")
         full_text = ""
         stream_state = {}
         try:
@@ -487,6 +537,7 @@ def api_revise():
 
             revised_text = _normalize_output_formatting(revised_text)
             revised_text = _add_human_noise(revised_text)
+            revised_text = _aggressive_rewrite(revised_text)
 
             checklist = _normalize_checklist(parsed.get("checklist"), chapter_text, revised_text)
             yield _sse(
@@ -518,12 +569,13 @@ def api_revise():
             yield _sse("error", {"detail": f"Unexpected server error: {exc}"})
         finally:
             anthropic_resp.close()
-    
+
     return Response(
         stream_with_context(generate()),
         mimetype="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
 
 @app.get("/")
 def index():
