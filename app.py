@@ -18,7 +18,7 @@ STATIC_DIR = BASE_DIR / "static"
 
 # Bump this with every deployed change -- it's shown in the UI footer so you
 # can tell at a glance which version is actually live on Render.
-APP_VERSION = "1.8.0"
+APP_VERSION = "1.9.0"
 
 ANTHROPIC_API_URL = os.environ.get(
     "ANTHROPIC_API_URL", "https://api.anthropic.com/v1/messages"
@@ -112,6 +112,11 @@ CHECKLIST_ITEMS = [
         "Повествование не выглядит как раскадровка «сделал это — потом "
         "то — затем вот это»",
     ),
+    (
+        "full_coverage",
+        "Правка затронула все абзацы без исключения — ни один не "
+        "оставлен точно в исходном виде",
+    ),
 ]
 
 SYSTEM_PROMPT = """You are a meticulous literary editor who specializes in \
@@ -176,7 +181,16 @@ factual continuity exactly. Do not add new plot events. Do not change the \
 language the chapter is written in, and do not translate it. Keep the total \
 length within roughly ±10% of the original.
 
-After editing, honestly self-assess the revised text against these eleven \
+Coverage matters as much as restraint: apply this pass to every paragraph \
+in the chapter, without exception. "Minimum changes" means keep each touch \
+small and purposeful -- it does NOT mean some paragraphs get skipped \
+because they already read fine. Even an already-solid paragraph should get \
+at least one small, genuine adjustment (a rhythm break, a swapped word, an \
+inversion, a livelier transition) so the whole chapter feels consistently \
+reworked, not patchy with some paragraphs polished and others left exactly \
+as the original draft wrote them.
+
+After editing, honestly self-assess the revised text against these twelve \
 checks (do not just mark everything true -- if something genuinely doesn't \
 hold, say so; mark dialogue_natural as passed:true with a note saying so if \
 the passage has no dialogue at all):
@@ -191,6 +205,7 @@ the passage has no dialogue at all):
 9. plot_preserved
 10. dialogue_natural
 11. no_storyboard_sequencing
+12. full_coverage
 
 Respond with a single JSON object and nothing else, matching this schema:
 {
@@ -208,7 +223,8 @@ Respond with a single JSON object and nothing else, matching this schema:
     "reads_naturally_aloud": {"passed": boolean, "note": string},
     "plot_preserved": {"passed": boolean, "note": string},
     "dialogue_natural": {"passed": boolean, "note": string},
-    "no_storyboard_sequencing": {"passed": boolean, "note": string}
+    "no_storyboard_sequencing": {"passed": boolean, "note": string},
+    "full_coverage": {"passed": boolean, "note": string}
   }
 }
 
