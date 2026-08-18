@@ -444,44 +444,57 @@
         });
     });
 
-    function handleStream(response) {
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let resolved = false;
+function handleStream(response) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let resolved = false;
+    let timeoutId = null;
 
-        return new Promise((resolve, reject) => {
-            function read() {
-                reader.read().then(({ done, value }) => {
-                    if (done) {
-                        if (!resolved) reject(new Error('Соединение закрыто'));
-                        return;
+    // Таймаут на случай, если стрим зависнет
+    const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+            reject(new Error('Превышено время ожидания ответа от сервера'));
+        }, 300000); // 5 минут
+    });
+
+    const readPromise = new Promise((resolve, reject) => {
+        function read() {
+            reader.read().then(({ done, value }) => {
+                if (done) {
+                    if (!resolved) reject(new Error('Соединение закрыто сервером'));
+                    return;
+                }
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    const payload = line.slice(6).trim();
+                    if (!payload) continue;
+
+                    try {
+                        const event = JSON.parse(payload);
+                        handleEvent(event, resolve, reject, () => { resolved = true; });
+                    } catch (e) {
+                        // игнорируем битые JSON
                     }
+                }
 
-                    buffer += decoder.decode(value, { stream: true });
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop() || '';
+                read();
+            }).catch(reject);
+        }
 
-                    for (const line of lines) {
-                        if (!line.startsWith('data: ')) continue;
-                        const payload = line.slice(6).trim();
-                        if (!payload) continue;
+        read();
+    });
 
-                        try {
-                            const event = JSON.parse(payload);
-                            handleEvent(event, resolve, reject, () => { resolved = true; });
-                        } catch (e) {
-                            // игнорируем битые JSON
-                        }
-                    }
-
-                    read();
-                }).catch(reject);
-            }
-
-            read();
+    return Promise.race([readPromise, timeoutPromise])
+        .finally(() => {
+            if (timeoutId) clearTimeout(timeoutId);
         });
-    }
+}
 
     function handleEvent(event, resolve, reject, markResolved) {
         switch (event.type) {
