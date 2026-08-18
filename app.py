@@ -463,9 +463,6 @@ def api_revise():
             for cumulative_text in _parse_anthropic_text_stream(anthropic_resp, stream_state):
                 full_text = cumulative_text
                 yield _sse("progress", {"chars": len(full_text), "estimated_total": estimated_total_chars})
-                    "progress",
-                    {"chars": len(full_text), "estimated_total": estimated_total_chars},
-                )
 
             if stream_state.get("stop_reason") == "max_tokens":
                 raise ChapterEditError(
@@ -519,12 +516,6 @@ def api_revise():
             yield _sse("error", {"detail": f"Unexpected server error: {exc}"})
         finally:
             anthropic_resp.close()
-
-    return Response(
-        stream_with_context(generate()),
-        mimetype="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
 
 
 @app.get("/")
