@@ -173,7 +173,10 @@
     <ul id="changesList"></ul>
   </section>
 </main>
-<footer>Правки выполняет модель Claude по запросу; всегда сверяйте результат перед публикацией.</footer>
+<footer>
+  Правки выполняет модель Claude по запросу; всегда сверяйте результат перед публикацией.
+  <span id="versionTag"></span>
+</footer>
 
 <script>
 const fileInput = document.getElementById('file');
@@ -228,7 +231,16 @@ submitBtn.addEventListener('click', async () => {
 
   try {
     const resp = await fetch('/api/revise', { method: 'POST', body: formData });
-    const data = await resp.json();
+    const raw = await resp.text();
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch (parseErr) {
+      throw new Error(
+        `Сервер вернул неожиданный ответ (HTTP ${resp.status}). ` +
+        'Возможно, сервис перезапускается или временно недоступен — попробуйте ещё раз через минуту.'
+      );
+    }
 
     if (!resp.ok) {
       throw new Error(data.detail || 'Не удалось обработать главу.');
@@ -276,6 +288,21 @@ downloadBtn.addEventListener('click', () => {
   a.click();
   URL.revokeObjectURL(url);
 });
+
+// Show which version is actually live -- handy for confirming a Render
+// redeploy picked up the latest code.
+(async () => {
+  const versionTag = document.getElementById('versionTag');
+  try {
+    const resp = await fetch('/api/health');
+    const data = await resp.json();
+    if (data.version) {
+      versionTag.textContent = ` · v${data.version}`;
+    }
+  } catch (e) {
+    // non-critical, ignore
+  }
+})();
 </script>
 </body>
 </html>

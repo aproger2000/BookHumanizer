@@ -11,9 +11,14 @@ from pathlib import Path
 
 import requests
 from flask import Flask, jsonify, request
+from werkzeug.exceptions import HTTPException
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
+
+# Bump this with every deployed change -- it's shown in the UI footer so you
+# can tell at a glance which version is actually live on Render.
+APP_VERSION = "1.3.0"
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
@@ -21,6 +26,7 @@ ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929"
 MAX_CHARS = 60_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
+app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20 MB upload cap
 
 
 class ChapterEditError(RuntimeError):
@@ -32,26 +38,45 @@ polishing chapters that were drafted with AI assistance. Your job is line \
 editing, not rewriting: keep the plot, characters, facts, dialogue meaning, \
 and the author's voice completely intact.
 
-Focus on removing the small tics that make AI-assisted prose feel \
-mechanical, and give it a distinct, natural human cadence instead:
-- vary sentence length and structure instead of a uniform rhythm
-- cut stock transitional phrases ("moreover", "furthermore", "in conclusion", \
-"it is worth noting", "additionally", and their equivalents in the chapter's \
-own language) and generic hedging
-- replace generic, abstract phrasing with concrete, specific, sensory detail \
-where it fits the scene
-- break up repetitive sentence openers and repeated grammatical patterns
-- avoid listy, over-structured paragraphs; let the prose breathe the way a \
-person telling a story would
-- trim redundant restatements and throat-clearing
-- keep idiosyncrasies: the occasional fragment, an unusual word choice, an \
-imperfect but natural rhythm
+The goal is prose that reads like it came from an attentive human author \
+with a distinct voice. Judge yourself by how the passage actually sounds \
+and feels when read -- NOT by matching any statistical profile (sentence-\
+length variance, percentage of sentences starting with the subject, \
+unique-word ratio, or similar metrics). Do not treat this as a checklist \
+to satisfy; treat it as craft.
 
-Make the *minimum* number of changes needed to achieve this -- this is a \
-polish pass, not a rewrite. Preserve paragraph breaks, chapter structure, \
-character names, and factual continuity exactly. Do not add new plot \
-events or invent details. Do not change the language the chapter is \
-written in, and do not translate it.
+Working moves, use only what genuinely improves a given passage:
+- Syntax: vary sentence construction -- inversions, parenthetical asides, \
+an occasional rhetorical question or interjection. Break up long, uniform \
+sentences; join short choppy ones with conjunctions where it helps the \
+rhythm. Not every sentence needs to be plain subject-verb-object.
+- Word choice: cut clichéd, bureaucratic, or overly bookish phrasing (stock \
+words like "process," "situation," "ultimately," "accordingly," and their \
+equivalents in the chapter's own language) for concrete, vivid, colloquial \
+alternatives. Bring in a fresh comparison or image where it fits naturally \
+-- don't force one into every paragraph.
+- Interiority: where a character is already present in a scene, you may \
+surface a sensory detail or reaction that's implied but left flat in the \
+draft (a sound, a smell, a flicker of feeling) -- but stay anchored to what \
+the scene already supports. Do not invent new plot-relevant experiences, \
+opinions, or events that aren't implied by the original.
+- Rhythm: alternate short, punchy sentences with longer, flowing ones. Use \
+dashes, colons, and ellipses where a human writer would reach for them -- \
+including, occasionally, a deliberately unfinished thought.
+- Paragraph shape: don't open every paragraph with the grammatical subject \
+-- lead with a setting, a gesture, a participial phrase sometimes. Let \
+transitions between sentences be a little less tidy than a textbook \
+outline; real prose doesn't march in perfect logical lockstep.
+- Final pass: read it back mentally -- does it sound like a person telling \
+the story, or like a summary of one? Trim leftover over-smoothness; a touch \
+of repetition, a colloquial particle, a rough edge here and there reads \
+more human than uniform polish.
+
+Make the *minimum* number of changes needed -- this is a polish pass, not a \
+rewrite. Preserve paragraph breaks, chapter structure, character names, and \
+factual continuity exactly. Do not add new plot events. Do not change the \
+language the chapter is written in, and do not translate it. Keep the total \
+length within roughly ±10% of the original.
 
 Respond with a single JSON object and nothing else, matching this schema:
 {"revised_text": string, "summary": string, "changes": [string, ...]}
@@ -61,7 +86,7 @@ Respond with a single JSON object and nothing else, matching this schema:
 chapter's own language
 - changes: 3-8 short notes (in the chapter's own language) describing the \
 kinds of edits made, e.g. "shortened three overly uniform sentences in the \
-second scene" or "removed repeated use of a stock transition word"
+second scene" or "opened a paragraph with a gesture instead of the subject"
 """
 
 INTENSITY_HINTS = {
@@ -71,12 +96,15 @@ INTENSITY_HINTS = {
     ),
     "balanced": (
         "Make a normal editorial pass: noticeable but restrained "
-        "improvements throughout the chapter."
+        "improvements throughout the chapter -- touch syntax, word choice, "
+        "rhythm and paragraph openings where they clearly help."
     ),
     "thorough": (
         "Make a thorough line-edit pass while still respecting every "
-        "constraint above -- more sentences may be touched, but do not "
-        "rewrite whole scenes or add content."
+        "constraint above -- more sentences may be touched, rhythm and "
+        "paragraph shape may change more freely, but do not rewrite whole "
+        "scenes, invent content, or add anything not implied by the "
+        "original."
     ),
 }
 
@@ -91,7 +119,13 @@ def extract_text_from_upload(file_storage) -> str:
     if filename.endswith(".docx"):
         from docx import Document  # python-docx
 
-        doc = Document(io.BytesIO(raw))
+        try:
+            doc = Document(io.BytesIO(raw))
+        except Exception as exc:
+            raise ValueError(
+                "Could not read this .docx file -- it may be corrupted or "
+                "not a real Word file."
+            ) from exc
         return "\n\n".join(p.text for p in doc.paragraphs)
 
     raise ValueError(
@@ -177,7 +211,7 @@ def revise_chapter(chapter_text: str, intensity: str = "balanced") -> dict:
 
 @app.get("/api/health")
 def health():
-    return jsonify(status="ok")
+    return jsonify(status="ok", version=APP_VERSION)
 
 
 @app.post("/api/revise")
@@ -215,6 +249,10 @@ def api_revise():
         result = revise_chapter(chapter_text, intensity=intensity)
     except ChapterEditError as exc:
         return jsonify(detail=str(exc)), 502
+    except Exception as exc:  # last-resort safety net -- never let a raw
+        # traceback / HTML page reach the browser, always return JSON.
+        app.logger.exception("Unexpected error in /api/revise")
+        return jsonify(detail=f"Unexpected server error: {exc}"), 500
 
     return jsonify(result)
 
@@ -222,6 +260,24 @@ def api_revise():
 @app.get("/")
 def index():
     return app.send_static_file("index.html")
+
+
+# --- Global error handlers -------------------------------------------------
+# Flask's default error pages are HTML. The frontend always expects JSON, so
+# make sure every error response -- including ones raised outside our own
+# routes (404s, oversized uploads, unexpected 500s) -- comes back as JSON
+# instead of crashing the browser's JSON.parse().
+
+
+@app.errorhandler(HTTPException)
+def handle_http_exception(exc: HTTPException):
+    return jsonify(detail=exc.description or str(exc)), exc.code or 500
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_exception(exc: Exception):
+    app.logger.exception("Unhandled exception")
+    return jsonify(detail=f"Unexpected server error: {exc}"), 500
 
 
 if __name__ == "__main__":
