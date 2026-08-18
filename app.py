@@ -21,15 +21,15 @@ STATIC_DIR = BASE_DIR / "static"
 
 # Bump this with every deployed change -- it's shown in the UI footer so you
 # can tell at a glance which version is actually live on Render.
-APP_VERSION = "2.4.0"
+APP_VERSION = "2.5.0"
 
 ANTHROPIC_API_URL = os.environ.get(
     "ANTHROPIC_API_URL", "https://api.anthropic.com/v1/messages"
 )
 ANTHROPIC_VERSION = "2023-06-01"
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
-MAX_CHARS = 60_000
-MAX_OUTPUT_TOKENS = 64_000
+MAX_CHARS = 30_000
+MAX_OUTPUT_TOKENS = 32_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20 MB upload cap
@@ -228,7 +228,7 @@ def _add_human_noise(text: str) -> str:
                 new_lines.append(words[2] + ' ' + words[3] + ', ' + ' '.join(words[:2]) + ' ' + ' '.join(words[4:]))
                 continue
         
-        # 3. Добавляем шум только в 12% случаев (редко)
+        # 3. Добавляем шум только в 8% случаев (редко)
         if random.random() < 0.08:
             noise_type = random.choice(['filler', 'break', 'interjection'])
             
@@ -267,17 +267,15 @@ def _add_human_noise(text: str) -> str:
 
 
 def _aggressive_rewrite(text: str) -> str:
-
     """Принудительно ломает идеальную структуру предложений."""
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    new_sentences = []
-    
     # Если текст слишком длинный, обрабатываем только первые 20 000 символов
-    # чтобы не замедлять ответ
     if len(text) > 20000:
         head = text[:20000]
         tail = text[20000:]
         return _aggressive_rewrite(head) + tail
+    
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    new_sentences = []
     
     for sent in sentences:
         words = sent.split()
@@ -324,6 +322,7 @@ def _aggressive_rewrite(text: str) -> str:
         new_sentences.append(sent)
     
     return '. '.join(new_sentences)
+
 
 def _restore_paragraphs(text: str, original_text: str) -> str:
     """Восстанавливает разбивку на абзацы, анализируя исходный текст."""
@@ -551,16 +550,16 @@ def api_revise():
     def generate():
         full_text = ""
         stream_state = {}
-        last_ping = time.time() 
+        last_ping = time.time()
         try:
             for cumulative_text in _parse_anthropic_text_stream(anthropic_resp, stream_state):
                 full_text = cumulative_text
                 yield _sse("progress", {"chars": len(full_text), "estimated_total": estimated_total_chars})
-
-            # Отправляем ping каждые 15 секунд, чтобы Gunicorn не убил воркер
-            if time.time() - last_ping > 15:
-                yield _sse("ping", {})
-                last_ping = time.time()
+                
+                # Отправляем ping каждые 15 секунд, чтобы Gunicorn не убил воркер
+                if time.time() - last_ping > 15:
+                    yield _sse("ping", {})
+                    last_ping = time.time()
 
             if stream_state.get("stop_reason") == "max_tokens":
                 raise ChapterEditError(
@@ -584,7 +583,7 @@ def api_revise():
             revised_text = _normalize_output_formatting(revised_text)
             revised_text = _add_human_noise(revised_text)
             revised_text = _aggressive_rewrite(revised_text)
-            revised_text = _restore_paragraphs(revised_text, chapter_text) 
+            revised_text = _restore_paragraphs(revised_text, chapter_text)
 
             checklist = _normalize_checklist(parsed.get("checklist"), chapter_text, revised_text)
             yield _sse(
