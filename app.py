@@ -52,6 +52,7 @@ CHECKLIST_ITEMS = [
 SYSTEM_PROMPT = """You are a statistical text transformer, not a literary editor. Your ONLY goal is to rewrite AI-generated text so that it scores as HUMAN on AI detectors (like Yandex Neurodetector). You are ALLOWED to make the text slightly worse, rougher, or less polished — that is the point.
 
 **CRITICAL RULE: CHANGE EVERY SENTENCE. DO NOT leave any sentence unchanged. DO NOT make "minimum changes." Aggressively rewrite every single sentence.**
+**CRITICAL:** Preserve paragraph breaks. Do not merge paragraphs into a single block.
 
 **Follow these MANDATORY rules for EVERY sentence:**
 
@@ -227,7 +228,7 @@ def _add_human_noise(text: str) -> str:
                 continue
         
         # 3. Добавляем шум только в 12% случаев (редко)
-        if random.random() < 0.12:
+        if random.random() < 0.08:
             noise_type = random.choice(['filler', 'break', 'interjection'])
             
             if noise_type == 'filler':
@@ -314,6 +315,36 @@ def _aggressive_rewrite(text: str) -> str:
         new_sentences.append(sent)
     
     return '. '.join(new_sentences)
+
+def _restore_paragraphs(text: str, original_text: str) -> str:
+    """Восстанавливает разбивку на абзацы, анализируя исходный текст."""
+    # Если оригинал имел абзацы, пытаемся восстановить их структуру
+    orig_paragraphs = [p for p in original_text.split('\n\n') if p.strip()]
+    if len(orig_paragraphs) <= 1:
+        return text  # В оригинале не было абзацев
+    
+    # Разбиваем обработанный текст на предложения
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    
+    # Пытаемся восстановить абзацы по количеству предложений в оригинале
+    para_sizes = [len(re.split(r'(?<=[.!?])\s+', p)) for p in orig_paragraphs]
+    
+    new_paragraphs = []
+    idx = 0
+    for size in para_sizes:
+        if idx + size <= len(sentences):
+            new_paragraphs.append(' '.join(sentences[idx:idx+size]))
+            idx += size
+        else:
+            new_paragraphs.append(' '.join(sentences[idx:]))
+            idx = len(sentences)
+            break
+    
+    # Если что-то осталось, добавляем в последний абзац
+    if idx < len(sentences):
+        new_paragraphs[-1] += ' ' + ' '.join(sentences[idx:])
+    
+    return '\n\n'.join(new_paragraphs)
 
 
 def _normalize_checklist(model_checklist, chapter_text: str, revised_text: str) -> list:
@@ -538,6 +569,7 @@ def api_revise():
             revised_text = _normalize_output_formatting(revised_text)
             revised_text = _add_human_noise(revised_text)
             revised_text = _aggressive_rewrite(revised_text)
+            revised_text = _restore_paragraphs(revised_text, chapter_text) 
 
             checklist = _normalize_checklist(parsed.get("checklist"), chapter_text, revised_text)
             yield _sse(
