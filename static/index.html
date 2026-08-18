@@ -6,149 +6,266 @@
 <title>Редактор глав</title>
 <style>
   :root {
-    --bg: #f7f5f2;
+    --bg: #f6f3ee;
+    --bg-alt: #efe9e0;
     --panel: #ffffff;
-    --ink: #1f1b16;
-    --muted: #6b6157;
+    --ink: #241f1a;
+    --muted: #6f6558;
+    --muted-2: #948a7c;
     --accent: #8a5a3b;
-    --accent-ink: #ffffff;
-    --border: #e4ddd3;
-    --radius: 10px;
+    --accent-dark: #6e4529;
+    --accent-tint: #f1e4d8;
+    --accent-ink: #fffaf5;
+    --success: #3f7d5c;
+    --success-tint: #e4efe8;
+    --fail: #b3401f;
+    --fail-tint: #f7e6df;
+    --border: #e3dbcd;
+    --radius-lg: 16px;
+    --radius-md: 10px;
+    --radius-sm: 7px;
+    --shadow: 0 1px 2px rgba(40, 30, 20, 0.04), 0 8px 24px rgba(40, 30, 20, 0.06);
+    --serif: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-family: var(--sans);
     background: var(--bg);
     color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent-dark); }
+
+  .top-bar {
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+    color: var(--accent-ink);
   }
   header {
-    padding: 28px 24px 8px;
+    padding: 34px 24px 26px;
     max-width: 1080px;
     margin: 0 auto;
   }
   header h1 {
-    font-size: 1.5rem;
-    margin: 0 0 6px;
+    font-family: var(--serif);
+    font-size: 1.9rem;
+    font-weight: 600;
+    margin: 0 0 8px;
+    letter-spacing: 0.2px;
   }
   header p {
-    color: var(--muted);
+    color: rgba(255, 250, 245, 0.88);
     margin: 0;
-    max-width: 720px;
-    line-height: 1.5;
+    max-width: 680px;
+    line-height: 1.55;
+    font-size: 0.96rem;
   }
+
   main {
     max-width: 1080px;
-    margin: 0 auto;
-    padding: 16px 24px 60px;
+    margin: -18px auto 0;
+    padding: 0 24px 60px;
     display: grid;
     gap: 20px;
+    position: relative;
   }
   .panel {
     background: var(--panel);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 20px;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow);
+    padding: 22px 24px;
   }
   .controls-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 12px;
+    gap: 14px 22px;
     align-items: center;
     margin-bottom: 14px;
   }
-  label { font-size: 0.9rem; color: var(--muted); }
+  .control-group { display: flex; align-items: center; gap: 8px; }
+  label { font-size: 0.85rem; color: var(--muted); }
   select, input[type="file"] {
-    font-size: 0.9rem;
-    padding: 6px 10px;
-    border-radius: 6px;
+    font: inherit;
+    font-size: 0.88rem;
+    padding: 7px 10px;
+    border-radius: var(--radius-sm);
     border: 1px solid var(--border);
     background: #fff;
+    color: var(--ink);
+  }
+  select:focus, input:focus, textarea:focus, button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
   }
   textarea {
     width: 100%;
     min-height: 260px;
     resize: vertical;
     border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 14px;
-    font-size: 0.95rem;
-    line-height: 1.6;
-    font-family: inherit;
+    border-radius: var(--radius-md);
+    padding: 16px;
+    font-size: 0.98rem;
+    line-height: 1.7;
+    font-family: var(--serif);
+    background: #fffdfa;
+    color: var(--ink);
   }
+  textarea::placeholder { color: var(--muted-2); font-family: var(--sans); }
+
   .btn {
     background: var(--accent);
     color: var(--accent-ink);
     border: none;
-    padding: 10px 20px;
-    border-radius: 8px;
-    font-size: 0.95rem;
+    padding: 11px 22px;
+    border-radius: 999px;
+    font-size: 0.92rem;
+    font-weight: 600;
     cursor: pointer;
+    transition: background 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+    box-shadow: 0 2px 8px rgba(138, 90, 59, 0.28);
   }
-  .btn:disabled { opacity: 0.5; cursor: default; }
+  .btn:hover:not(:disabled) { background: var(--accent-dark); transform: translateY(-1px); }
+  .btn:active:not(:disabled) { transform: translateY(0); }
+  .btn:disabled { opacity: 0.5; cursor: default; box-shadow: none; }
   .btn.secondary {
     background: transparent;
-    color: var(--accent);
-    border: 1px solid var(--accent);
+    color: var(--accent-dark);
+    border: 1px solid var(--border);
+    box-shadow: none;
+    font-weight: 500;
   }
-  .actions {
-    display: flex;
-    gap: 10px;
-    margin-top: 14px;
-    align-items: center;
-    flex-wrap: wrap;
+  .btn.secondary:hover:not(:disabled) { background: var(--accent-tint); border-color: var(--accent); }
+
+  .actions { display: flex; gap: 10px; margin-top: 16px; align-items: center; flex-wrap: wrap; }
+  .status { color: var(--muted); font-size: 0.88rem; }
+  .status.error { color: var(--fail); }
+
+  /* Progress */
+  .progress-wrap { display: none; margin-top: 18px; }
+  .progress-wrap.show { display: block; }
+  .progress-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 0.85rem; color: var(--muted); margin-bottom: 8px;
   }
-  .status { color: var(--muted); font-size: 0.9rem; }
-  .status.error { color: #b3401f; }
+  .progress-stage { font-weight: 600; color: var(--accent-dark); }
+  .progress-track {
+    height: 10px; border-radius: 999px; background: var(--bg-alt);
+    overflow: hidden; border: 1px solid var(--border);
+  }
+  .progress-fill {
+    height: 100%; width: 0%; border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent) 0%, var(--accent-dark) 100%);
+    transition: width 0.4s ease;
+  }
+  .progress-fill.indeterminate {
+    width: 30% !important;
+    animation: progress-slide 1.3s ease-in-out infinite;
+  }
+  @keyframes progress-slide {
+    0% { margin-left: 0%; }
+    50% { margin-left: 65%; }
+    100% { margin-left: 0%; }
+  }
+  .progress-meta { margin-top: 6px; font-size: 0.78rem; color: var(--muted-2); }
+
   .results { display: none; grid-template-columns: 1fr 1fr; gap: 20px; }
   .results.show { display: grid; }
   @media (max-width: 820px) { .results.show { grid-template-columns: 1fr; } }
-  .result-col h3 { margin: 0 0 8px; font-size: 1rem; }
+  .result-col h3 { margin: 0 0 10px; font-size: 0.95rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
   .result-text {
     white-space: pre-wrap;
-    line-height: 1.65;
+    font-family: var(--serif);
+    line-height: 1.75;
     border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 14px;
+    border-radius: var(--radius-md);
+    padding: 18px;
     max-height: 520px;
     overflow-y: auto;
-    background: #fffdfb;
-    font-size: 0.95rem;
+    background: #fffdfa;
+    font-size: 1rem;
   }
-  .notes { margin-top: 18px; }
-  .notes h3 { font-size: 0.95rem; margin-bottom: 8px; }
+
+  .notes h3, .checklist-panel h3 { margin: 0 0 10px; font-size: 1rem; }
   .notes ul { margin: 0; padding-left: 20px; color: var(--muted); line-height: 1.6; }
-  .notes p { color: var(--muted); line-height: 1.5; }
-  footer { text-align: center; color: var(--muted); font-size: 0.8rem; padding-bottom: 30px; }
+  .notes p { color: var(--muted); line-height: 1.55; }
+
+  .checklist-panel { display: none; }
+  .checklist-panel.show { display: block; }
+  .checklist-summary { font-size: 0.85rem; color: var(--muted); margin: 0 0 14px; }
+  .checklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .checklist-item {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 10px 12px; border-radius: var(--radius-sm);
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+  }
+  .checklist-item.pass { background: var(--success-tint); border-color: #cfe4d8; }
+  .checklist-item.fail { background: var(--fail-tint); border-color: #eecabb; }
+  .checklist-icon {
+    flex: none; width: 22px; height: 22px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.8rem; font-weight: 700; color: #fff; margin-top: 1px;
+  }
+  .checklist-item.pass .checklist-icon { background: var(--success); }
+  .checklist-item.fail .checklist-icon { background: var(--fail); }
+  .checklist-item.unknown .checklist-icon { background: var(--muted-2); }
+  .checklist-body { flex: 1; }
+  .checklist-label { font-size: 0.88rem; font-weight: 600; color: var(--ink); }
+  .checklist-note { font-size: 0.82rem; color: var(--muted); margin-top: 2px; line-height: 1.4; }
+  .checklist-caveat {
+    margin-top: 14px; font-size: 0.78rem; color: var(--muted-2);
+    border-top: 1px dashed var(--border); padding-top: 12px; line-height: 1.5;
+  }
+
+  footer { text-align: center; color: var(--muted-2); font-size: 0.78rem; padding: 10px 24px 34px; }
 </style>
 </head>
 <body>
-<header>
-  <h1>Редактор глав</h1>
-  <p>
-    Вставьте текст главы (или загрузите .txt / .md / .docx) — сервис сделает
-    минимальную редакторскую правку: уберёт однообразный ритм, штампованные
-    связки и канцелярит, добавит живых деталей, сохранив сюжет, героев и
-    авторский голос без изменений.
-  </p>
-</header>
+<div class="top-bar">
+  <header>
+    <h1>Редактор глав</h1>
+    <p>
+      Вставьте текст главы (или загрузите .txt / .md / .docx) — сервис сделает
+      минимальную редакторскую правку: уберёт однообразный ритм, штампованные
+      связки и канцелярит, добавит живых деталей, сохранив сюжет, героев и
+      авторский голос без изменений.
+    </p>
+  </header>
+</div>
 <main>
   <section class="panel">
     <div class="controls-row">
-      <label for="file">Загрузить файл:</label>
-      <input type="file" id="file" accept=".txt,.md,.docx" />
-      <label for="intensity">Глубина правки:</label>
-      <select id="intensity">
-        <option value="light">Лёгкая</option>
-        <option value="balanced" selected>Стандартная</option>
-        <option value="thorough">Глубокая</option>
-      </select>
+      <div class="control-group">
+        <label for="file">Файл:</label>
+        <input type="file" id="file" accept=".txt,.md,.docx" />
+      </div>
+      <div class="control-group">
+        <label for="intensity">Глубина правки:</label>
+        <select id="intensity">
+          <option value="light">Лёгкая</option>
+          <option value="balanced" selected>Стандартная</option>
+          <option value="thorough">Глубокая</option>
+        </select>
+      </div>
     </div>
     <textarea id="text" placeholder="Вставьте текст главы сюда..."></textarea>
     <div class="actions">
       <button class="btn" id="submit">Улучшить главу</button>
       <button class="btn secondary" id="clear" type="button">Очистить</button>
       <span class="status" id="status"></span>
+    </div>
+
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-head">
+        <span class="progress-stage" id="progressStage">Отправляю главу…</span>
+        <span id="progressPct">0%</span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <div class="progress-meta" id="progressMeta">Прошло: 0 сек.</div>
     </div>
   </section>
 
@@ -172,6 +289,19 @@
     <p id="summaryText"></p>
     <ul id="changesList"></ul>
   </section>
+
+  <section class="panel checklist-panel" id="checklistPanel">
+    <h3>Проверка после правки</h3>
+    <p class="checklist-summary" id="checklistSummary"></p>
+    <ul class="checklist" id="checklistList"></ul>
+    <p class="checklist-caveat">
+      Пункты честно оценивает сама модель по итогам правки (кроме объёма
+      текста — его пересчитывает сервис). Количественные пороги вроде доли
+      предложений с подлежащего или коэффициента вариации длины сюда
+      намеренно не включены — это статистика, на которую ориентируются
+      детекторы ИИ-текста, а не показатель качества прозы.
+    </p>
+  </section>
 </main>
 <footer>
   Правки выполняет модель Claude по запросу; всегда сверяйте результат перед публикацией.
@@ -194,16 +324,170 @@ const changesList = document.getElementById('changesList');
 const copyBtn = document.getElementById('copyBtn');
 const downloadBtn = document.getElementById('downloadBtn');
 
+const progressWrap = document.getElementById('progressWrap');
+const progressFill = document.getElementById('progressFill');
+const progressPct = document.getElementById('progressPct');
+const progressStage = document.getElementById('progressStage');
+const progressMeta = document.getElementById('progressMeta');
+
+const checklistPanel = document.getElementById('checklistPanel');
+const checklistSummary = document.getElementById('checklistSummary');
+const checklistList = document.getElementById('checklistList');
+
 let lastRevised = '';
+let checklistLabels = {}; // id -> label, filled in from /api/health
+let progressTimer = null;
+let progressStart = 0;
+
+const STAGE_LABELS = [
+  { upto: 15, label: 'Читаю главу…' },
+  { upto: 55, label: 'Переписываю ритм и лексику…' },
+  { upto: 90, label: 'Добавляю живые детали…' },
+  { upto: 100, label: 'Финальная проверка…' },
+];
+
+function stageForPct(pct) {
+  for (const s of STAGE_LABELS) {
+    if (pct <= s.upto) return s.label;
+  }
+  return STAGE_LABELS[STAGE_LABELS.length - 1].label;
+}
+
+function startProgress() {
+  progressWrap.classList.add('show');
+  progressFill.style.width = '0%';
+  progressFill.classList.remove('indeterminate');
+  progressPct.textContent = '0%';
+  progressStage.textContent = 'Отправляю главу…';
+  progressStart = performance.now();
+  clearInterval(progressTimer);
+  progressTimer = setInterval(() => {
+    const secs = Math.round((performance.now() - progressStart) / 1000);
+    progressMeta.textContent = `Прошло: ${secs} сек.`;
+  }, 500);
+}
+
+function updateProgress(chars, estimatedTotal) {
+  const pct = Math.max(1, Math.min(96, Math.round((chars / estimatedTotal) * 100)));
+  progressFill.style.width = pct + '%';
+  progressPct.textContent = pct + '%';
+  progressStage.textContent = stageForPct(pct);
+}
+
+function finishProgress(success) {
+  clearInterval(progressTimer);
+  if (success) {
+    progressFill.style.width = '100%';
+    progressPct.textContent = '100%';
+    progressStage.textContent = 'Готово';
+    setTimeout(() => progressWrap.classList.remove('show'), 1200);
+  } else {
+    progressWrap.classList.remove('show');
+  }
+}
 
 clearBtn.addEventListener('click', () => {
   textArea.value = '';
   fileInput.value = '';
   resultsEl.classList.remove('show');
   notesPanel.style.display = 'none';
+  checklistPanel.classList.remove('show');
+  progressWrap.classList.remove('show');
   statusEl.textContent = '';
   statusEl.className = 'status';
 });
+
+async function streamRevise(formData) {
+  const resp = await fetch('/api/revise', { method: 'POST', body: formData });
+  const contentType = resp.headers.get('content-type') || '';
+
+  if (!contentType.includes('text/event-stream')) {
+    const raw = await resp.text();
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch (parseErr) {
+      throw new Error(
+        `Сервер вернул неожиданный ответ (HTTP ${resp.status}). ` +
+        'Возможно, сервис перезапускается или временно недоступен — попробуйте ещё раз через минуту.'
+      );
+    }
+    throw new Error(data.detail || 'Не удалось обработать главу.');
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let boundary;
+    while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+      const rawEvent = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const dataLine = rawEvent.split('\n').find((l) => l.startsWith('data:'));
+      if (!dataLine) continue;
+      const jsonStr = dataLine.slice(5).trim();
+      if (!jsonStr) continue;
+
+      let evt;
+      try {
+        evt = JSON.parse(jsonStr);
+      } catch (e) {
+        continue;
+      }
+
+      if (evt.type === 'progress') {
+        updateProgress(evt.chars, evt.estimated_total);
+      } else if (evt.type === 'done') {
+        return evt;
+      } else if (evt.type === 'error') {
+        throw new Error(evt.detail || 'Не удалось обработать главу.');
+      }
+    }
+  }
+
+  throw new Error('Соединение прервалось раньше, чем сервис закончил обработку.');
+}
+
+function renderChecklist(items) {
+  if (!items || !items.length) {
+    checklistPanel.classList.remove('show');
+    return;
+  }
+  checklistList.innerHTML = '';
+  let passed = 0;
+  items.forEach((item) => {
+    const li = document.createElement('li');
+    const cls = item.passed === true ? 'pass' : item.passed === false ? 'fail' : 'unknown';
+    if (cls === 'pass') passed += 1;
+    li.className = 'checklist-item ' + cls;
+
+    const icon = document.createElement('div');
+    icon.className = 'checklist-icon';
+    icon.textContent = cls === 'pass' ? '✓' : cls === 'fail' ? '✕' : '?';
+
+    const body = document.createElement('div');
+    body.className = 'checklist-body';
+    const label = document.createElement('div');
+    label.className = 'checklist-label';
+    label.textContent = item.label || checklistLabels[item.id] || item.id;
+    const note = document.createElement('div');
+    note.className = 'checklist-note';
+    note.textContent = item.note || '';
+    body.appendChild(label);
+    if (item.note) body.appendChild(note);
+
+    li.appendChild(icon);
+    li.appendChild(body);
+    checklistList.appendChild(li);
+  });
+  checklistSummary.textContent = `Пройдено пунктов: ${passed} из ${items.length}.`;
+  checklistPanel.classList.add('show');
+}
 
 submitBtn.addEventListener('click', async () => {
   const file = fileInput.files[0];
@@ -224,27 +508,15 @@ submitBtn.addEventListener('click', async () => {
   formData.append('intensity', intensitySelect.value);
 
   submitBtn.disabled = true;
-  statusEl.textContent = 'Обрабатываю главу…';
+  statusEl.textContent = '';
   statusEl.className = 'status';
   resultsEl.classList.remove('show');
   notesPanel.style.display = 'none';
+  checklistPanel.classList.remove('show');
+  startProgress();
 
   try {
-    const resp = await fetch('/api/revise', { method: 'POST', body: formData });
-    const raw = await resp.text();
-    let data;
-    try {
-      data = JSON.parse(raw);
-    } catch (parseErr) {
-      throw new Error(
-        `Сервер вернул неожиданный ответ (HTTP ${resp.status}). ` +
-        'Возможно, сервис перезапускается или временно недоступен — попробуйте ещё раз через минуту.'
-      );
-    }
-
-    if (!resp.ok) {
-      throw new Error(data.detail || 'Не удалось обработать главу.');
-    }
+    const data = await streamRevise(formData);
 
     originalTextEl.textContent = text || '(из загруженного файла)';
     revisedTextEl.textContent = data.revised_text;
@@ -262,8 +534,12 @@ submitBtn.addEventListener('click', async () => {
       notesPanel.style.display = 'block';
     }
 
+    renderChecklist(data.checklist);
+
+    finishProgress(true);
     statusEl.textContent = 'Готово.';
   } catch (err) {
+    finishProgress(false);
     statusEl.textContent = err.message;
     statusEl.className = 'status error';
   } finally {
@@ -289,8 +565,8 @@ downloadBtn.addEventListener('click', () => {
   URL.revokeObjectURL(url);
 });
 
-// Show which version is actually live -- handy for confirming a Render
-// redeploy picked up the latest code.
+// Show which version is actually live, and pick up checklist item labels --
+// handy for confirming a Render redeploy picked up the latest code.
 (async () => {
   const versionTag = document.getElementById('versionTag');
   try {
@@ -299,6 +575,9 @@ downloadBtn.addEventListener('click', () => {
     if (data.version) {
       versionTag.textContent = ` · v${data.version}`;
     }
+    (data.checklist_items || []).forEach((item) => {
+      checklistLabels[item.id] = item.label;
+    });
   } catch (e) {
     // non-critical, ignore
   }
