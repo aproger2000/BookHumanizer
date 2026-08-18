@@ -8,6 +8,7 @@ import io
 import json
 import os
 import re
+import random
 from pathlib import Path
 
 import requests
@@ -19,23 +20,14 @@ STATIC_DIR = BASE_DIR / "static"
 
 # Bump this with every deployed change -- it's shown in the UI footer so you
 # can tell at a glance which version is actually live on Render.
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.2.0"
 
 ANTHROPIC_API_URL = os.environ.get(
     "ANTHROPIC_API_URL", "https://api.anthropic.com/v1/messages"
 )
 ANTHROPIC_VERSION = "2023-06-01"
-# claude-sonnet-4-5-20250929 (the previous default) is now a legacy model;
-# claude-sonnet-5 is the current model and supports up to 128k output tokens
-# on the standard synchronous API, no beta header required.
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
 MAX_CHARS = 60_000
-# revised_text alone can run close to the size of the input chapter (the
-# prompt targets ~length parity), plus the summary/changes/checklist on top
-# -- for a 60k-character chapter that's tens of thousands of output tokens.
-# The old value here (8192) was too small once the checklist was added and
-# caused the model's JSON to get cut off mid-response ("The model did not
-# return valid JSON."). 64k leaves generous headroom under the 128k cap.
 MAX_OUTPUT_TOKENS = 64_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
@@ -46,21 +38,6 @@ class ChapterEditError(RuntimeError):
     """Raised when the chapter could not be revised."""
 
 
-# The qualitative craft checklist the model self-assesses after every edit.
-# These map to the genuine editorial-craft items from the brief (syntax
-# variety, lexical freshness, rhythm, paragraph shape, dialogue mechanics,
-# narrative flow, natural read-aloud quality, preserved plot). Deliberately
-# excluded, across multiple revisions of the brief: statistical self-check
-# thresholds (% of sentences starting with the subject, sentence-length
-# coefficient of variation, explicitly avoiding "8-12 word sentences because
-# that's characteristic of neural networks", unique-word ratio, a quota of
-# non-verbal dialogue intros, "no signs of machine generation") -- those
-# target the exact features AI-text detectors use, and this tool is meant to
-# make prose genuinely better, not tuned to beat a specific classifier. Also
-# excluded: inventing character experiences "unrelated to the plot" -- that's
-# content invention, not style editing. The one checklist item we *do*
-# compute exactly (length_within_10_percent) is measured in code below, not
-# self-reported.
 CHECKLIST_ITEMS = [
     ("zero_unchanged_sentences", "Каждое предложение было изменено — ни одно не осталось прежним."),
     ("zero_subject_start", "Ни одно предложение не начинается с имени или местоимения (Он/Она/Они)."),
@@ -81,7 +58,7 @@ SYSTEM_PROMPT = """You are a statistical text transformer, not a literary editor
 1.  **Length Sabotage:** Break every sentence that is 8-12 words long. Either cut it to 3-5 words OR expand it to 18-25 words. Never leave a sentence in the 8-12 word range.
 2.  **Subject Sabotage:** Never start a sentence with a character's name or a pronoun (He/She/It/They). Start with time ("Then..."), place ("In the corner..."), action ("Running..."), or an interjection ("Well...").
 3.  **Word Sabotage:** Replace 20-30% of all words with LESS common synonyms. Use words that are slightly awkward, regional, or specific. Never use the first thesaurus suggestion.
-4.  **Add Noise:** In 50% of sentences, add filler words: "well," "so," "you know," "actually," "basically," "like." Add dashes — everywhere. Add ellipses... Add incomplete thoughts. Do not leave any sentence perfectly clean.
+4.  **Add Noise:** In NO MORE THAN 15% of sentences, add filler words: "well," "so," "you know," "actually," "basically," "like." Use different types of noise: interjections, dashes, ellipses, and breaks. Never use two interjections in the same sentence. Do not start more than 20% of sentences with "well" or "you know."
 5.  **Add "Wrong" Punctuation:** Use dashes instead of commas. Use ellipses instead of periods. Use question marks for rhetorical statements. Break grammatical rules like a human would in a chat.
 6.  **Logical Leaps:** Between sentences, do NOT use perfect logical transitions ("therefore," "as a result," "consequently"). Jump from one idea to another abruptly, like human thinking.
 7.  **Preserve Plot ONLY:** Keep the storyline, characters, and facts EXACTLY as they are. But change HOW EVERY sentence is written.
@@ -104,6 +81,12 @@ SYSTEM_PROMPT = """You are a statistical text transformer, not a literary editor
 **EXAMPLE of a good rewrite:**
 Original: "The old factory smelled of rust and machine oil. Alex stepped inside and turned on his flashlight."
 Rewrite: "Rust. Machine oil. That's what hit Alex first. He stepped inside — flashlight clicked on."
+
+**CRITICAL:**
+- Use interjections ("well," "you know," "actually") in AT MOST 15% of sentences.
+- Never use two interjections in the same sentence.
+- Vary the types of "noise": use pauses, dashes, and breaks instead of always using filler words.
+- Do NOT start more than 20% of sentences with "Ну" or "И, знаешь".
 
 **Respond with a single JSON object and nothing else, matching this schema:**
 {
@@ -151,7 +134,7 @@ def extract_text_from_upload(file_storage) -> str:
         return raw.decode("utf-8", errors="replace")
 
     if filename.endswith(".docx"):
-        from docx import Document  # python-docx
+        from docx import Document
 
         try:
             doc = Document(io.BytesIO(raw))
@@ -192,23 +175,14 @@ _MULTI_BLANK_LINE_RE = re.compile(r"\n{3,}")
 
 
 def _normalize_output_formatting(text: str) -> str:
-    """Deterministic punctuation/whitespace cleanup applied to whatever the
-    model returns, so these house-style conventions hold regardless of how
-    consistently the model itself followed the prompt:
-    - em dash "—" -> plain hyphen "-"
-    - a "---"-style scene-break line -> "*************"
-    - never more than one blank line between paragraphs
-    """
-    text = text.replace("—", "-")  # em dash -> plain hyphen
+    text = text.replace("—", "-")
     text = _SCENE_BREAK_RE.sub("*************", text)
     text = _MULTI_BLANK_LINE_RE.sub("\n\n", text)
     return text
 
 
-import random
-import random
-
 def _add_human_noise(text: str) -> str:
+    """Агрессивная финишная правка: ломает оставшиеся AI-паттерны."""
     lines = text.splitlines()
     new_lines = []
     
@@ -219,7 +193,7 @@ def _add_human_noise(text: str) -> str:
             continue
         
         # Пропускаем диалоги и служебные строки
-        if stripped[0] in ('"', '«', '—', '-', '*', '•'):
+        if stripped and stripped[0] in ('"', '«', '—', '-', '*', '•'):
             new_lines.append(line)
             continue
         
@@ -228,47 +202,70 @@ def _add_human_noise(text: str) -> str:
             new_lines.append(line)
             continue
         
-        # 1. Если длинное предложение — разбиваем
+        # 1. Длинные предложения (>15 слов) — разбиваем с разными методами
         if len(words) > 15:
-            mid1 = len(words) // 3
-            mid2 = 2 * len(words) // 3
-            part1 = ' '.join(words[:mid1]) + '.'
-            part2 = ' '.join(words[mid1:mid2]) + '.'
-            part3 = ' '.join(words[mid2:])
-            fillers = ["Да, ", "Ну, ", "Кстати, ", "Вообще, ", "Вот, "]
-            new_lines.append(random.choice(fillers) + part1 + ' ' + part2 + ' И, знаешь, ' + part3)
+            method = random.choice(['split', 'dash', 'question'])
+            
+            if method == 'split':
+                mid = len(words) // 2
+                part1 = ' '.join(words[:mid])
+                part2 = ' '.join(words[mid:])
+                fillers = [" — ну, как бы — ", " — и вообще, — ", " — честно говоря, — "]
+                new_lines.append(part1 + random.choice(fillers) + part2)
+            elif method == 'dash':
+                pos = random.randint(3, len(words)-2)
+                new_lines.append(' '.join(words[:pos]) + ' — и это, знаете ли — ' + ' '.join(words[pos:]))
+            else:  # question
+                new_lines.append(' '.join(words) + ', не так ли?')
             continue
         
         # 2. Если начинается с имени — меняем порядок
         first_word = words[0].lower()
-        if first_word in ["алексей", "он", "она", "они", "анна", "масарик", "кросс"]:
+        if first_word in ["алексей", "он", "она", "они", "анна", "масарик", "кросс", "илья"]:
             if len(words) >= 4:
                 new_lines.append(words[2] + ' ' + words[3] + ', ' + ' '.join(words[:2]) + ' ' + ' '.join(words[4:]))
                 continue
         
-        # 3. Добавляем «шум» только в 25% случаев (было 40%)
-        if random.random() < 0.25:
-            fillers = [
-                "Ну, ", "Вот, ", "И, знаешь, ", "Честно говоря, ",
-                "Так вот, ", "Кстати, ", "Слушай, ", "А вообще, "
-            ]
-            # В 30% случаев вставляем в середину, а не в начало
-            if random.random() < 0.3 and len(words) > 4:
-                mid = len(words) // 2
-                new_lines.append(' '.join(words[:mid]) + ', ' + random.choice(fillers).lower().strip() + ' ' + ' '.join(words[mid:]))
-            else:
-                first_char = stripped[0]
-                rest = stripped[1:]
-                new_lines.append(random.choice(fillers) + first_char.lower() + rest)
+        # 3. Добавляем шум только в 12% случаев (редко)
+        if random.random() < 0.12:
+            noise_type = random.choice(['filler', 'break', 'interjection'])
+            
+            if noise_type == 'filler':
+                fillers = [
+                    "Ну, ", "Вот, ", "И, знаешь, ", "Честно говоря, ",
+                    "Так вот, ", "Кстати, ", "Слушай, ", "А вообще, "
+                ]
+                if random.random() < 0.3 and len(words) > 4:
+                    mid = len(words) // 2
+                    new_lines.append(' '.join(words[:mid]) + ', ' + random.choice(fillers).lower().strip() + ' ' + ' '.join(words[mid:]))
+                else:
+                    new_lines.append(random.choice(fillers) + stripped[0].lower() + stripped[1:])
+            elif noise_type == 'break':
+                if len(words) > 4:
+                    cut = random.randint(2, len(words)-1)
+                    new_lines.append(' '.join(words[:cut]) + '... ну, вы поняли.')
+                else:
+                    new_lines.append(line)
+            else:  # interjection
+                interjections = ["Чёрт!", "Вот это да!", "Ну и ну!", "Боже!", "Ого!"]
+                new_lines.append(random.choice(interjections) + ' ' + stripped[0].lower() + stripped[1:])
         else:
             new_lines.append(line)
     
-    return '\n'.join(new_lines)
+    # Финальная чистка: удаляем повторяющиеся вводные слова подряд
+    final_lines = []
+    for line in new_lines:
+        line = re.sub(r'(Ну,)\s*(Ну,)\s*', r'\1 ', line)
+        line = re.sub(r'(И, знаешь,)\s*(И, знаешь,)\s*', r'\1 ', line)
+        line = re.sub(r'(Вообще,)\s*(Вообще,)\s*', r'\1 ', line)
+        line = re.sub(r'(Кстати,)\s*(Кстати,)\s*', r'\1 ', line)
+        final_lines.append(line)
+    
+    return '\n'.join(final_lines)
+
 
 def _normalize_checklist(model_checklist, chapter_text: str, revised_text: str) -> list:
-    """Собирает чек-лист из ответа модели, добавляя вычисляемый пункт о длине."""
     items = []
-    # Новые ключи, которые должна вернуть модель
     expected_keys = [
         "zero_unchanged_sentences",
         "zero_subject_start",
@@ -280,7 +277,6 @@ def _normalize_checklist(model_checklist, chapter_text: str, revised_text: str) 
         "plot_preserved",
     ]
     
-    # Сопоставление ключей с их отображаемыми названиями
     labels = {
         "zero_unchanged_sentences": "Каждое предложение было изменено",
         "zero_subject_start": "Ни одно предложение не начинается с имени/местоимения",
@@ -311,7 +307,6 @@ def _normalize_checklist(model_checklist, chapter_text: str, revised_text: str) 
                 "source": "model",
             })
 
-    # Вычисляемый пункт (не зависит от модели)
     original_len = len(chapter_text)
     revised_len = len(revised_text)
     ratio = (revised_len / original_len) if original_len else 1.0
@@ -327,12 +322,6 @@ def _normalize_checklist(model_checklist, chapter_text: str, revised_text: str) 
 
 
 def _parse_anthropic_text_stream(resp, state):
-    """Iterate an Anthropic streaming response, yielding the cumulative
-    generated text after every text delta. Raises ChapterEditError if the
-    stream itself reports an error event. Writes the final stop_reason (if
-    any) into state['stop_reason'] so the caller can tell a truncated
-    response (stop_reason == "max_tokens") apart from a clean one -- that's
-    a much more useful error than a bare JSON-parse failure."""
     buffer = []
     for raw_line in resp.iter_lines(decode_unicode=True):
         if not raw_line or not raw_line.startswith("data:"):
@@ -381,7 +370,6 @@ def health():
 def api_revise():
     file_storage = request.files.get("file")
     text = request.form.get("text", "")
-    intensity = request.form.get("intensity", "balanced")
     style = request.form.get("style", "neutral")
 
     if file_storage and file_storage.filename:
@@ -442,11 +430,6 @@ def api_revise():
     }
 
     try:
-        # (connect timeout, read timeout) -- generating a full chapter can
-        # legitimately take a couple of minutes, especially for long
-        # chapters or "thorough" intensity, so the read timeout is generous.
-        # With streaming, this read timeout applies between individual
-        # chunks, not to the whole call, so it rarely gets hit in practice.
         anthropic_resp = requests.post(
             ANTHROPIC_API_URL, headers=headers, json=payload, stream=True, timeout=(10, 300)
         )
@@ -471,9 +454,6 @@ def api_revise():
             502,
         )
 
-    # Once we get here we commit to a streaming response, so every error
-    # from this point on is reported as an SSE "error" event instead of an
-    # HTTP error status (the 200 + headers were already sent to the browser).
     estimated_total_chars = max(int(len(chapter_text) * 1.15), 200)
 
     def generate():
@@ -500,12 +480,6 @@ def api_revise():
             if not revised_text:
                 raise ChapterEditError("The model response was missing the revised text.")
             if revised_text.strip() == chapter_text.strip():
-                # The model left the chapter completely untouched -- this
-                # defeats the whole point of the tool, so surface it as a
-                # clear failure instead of quietly "succeeding" with a
-                # checklist that likely claims things passed that didn't.
-                # (Checked before formatting normalization below, so a
-                # punctuation-only rewrite doesn't mask a genuine no-op.)
                 raise ChapterEditError(
                     "The model returned the chapter with no changes at all. "
                     "Try again, or switch to a stronger intensity (e.g. "
@@ -513,17 +487,13 @@ def api_revise():
                 )
 
             revised_text = _normalize_output_formatting(revised_text)
-            revised_text = _add_human_noise(revised_text) 
+            revised_text = _add_human_noise(revised_text)
 
             checklist = _normalize_checklist(parsed.get("checklist"), chapter_text, revised_text)
             yield _sse(
                 "done",
                 {
                     "revised_text": revised_text,
-                    # Sent back so the frontend can show/diff the real
-                    # original even when the chapter came from an uploaded
-                    # file (the browser never saw the extracted text
-                    # otherwise).
                     "original_text": chapter_text,
                     "summary": parsed.get("summary", ""),
                     "changes": parsed.get("changes", []),
@@ -544,7 +514,7 @@ def api_revise():
             )
         except requests.RequestException as exc:
             yield _sse("error", {"detail": f"Network error calling the Anthropic API: {exc}"})
-        except Exception as exc:  # last-resort safety net
+        except Exception as exc:
             app.logger.exception("Unexpected error while streaming chapter revision")
             yield _sse("error", {"detail": f"Unexpected server error: {exc}"})
         finally:
@@ -560,13 +530,6 @@ def api_revise():
 @app.get("/")
 def index():
     return app.send_static_file("index.html")
-
-
-# --- Global error handlers -------------------------------------------------
-# Flask's default error pages are HTML. The frontend always expects JSON, so
-# make sure every error response -- including ones raised outside our own
-# routes (404s, oversized uploads, unexpected 500s) -- comes back as JSON
-# instead of crashing the browser's JSON.parse().
 
 
 @app.errorhandler(HTTPException)
