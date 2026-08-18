@@ -18,7 +18,7 @@ STATIC_DIR = BASE_DIR / "static"
 
 # Bump this with every deployed change -- it's shown in the UI footer so you
 # can tell at a glance which version is actually live on Render.
-APP_VERSION = "1.9.0"
+APP_VERSION = "1.9.1"
 
 ANTHROPIC_API_URL = os.environ.get(
     "ANTHROPIC_API_URL", "https://api.anthropic.com/v1/messages"
@@ -181,14 +181,15 @@ factual continuity exactly. Do not add new plot events. Do not change the \
 language the chapter is written in, and do not translate it. Keep the total \
 length within roughly ±10% of the original.
 
-Coverage matters as much as restraint: apply this pass to every paragraph \
-in the chapter, without exception. "Minimum changes" means keep each touch \
-small and purposeful -- it does NOT mean some paragraphs get skipped \
-because they already read fine. Even an already-solid paragraph should get \
-at least one small, genuine adjustment (a rhythm break, a swapped word, an \
-inversion, a livelier transition) so the whole chapter feels consistently \
-reworked, not patchy with some paragraphs polished and others left exactly \
-as the original draft wrote them.
+Coverage is a hard requirement, not a suggestion: every single paragraph \
+in the chapter must come out different from how it went in -- zero \
+exceptions, including short paragraphs, dialogue-only paragraphs, and \
+paragraphs that already read fine. "Minimum changes" controls how much a \
+given paragraph changes, never whether it changes. If a paragraph seems \
+like it needs nothing, that's a sign to look harder -- swap one word, break \
+one sentence, add one dash -- not a reason to leave it byte-for-byte as \
+written. A revised chapter that is identical, or nearly identical, to the \
+original anywhere is a failed edit.
 
 After editing, honestly self-assess the revised text against these twelve \
 checks (do not just mark everything true -- if something genuinely doesn't \
@@ -240,8 +241,11 @@ the chapter's own language explaining it
 
 INTENSITY_HINTS = {
     "light": (
-        "Make a light-touch pass: fix only the most obvious mechanical "
-        "tics, and change as little as possible otherwise."
+        "Make a light-touch pass: every paragraph still gets touched, but "
+        "keep each individual touch small -- fix only the most obvious "
+        "mechanical tics per paragraph, nothing more. \"Light\" controls "
+        "how much a paragraph changes, not whether it changes: do not skip "
+        "a paragraph just because it already reads acceptably."
     ),
     "balanced": (
         "Make a normal editorial pass: noticeable but restrained "
@@ -551,6 +555,16 @@ def api_revise():
             revised_text = parsed.get("revised_text")
             if not revised_text:
                 raise ChapterEditError("The model response was missing the revised text.")
+            if revised_text.strip() == chapter_text.strip():
+                # The model left the chapter completely untouched -- this
+                # defeats the whole point of the tool, so surface it as a
+                # clear failure instead of quietly "succeeding" with a
+                # checklist that likely claims things passed that didn't.
+                raise ChapterEditError(
+                    "The model returned the chapter with no changes at all. "
+                    "Try again, or switch to a stronger intensity (e.g. "
+                    "\"Thorough\") or a different style."
+                )
 
             checklist = _normalize_checklist(parsed.get("checklist"), chapter_text, revised_text)
             yield _sse(
