@@ -28,7 +28,7 @@ ANTHROPIC_API_URL = os.environ.get(
 ANTHROPIC_VERSION = "2023-06-01"
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
 MAX_CHARS = 60_000
-MAX_OUTPUT_TOKENS = 16_000
+MAX_OUTPUT_TOKENS = 64_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20 MB upload cap
