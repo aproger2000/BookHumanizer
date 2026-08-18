@@ -19,9 +19,7 @@ from werkzeug.exceptions import HTTPException
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-# Bump this with every deployed change -- it's shown in the UI footer so you
-# can tell at a glance which version is actually live on Render.
-APP_VERSION = "2.6.1"
+APP_VERSION = "2.6.2"
 
 ANTHROPIC_API_URL = os.environ.get(
     "ANTHROPIC_API_URL", "https://api.anthropic.com/v1/messages"
@@ -32,11 +30,11 @@ MAX_CHARS = 30_000
 MAX_OUTPUT_TOKENS = 32_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
-app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20 MB upload cap
+app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 
 
 class ChapterEditError(RuntimeError):
-    """Raised when the chapter could not be revised."""
+    pass
 
 
 CHECKLIST_ITEMS = [
@@ -174,7 +172,7 @@ def _normalize_output_formatting(text: str) -> str:
 
 
 def _add_human_noise(text: str) -> str:
-    """Обрабатывает каждый абзац отдельно, добавляя шум умеренно."""
+    """Минимальная правка: только разбивает длинные предложения."""
     paragraphs = text.split('\n\n')
     processed_paragraphs = []
     
@@ -183,7 +181,6 @@ def _add_human_noise(text: str) -> str:
             processed_paragraphs.append(para)
             continue
         
-        # Разбиваем на предложения
         sentences = re.split(r'(?<=[.!?])\s+', para)
         new_sentences = []
         
@@ -193,35 +190,12 @@ def _add_human_noise(text: str) -> str:
                 new_sentences.append(sent)
                 continue
             
-            # 1. Длинные предложения (>15 слов) — разбиваем
+            # Только разбиваем длинные предложения (>15 слов)
             if len(words) > 15:
                 mid = len(words) // 2
                 part1 = ' '.join(words[:mid])
                 part2 = ' '.join(words[mid:])
-                fillers = [" — ну, как бы — ", " — и вообще, — ", " — честно говоря, — "]
-                new_sentences.append(part1 + random.choice(fillers) + part2)
-                continue
-            
-            # 2. Если начинается с имени — меняем порядок
-            first_word = words[0].lower()
-            if first_word in ["алексей", "он", "она", "они", "анна", "масарик", "кросс", "илья"]:
-                if len(words) >= 4:
-                    new_sentences.append(
-                        words[2] + ' ' + words[3] + ', ' + 
-                        ' '.join(words[:2]) + ' ' + 
-                        ' '.join(words[4:])
-                    )
-                    continue
-            
-            # 3. Добавляем шум только в 5% случаев
-            if random.random() < 0.05:
-                noise_type = random.choice(['filler', 'break'])
-                
-                if noise_type == 'filler':
-                    fillers = ["Ну, ", "Вот, ", "И, знаешь, ", "Честно говоря, "]
-                    new_sentences.append(random.choice(fillers) + sent[0].lower() + sent[1:])
-                else:
-                    new_sentences.append(sent + '..., не так ли?')
+                new_sentences.append(part1 + ' — ' + part2)
                 continue
             
             new_sentences.append(sent)
@@ -232,7 +206,7 @@ def _add_human_noise(text: str) -> str:
 
 
 def _aggressive_rewrite(text: str) -> str:
-    """Разбивает предложения 8-12 слов, но не перегружает шумом."""
+    """Минимальная правка: только разбивает предложения 8-12 слов."""
     paragraphs = text.split('\n\n')
     new_paragraphs = []
     
@@ -250,29 +224,13 @@ def _aggressive_rewrite(text: str) -> str:
                 new_sentences.append(sent)
                 continue
             
-            # 1. Если предложение 8-12 слов — ломаем (но только если не диалог)
+            # Разбиваем предложения 8-12 слов (но не диалоги)
             if 8 <= len(words) <= 12 and not sent.startswith('"') and not sent.startswith('«'):
                 mid = len(words) // 2
                 part1 = ' '.join(words[:mid])
                 part2 = ' '.join(words[mid:])
-                insert = random.choice([
-                    ' — ну, как бы — ',
-                    ' — честно говоря, — ',
-                    ' — и вообще, — ',
-                ])
-                new_sentences.append(part1 + insert + part2)
+                new_sentences.append(part1 + ' — ' + part2)
                 continue
-            
-            # 2. Если начинается с имени — меняем порядок (редко)
-            first = words[0].lower()
-            if first in ["он", "она", "они", "алексей", "анна", "масарик", "кросс", "илья"]:
-                if len(words) >= 4 and random.random() < 0.3:
-                    new_sentences.append(
-                        words[2] + ' ' + words[3] + ', ' + 
-                        ' '.join(words[:2]) + ' ' + 
-                        ' '.join(words[4:])
-                    )
-                    continue
             
             new_sentences.append(sent)
         
@@ -482,7 +440,6 @@ def api_revise():
                 full_text = cumulative_text
                 yield _sse("progress", {"chars": len(full_text), "estimated_total": estimated_total_chars})
                 
-                # Отправляем ping каждые 15 секунд, чтобы Gunicorn не убил воркер
                 if time.time() - last_ping > 15:
                     yield _sse("ping", {})
                     last_ping = time.time()
