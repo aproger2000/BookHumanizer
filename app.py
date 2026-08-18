@@ -203,74 +203,115 @@ def _normalize_output_formatting(text: str) -> str:
 
 import random
 
+import random
+
 def _add_human_noise(text: str) -> str:
-    """Финишная правка: принудительно добавляет 'человеческий шум'
-    в виде вводных слов и изменения структуры, чтобы гарантировать
-    прохождение детектора."""
+    """Агрессивная финишная правка: ломает оставшиеся AI-паттерны."""
     lines = text.splitlines()
-    for i, line in enumerate(lines):
-        # Проверяем, что строка не пустая и достаточно короткая
-        if len(line) < 30 and i > 0 and len(line) > 2:
-            # Проверяем, что строка не начинается с кавычек или тире
-            stripped = line.strip()
-            if not stripped or stripped[0] in ('"', '«', '—', '-', '*', '•'):
+    new_lines = []
+    
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            new_lines.append(line)
+            continue
+            
+        # Пропускаем диалоги и служебные строки
+        if stripped[0] in ('"', '«', '—', '-', '*', '•'):
+            new_lines.append(line)
+            continue
+            
+        words = stripped.split()
+        if not words:
+            new_lines.append(line)
+            continue
+            
+        # Если 8-12 слов — ломаем через вставку
+        if 8 <= len(words) <= 12:
+            mid = len(words) // 2
+            first_part = ' '.join(words[:mid])
+            second_part = ' '.join(words[mid:])
+            fillers = [" — ну, ", " — так, ", " — честно говоря, ", " — вообще-то, "]
+            new_lines.append(first_part + random.choice(fillers) + second_part)
+            continue
+            
+        # Если начинается с имени — меняем порядок
+        first_word = words[0].lower()
+        if first_word in ["алексей", "он", "она", "они", "анна", "масарик", "кросс"]:
+            if len(words) >= 4:
+                new_lines.append(words[2] + ' ' + words[3] + ', ' + ' '.join(words[:2]) + ' ' + ' '.join(words[4:]))
                 continue
-
-            # Добавляем вводное слово с вероятностью 40%
-            if random.random() < 0.4:
-                insert_words = ["Ну, ", "Вот, ", "Слушай, ", "Да, ", "И всё же, ", "Кстати, "]
-                # Берём первую букву с маленькой буквы, если это не имя собственное
-                first_char = stripped[0]
-                rest = stripped[1:]
-                new_line = random.choice(insert_words) + first_char.lower() + rest
-                lines[i] = new_line
-
-    return "\n".join(lines)
+                
+        # Добавляем междометие с вероятностью 35%
+        if random.random() < 0.35:
+            fillers = ["Ну, ", "Вот, ", "И, знаешь, ", "Честно говоря, ", "Так вот, "]
+            first_char = stripped[0]
+            rest = stripped[1:]
+            new_lines.append(random.choice(fillers) + first_char.lower() + rest)
+        else:
+            new_lines.append(line)
+    
+    return '\n'.join(new_lines)
 
 
 def _normalize_checklist(model_checklist, chapter_text: str, revised_text: str) -> list:
-    """Merge the model's self-reported checklist with one item we compute
-    exactly ourselves (length ratio), always in a fixed, known order."""
+    """Собирает чек-лист из ответа модели, добавляя вычисляемый пункт о длине."""
     items = []
-    for key, label in CHECKLIST_ITEMS:
+    # Новые ключи, которые должна вернуть модель
+    expected_keys = [
+        "zero_unchanged_sentences",
+        "zero_subject_start",
+        "sentence_length_sabotage",
+        "word_replacement_20_percent",
+        "human_noise_added",
+        "wrong_punctuation",
+        "broken_logical_transitions",
+        "plot_preserved",
+    ]
+    
+    # Сопоставление ключей с их отображаемыми названиями
+    labels = {
+        "zero_unchanged_sentences": "Каждое предложение было изменено",
+        "zero_subject_start": "Ни одно предложение не начинается с имени/местоимения",
+        "sentence_length_sabotage": "Нет предложений длиной 8-12 слов",
+        "word_replacement_20_percent": "Заменено более 20% слов",
+        "human_noise_added": "Добавлены вводные слова в 50% предложений",
+        "wrong_punctuation": "Использованы тире, многоточия, вопросительные знаки",
+        "broken_logical_transitions": "Нарушены логические переходы",
+        "plot_preserved": "Сюжет и герои сохранены",
+    }
+    
+    for key in expected_keys:
         entry = model_checklist.get(key) if isinstance(model_checklist, dict) else None
         if isinstance(entry, dict) and "passed" in entry:
-            items.append(
-                {
-                    "id": key,
-                    "label": label,
-                    "passed": bool(entry.get("passed")),
-                    "note": str(entry.get("note", ""))[:400],
-                    "source": "model",
-                }
-            )
+            items.append({
+                "id": key,
+                "label": labels.get(key, key),
+                "passed": bool(entry.get("passed")),
+                "note": str(entry.get("note", ""))[:400],
+                "source": "model",
+            })
         else:
-            items.append(
-                {
-                    "id": key,
-                    "label": label,
-                    "passed": None,
-                    "note": "Модель не вернула оценку по этому пункту.",
-                    "source": "model",
-                }
-            )
+            items.append({
+                "id": key,
+                "label": labels.get(key, key),
+                "passed": None,
+                "note": "Модель не вернула оценку по этому пункту.",
+                "source": "model",
+            })
 
+    # Вычисляемый пункт (не зависит от модели)
     original_len = len(chapter_text)
     revised_len = len(revised_text)
     ratio = (revised_len / original_len) if original_len else 1.0
     length_ok = 0.9 <= ratio <= 1.1
-    items.append(
-        {
-            "id": "length_within_10_percent",
-            "label": "Объём текста изменился не более чем на ±10% от оригинала",
-            "passed": length_ok,
-            "note": (
-                f"Было {original_len} симв., стало {revised_len} "
-                f"({ratio * 100:.0f}% от оригинала)."
-            ),
-            "source": "computed",
-        }
-    )
+    items.append({
+        "id": "length_within_10_percent",
+        "label": "Объём текста изменился не более чем на ±10% от оригинала",
+        "passed": length_ok,
+        "note": f"Было {original_len} симв., стало {revised_len} ({ratio * 100:.0f}% от оригинала).",
+        "source": "computed",
+    })
     return items
 
 
