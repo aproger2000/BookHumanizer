@@ -18,14 +18,24 @@ STATIC_DIR = BASE_DIR / "static"
 
 # Bump this with every deployed change -- it's shown in the UI footer so you
 # can tell at a glance which version is actually live on Render.
-APP_VERSION = "1.7.0"
+APP_VERSION = "1.8.0"
 
 ANTHROPIC_API_URL = os.environ.get(
     "ANTHROPIC_API_URL", "https://api.anthropic.com/v1/messages"
 )
 ANTHROPIC_VERSION = "2023-06-01"
-ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
+# claude-sonnet-4-5-20250929 (the previous default) is now a legacy model;
+# claude-sonnet-5 is the current model and supports up to 128k output tokens
+# on the standard synchronous API, no beta header required.
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
 MAX_CHARS = 60_000
+# revised_text alone can run close to the size of the input chapter (the
+# prompt targets ~length parity), plus the summary/changes/checklist on top
+# -- for a 60k-character chapter that's tens of thousands of output tokens.
+# The old value here (8192) was too small once the checklist was added and
+# caused the model's JSON to get cut off mid-response ("The model did not
+# return valid JSON."). 64k leaves generous headroom under the 128k cap.
+MAX_OUTPUT_TOKENS = 64_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20 MB upload cap
@@ -351,10 +361,13 @@ def _normalize_checklist(model_checklist, chapter_text: str, revised_text: str) 
     return items
 
 
-def _parse_anthropic_text_stream(resp):
+def _parse_anthropic_text_stream(resp, state):
     """Iterate an Anthropic streaming response, yielding the cumulative
     generated text after every text delta. Raises ChapterEditError if the
-    stream itself reports an error event."""
+    stream itself reports an error event. Writes the final stop_reason (if
+    any) into state['stop_reason'] so the caller can tell a truncated
+    response (stop_reason == "max_tokens") apart from a clean one -- that's
+    a much more useful error than a bare JSON-parse failure."""
     buffer = []
     for raw_line in resp.iter_lines(decode_unicode=True):
         if not raw_line or not raw_line.startswith("data:"):
@@ -373,6 +386,10 @@ def _parse_anthropic_text_stream(resp):
             if delta.get("type") == "text_delta":
                 buffer.append(delta.get("text", ""))
                 yield "".join(buffer)
+        elif event_type == "message_delta":
+            stop_reason = event.get("delta", {}).get("stop_reason")
+            if stop_reason:
+                state["stop_reason"] = stop_reason
         elif event_type == "error":
             message = event.get("error", {}).get("message", "unknown error")
             raise ChapterEditError(f"Anthropic API stream error: {message}")
@@ -444,7 +461,7 @@ def api_revise():
     style_hint = STYLE_PRESETS.get(style, "")
     payload = {
         "model": ANTHROPIC_MODEL,
-        "max_tokens": 8192,
+        "max_tokens": MAX_OUTPUT_TOKENS,
         "system": SYSTEM_PROMPT,
         "stream": True,
         "messages": [
@@ -497,12 +514,21 @@ def api_revise():
 
     def generate():
         full_text = ""
+        stream_state = {}
         try:
-            for cumulative_text in _parse_anthropic_text_stream(anthropic_resp):
+            for cumulative_text in _parse_anthropic_text_stream(anthropic_resp, stream_state):
                 full_text = cumulative_text
                 yield _sse(
                     "progress",
                     {"chars": len(full_text), "estimated_total": estimated_total_chars},
+                )
+
+            if stream_state.get("stop_reason") == "max_tokens":
+                raise ChapterEditError(
+                    "The model's response was cut off because it ran out of "
+                    "output space for this chapter. Try a shorter chapter, a "
+                    "lighter intensity, or split the chapter into smaller "
+                    "pieces."
                 )
 
             parsed = _extract_json(full_text)
