@@ -266,6 +266,14 @@ def _add_human_noise(text: str) -> str:
 
 
 def _aggressive_rewrite(text: str) -> str:
+
+    # Если текст слишком длинный, обрабатываем только первые 20 000 символов
+    # чтобы не замедлять ответ
+    if len(text) > 20000:
+        head = text[:20000]
+        tail = text[20000:]
+        return _aggressive_rewrite(head) + tail
+        
     """Принудительно ломает идеальную структуру предложений."""
     sentences = re.split(r'(?<=[.!?])\s+', text)
     new_sentences = []
@@ -546,6 +554,11 @@ def api_revise():
             for cumulative_text in _parse_anthropic_text_stream(anthropic_resp, stream_state):
                 full_text = cumulative_text
                 yield _sse("progress", {"chars": len(full_text), "estimated_total": estimated_total_chars})
+
+            # Отправляем ping каждые 15 секунд, чтобы Gunicorn не убил воркер
+            if time.time() - last_ping > 15:
+                yield _sse("ping", {})
+                last_ping = time.time()
 
             if stream_state.get("stop_reason") == "max_tokens":
                 raise ChapterEditError(
