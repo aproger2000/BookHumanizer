@@ -18,7 +18,7 @@ STATIC_DIR = BASE_DIR / "static"
 
 # Bump this with every deployed change -- it's shown in the UI footer so you
 # can tell at a glance which version is actually live on Render.
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.7.0"
 
 ANTHROPIC_API_URL = os.environ.get(
     "ANTHROPIC_API_URL", "https://api.anthropic.com/v1/messages"
@@ -72,8 +72,9 @@ CHECKLIST_ITEMS = [
     ),
     (
         "uneven_rhythm",
-        "Ритм неровный: чередуются короткие и длинные предложения, "
-        "встречаются тире и многоточия",
+        "Ритм заметно неровный: длинные и короткие предложения ощутимо "
+        "чередуются, нет длинных цепочек фраз одинаковой длины, встречаются "
+        "тире и многоточия",
     ),
     (
         "paragraph_openings",
@@ -134,8 +135,11 @@ surface a sensory detail or reaction that's implied but left flat in the \
 draft (a sound, a smell, a flicker of feeling) -- but stay anchored to what \
 the scene already supports. Do not invent new plot-relevant experiences, \
 opinions, or events that aren't implied by the original.
-- Rhythm: alternate short, punchy sentences with longer, flowing ones. Use \
-dashes, colons, and ellipses where a human writer would reach for them -- \
+- Rhythm: make sentence length swing noticeably -- a longer, flowing \
+sentence, then something short and blunt, maybe another short one, before \
+flowing out again. Don't let three or more sentences in a row land at \
+roughly the same length and shape; break that pattern up. Use dashes, \
+colons, and ellipses where a human writer would reach for them -- \
 including, occasionally, a deliberately unfinished thought.
 - Paragraph shape: don't open every paragraph with the grammatical subject \
 -- lead with a setting, a gesture, a participial phrase sometimes. Let \
@@ -511,6 +515,11 @@ def api_revise():
                 "done",
                 {
                     "revised_text": revised_text,
+                    # Sent back so the frontend can show/diff the real
+                    # original even when the chapter came from an uploaded
+                    # file (the browser never saw the extracted text
+                    # otherwise).
+                    "original_text": chapter_text,
                     "summary": parsed.get("summary", ""),
                     "changes": parsed.get("changes", []),
                     "checklist": checklist,

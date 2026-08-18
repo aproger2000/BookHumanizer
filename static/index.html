@@ -186,6 +186,28 @@
     background: #fffdfa;
     font-size: 1rem;
   }
+  mark.diff-mark {
+    background: #fff1a8;
+    color: inherit;
+    padding: 0 1px;
+    border-radius: 3px;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+  }
+  .result-text.no-highlight mark.diff-mark {
+    background: none;
+    padding: 0;
+    border-radius: 0;
+  }
+  .highlight-toggle {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 0.82rem; color: var(--muted);
+  }
+  .highlight-toggle input { accent-color: var(--accent); }
+  .highlight-swatch {
+    display: inline-block; width: 12px; height: 12px; border-radius: 3px;
+    background: #fff1a8; border: 1px solid #e3cf6e; vertical-align: -1px;
+  }
 
   .notes h3, .checklist-panel h3 { margin: 0 0 10px; font-size: 1rem; }
   .notes ul { margin: 0; padding-left: 20px; color: var(--muted); line-height: 1.6; }
@@ -287,6 +309,11 @@
       <div class="actions">
         <button class="btn secondary" id="copyBtn" type="button">Скопировать</button>
         <button class="btn secondary" id="downloadBtn" type="button">Скачать .txt</button>
+        <label class="highlight-toggle">
+          <input type="checkbox" id="highlightToggle" checked />
+          <span class="highlight-swatch"></span>
+          Подсветка правок
+        </label>
       </div>
     </div>
   </section>
@@ -331,6 +358,7 @@ const summaryText = document.getElementById('summaryText');
 const changesList = document.getElementById('changesList');
 const copyBtn = document.getElementById('copyBtn');
 const downloadBtn = document.getElementById('downloadBtn');
+const highlightToggle = document.getElementById('highlightToggle');
 
 const progressWrap = document.getElementById('progressWrap');
 const progressFill = document.getElementById('progressFill');
@@ -346,6 +374,112 @@ let lastRevised = '';
 let checklistLabels = {}; // id -> label, filled in from /api/health
 let progressTimer = null;
 let progressStart = 0;
+
+// ---- Word-level diff, used to highlight edited spots in the revised panel.
+// Paragraphs are diffed independently (the editor is instructed to keep
+// paragraph breaks and count exactly, so this alignment is normally
+// reliable) which keeps each LCS comparison small and fast even for a full
+// chapter, instead of running one huge O(n*m) diff over the whole text.
+
+function tokenize(str) {
+  return str.split(/(\s+)/).filter((t) => t.length > 0);
+}
+
+function diffTokens(oldTokens, newTokens) {
+  const m = oldTokens.length;
+  const n = newTokens.length;
+
+  // Guard against a pathological single block (e.g. one giant paragraph)
+  // making the O(n*m) table too large for the browser to hold/compute.
+  if (m * n > 4_000_000) {
+    return newTokens.map((t) => ({ text: t, changed: true }));
+  }
+
+  const dp = new Array(m + 1);
+  for (let i = 0; i <= m; i++) dp[i] = new Int32Array(n + 1);
+  for (let i = m - 1; i >= 0; i--) {
+    for (let j = n - 1; j >= 0; j--) {
+      dp[i][j] = oldTokens[i] === newTokens[j]
+        ? dp[i + 1][j + 1] + 1
+        : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+
+  const result = [];
+  let i = 0, j = 0;
+  while (i < m && j < n) {
+    if (oldTokens[i] === newTokens[j]) {
+      result.push({ text: newTokens[j], changed: false });
+      i++; j++;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      i++; // token removed from the original -- nothing to show
+    } else {
+      result.push({ text: newTokens[j], changed: true });
+      j++;
+    }
+  }
+  while (j < n) {
+    result.push({ text: newTokens[j], changed: true });
+    j++;
+  }
+  return result;
+}
+
+function diffParagraphs(originalText, revisedText) {
+  let sepRegex = /\n{2,}/;
+  let sepText = '\n\n';
+  let originalParts = originalText.split(sepRegex);
+  let revisedParts = revisedText.split(sepRegex);
+
+  if (originalParts.length !== revisedParts.length) {
+    sepRegex = /\n/;
+    sepText = '\n';
+    originalParts = originalText.split(sepRegex);
+    revisedParts = revisedText.split(sepRegex);
+  }
+
+  if (originalParts.length !== revisedParts.length) {
+    // Couldn't align paragraphs/lines 1:1 -- show the revised text plain
+    // rather than risk a misleading diff.
+    return tokenize(revisedText).map((t) => ({ text: t, changed: false }));
+  }
+
+  const out = [];
+  for (let p = 0; p < revisedParts.length; p++) {
+    const oldTokens = tokenize(originalParts[p]);
+    const newTokens = tokenize(revisedParts[p]);
+    out.push(...diffTokens(oldTokens, newTokens));
+    if (p < revisedParts.length - 1) out.push({ text: sepText, changed: false });
+  }
+  return out;
+}
+
+function mergeAdjacentWhitespace(tokens) {
+  for (let i = 1; i < tokens.length - 1; i++) {
+    const t = tokens[i];
+    if (!t.changed && t.text.trim() === '' && tokens[i - 1].changed && tokens[i + 1].changed) {
+      t.changed = true;
+    }
+  }
+  return tokens;
+}
+
+function renderDiffHighlighted(container, originalText, revisedText) {
+  const tokens = mergeAdjacentWhitespace(diffParagraphs(originalText, revisedText));
+  container.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  tokens.forEach((tok) => {
+    if (tok.changed && tok.text.trim() !== '') {
+      const mark = document.createElement('mark');
+      mark.className = 'diff-mark';
+      mark.textContent = tok.text;
+      frag.appendChild(mark);
+    } else {
+      frag.appendChild(document.createTextNode(tok.text));
+    }
+  });
+  container.appendChild(frag);
+}
 
 const STAGE_LABELS = [
   { upto: 15, label: 'Читаю главу…' },
@@ -403,6 +537,10 @@ clearBtn.addEventListener('click', () => {
   progressWrap.classList.remove('show');
   statusEl.textContent = '';
   statusEl.className = 'status';
+});
+
+highlightToggle.addEventListener('change', () => {
+  revisedTextEl.classList.toggle('no-highlight', !highlightToggle.checked);
 });
 
 async function streamRevise(formData) {
@@ -527,9 +665,11 @@ submitBtn.addEventListener('click', async () => {
   try {
     const data = await streamRevise(formData);
 
-    originalTextEl.textContent = text || '(из загруженного файла)';
-    revisedTextEl.textContent = data.revised_text;
+    const originalForDiff = data.original_text || text || '';
+    originalTextEl.textContent = originalForDiff || '(из загруженного файла)';
     lastRevised = data.revised_text;
+    renderDiffHighlighted(revisedTextEl, originalForDiff, data.revised_text);
+    revisedTextEl.classList.toggle('no-highlight', !highlightToggle.checked);
     resultsEl.classList.add('show');
 
     if (data.summary || (data.changes && data.changes.length)) {
