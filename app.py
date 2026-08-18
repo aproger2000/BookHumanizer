@@ -18,7 +18,7 @@ STATIC_DIR = BASE_DIR / "static"
 
 # Bump this with every deployed change -- it's shown in the UI footer so you
 # can tell at a glance which version is actually live on Render.
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.6.0"
 
 ANTHROPIC_API_URL = os.environ.get(
     "ANTHROPIC_API_URL", "https://api.anthropic.com/v1/messages"
@@ -227,6 +227,35 @@ INTENSITY_HINTS = {
     ),
 }
 
+# Optional voice/register presets, layered on top of the craft moves above.
+# "dynamic_scifi" nudges the telling toward the brisk, cinematic register
+# common to Russian action-sci-fi (writers like Vasily Golovachev and Sergei
+# Lukyanenko are a useful reference point) -- pace, tone, dialogue rhythm.
+# General prose style isn't copyrightable and this only ever touches the
+# user's own chapter text, but the instruction explicitly forbids borrowing
+# either author's actual invented terminology, characters, or wording, so
+# this stays a register shift and never turns into reproducing or
+# imitating anyone's specific protected fictional universe.
+STYLE_PRESETS = {
+    "neutral": "",
+    "dynamic_scifi": (
+        "\n\nVoice preset -- in addition to everything above, lean the "
+        "telling toward a brisk, cinematic register typical of contemporary "
+        "Russian action science fiction (think of the general pace and tone "
+        "of writers like Vasily Golovachev and Sergei Lukyanenko, blended): "
+        "quick, punchy sentences during action or confrontation; short, "
+        "sharp, often wry dialogue; a narrator who isn't afraid of a dry "
+        "aside or a genre-appropriate philosophical beat; confident, driving "
+        "pacing that keeps tension up. This is a register shift, not new "
+        "content -- keep every plot beat, fact, and character choice exactly "
+        "as in the original chapter; only how it's told changes. Do NOT "
+        "borrow either author's specific invented terminology, characters, "
+        "settings, or any actual wording from their books -- take only the "
+        "general feel of pace, tone, and register, applied to this chapter's "
+        "own story."
+    ),
+}
+
 
 def extract_text_from_upload(file_storage) -> str:
     filename = (file_storage.filename or "").lower()
@@ -367,6 +396,7 @@ def api_revise():
     file_storage = request.files.get("file")
     text = request.form.get("text", "")
     intensity = request.form.get("intensity", "balanced")
+    style = request.form.get("style", "neutral")
 
     if file_storage and file_storage.filename:
         try:
@@ -407,6 +437,7 @@ def api_revise():
         )
 
     hint = INTENSITY_HINTS.get(intensity, INTENSITY_HINTS["balanced"])
+    style_hint = STYLE_PRESETS.get(style, "")
     payload = {
         "model": ANTHROPIC_MODEL,
         "max_tokens": 8192,
@@ -415,7 +446,7 @@ def api_revise():
         "messages": [
             {
                 "role": "user",
-                "content": f"{hint}\n\n---\nCHAPTER TEXT:\n---\n{chapter_text}",
+                "content": f"{hint}{style_hint}\n\n---\nCHAPTER TEXT:\n---\n{chapter_text}",
             }
         ],
     }

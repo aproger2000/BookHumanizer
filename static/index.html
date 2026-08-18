@@ -249,6 +249,13 @@
           <option value="thorough">Глубокая</option>
         </select>
       </div>
+      <div class="control-group">
+        <label for="style">Стиль:</label>
+        <select id="style">
+          <option value="neutral" selected>Нейтральный</option>
+          <option value="dynamic_scifi">Динамичная фантастика (в духе Головачёва / Лукьяненко)</option>
+        </select>
+      </div>
     </div>
     <textarea id="text" placeholder="Вставьте текст главы сюда..."></textarea>
     <div class="actions">
@@ -312,6 +319,7 @@
 const fileInput = document.getElementById('file');
 const textArea = document.getElementById('text');
 const intensitySelect = document.getElementById('intensity');
+const styleSelect = document.getElementById('style');
 const submitBtn = document.getElementById('submit');
 const clearBtn = document.getElementById('clear');
 const statusEl = document.getElementById('status');
@@ -506,6 +514,7 @@ submitBtn.addEventListener('click', async () => {
     formData.append('text', text);
   }
   formData.append('intensity', intensitySelect.value);
+  formData.append('style', styleSelect.value);
 
   submitBtn.disabled = true;
   statusEl.textContent = '';
