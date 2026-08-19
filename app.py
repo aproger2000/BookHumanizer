@@ -19,7 +19,7 @@ from werkzeug.exceptions import HTTPException
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "2.6.2"
+APP_VERSION = "2.4.0"
 
 ANTHROPIC_API_URL = os.environ.get(
     "ANTHROPIC_API_URL", "https://api.anthropic.com/v1/messages"
@@ -51,7 +51,7 @@ CHECKLIST_ITEMS = [
 SYSTEM_PROMPT = """You are a statistical text transformer, not a literary editor. Your ONLY goal is to rewrite AI-generated text so that it scores as HUMAN on AI detectors (like Yandex Neurodetector). You are ALLOWED to make the text slightly worse, rougher, or less polished — that is the point.
 
 **CRITICAL RULE: CHANGE EVERY SENTENCE. DO NOT leave any sentence unchanged. DO NOT make "minimum changes." Aggressively rewrite every single sentence.**
-**CRITICAL:** Preserve paragraph breaks. Do not merge paragraphs into a single block. Keep the same number of paragraphs as the original.
+**CRITICAL:** Preserve paragraph breaks. Do not merge paragraphs into a single block.
 
 **Follow these MANDATORY rules for EVERY sentence:**
 
@@ -71,12 +71,6 @@ SYSTEM_PROMPT = """You are a statistical text transformer, not a literary editor
 **EXAMPLE of a good rewrite (Russian):**
 Original: "Он не вздрогнул. Он узнал голос сразу, а ещё его старый научный руководитель, профессор Масарик, всегда появлялся бесшумно, как призрак плохой научной гипотезы."
 Rewrite: "Не вздрогнул. Причины две: голос он узнал сразу, да и профессор Масарик - его старый научный руководитель - всегда возникал бесшумно. Как призрак, ей-богу. Неудачной гипотезы."
-
-**CRITICAL:**
-- Use interjections ("well," "you know," "actually") in AT MOST 15% of sentences.
-- Never use two interjections in the same sentence.
-- Vary the types of "noise": use pauses, dashes, and breaks instead of always using filler words.
-- Do NOT start more than 20% of sentences with "Ну" or "И, знаешь".
 
 **Respond with a single JSON object and nothing else, matching this schema:**
 {
@@ -100,18 +94,7 @@ STYLE_PRESETS = {
     "dynamic_scifi": (
         "\n\nVoice preset -- in addition to everything above, lean the "
         "telling toward a brisk, cinematic register typical of contemporary "
-        "Russian action science fiction (think of the general pace and tone "
-        "of writers like Vasily Golovachev and Sergei Lukyanenko, blended): "
-        "quick, punchy sentences during action or confrontation; short, "
-        "sharp, often wry dialogue; a narrator who isn't afraid of a dry "
-        "aside or a genre-appropriate philosophical beat; confident, driving "
-        "pacing that keeps tension up. This is a register shift, not new "
-        "content -- keep every plot beat, fact, and character choice exactly "
-        "as in the original chapter; only how it's told changes. Do NOT "
-        "borrow either author's specific invented terminology, characters, "
-        "settings, or any actual wording from their books -- take only the "
-        "general feel of pace, tone, and register, applied to this chapter's "
-        "own story."
+        "Russian action science fiction..."
     ),
 }
 
@@ -125,20 +108,13 @@ def extract_text_from_upload(file_storage) -> str:
 
     if filename.endswith(".docx"):
         from docx import Document
-
         try:
             doc = Document(io.BytesIO(raw))
         except Exception as exc:
-            raise ValueError(
-                "Could not read this .docx file -- it may be corrupted or "
-                "not a real Word file."
-            ) from exc
+            raise ValueError("Could not read this .docx file") from exc
         return "\n\n".join(p.text for p in doc.paragraphs)
 
-    raise ValueError(
-        "Unsupported file type. Please upload a .txt, .md, or .docx file, "
-        "or paste the chapter text directly."
-    )
+    raise ValueError("Unsupported file type. Please upload a .txt, .md, or .docx file.")
 
 
 def _sse(event_type: str, data: dict) -> str:
@@ -172,71 +148,86 @@ def _normalize_output_formatting(text: str) -> str:
 
 
 def _add_human_noise(text: str) -> str:
-    """Минимальная правка: только разбивает длинные предложения."""
-    paragraphs = text.split('\n\n')
-    processed_paragraphs = []
+    """Агрессивная финишная правка: ломает оставшиеся AI-паттерны."""
+    lines = text.splitlines()
+    new_lines = []
     
-    for para in paragraphs:
-        if not para.strip():
-            processed_paragraphs.append(para)
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            new_lines.append(line)
             continue
         
-        sentences = re.split(r'(?<=[.!?])\s+', para)
-        new_sentences = []
+        # Пропускаем диалоги и служебные строки
+        if stripped and stripped[0] in ('"', '«', '—', '-', '*', '•'):
+            new_lines.append(line)
+            continue
         
-        for sent in sentences:
-            words = sent.split()
-            if not words:
-                new_sentences.append(sent)
-                continue
+        words = stripped.split()
+        if not words:
+            new_lines.append(line)
+            continue
+        
+        # 1. Длинные предложения (>15 слов) — разбиваем с разными методами
+        if len(words) > 15:
+            method = random.choice(['split', 'dash', 'question'])
             
-            # Только разбиваем длинные предложения (>15 слов)
-            if len(words) > 15:
+            if method == 'split':
                 mid = len(words) // 2
                 part1 = ' '.join(words[:mid])
                 part2 = ' '.join(words[mid:])
-                new_sentences.append(part1 + ' — ' + part2)
-                continue
-            
-            new_sentences.append(sent)
-        
-        processed_paragraphs.append(' '.join(new_sentences))
-    
-    return '\n\n'.join(processed_paragraphs)
-
-
-def _aggressive_rewrite(text: str) -> str:
-    """Минимальная правка: только разбивает предложения 8-12 слов."""
-    paragraphs = text.split('\n\n')
-    new_paragraphs = []
-    
-    for para in paragraphs:
-        if not para.strip():
-            new_paragraphs.append(para)
+                fillers = [" — ну, как бы — ", " — и вообще, — ", " — честно говоря, — "]
+                new_lines.append(part1 + random.choice(fillers) + part2)
+            elif method == 'dash':
+                pos = random.randint(3, len(words)-2)
+                new_lines.append(' '.join(words[:pos]) + ' — и это, знаете ли — ' + ' '.join(words[pos:]))
+            else:  # question
+                new_lines.append(' '.join(words) + ', не так ли?')
             continue
         
-        sentences = re.split(r'(?<=[.!?])\s+', para)
-        new_sentences = []
-        
-        for sent in sentences:
-            words = sent.split()
-            if not words:
-                new_sentences.append(sent)
+        # 2. Если начинается с имени — меняем порядок
+        first_word = words[0].lower()
+        if first_word in ["алексей", "он", "она", "они", "анна", "масарик", "кросс", "илья"]:
+            if len(words) >= 4:
+                new_lines.append(words[2] + ' ' + words[3] + ', ' + ' '.join(words[:2]) + ' ' + ' '.join(words[4:]))
                 continue
-            
-            # Разбиваем предложения 8-12 слов (но не диалоги)
-            if 8 <= len(words) <= 12 and not sent.startswith('"') and not sent.startswith('«'):
-                mid = len(words) // 2
-                part1 = ' '.join(words[:mid])
-                part2 = ' '.join(words[mid:])
-                new_sentences.append(part1 + ' — ' + part2)
-                continue
-            
-            new_sentences.append(sent)
         
-        new_paragraphs.append(' '.join(new_sentences))
+        # 3. Добавляем шум только в 12% случаев
+        if random.random() < 0.12:
+            noise_type = random.choice(['filler', 'break', 'interjection'])
+            
+            if noise_type == 'filler':
+                fillers = [
+                    "Ну, ", "Вот, ", "И, знаешь, ", "Честно говоря, ",
+                    "Так вот, ", "Кстати, ", "Слушай, ", "А вообще, "
+                ]
+                if random.random() < 0.3 and len(words) > 4:
+                    mid = len(words) // 2
+                    new_lines.append(' '.join(words[:mid]) + ', ' + random.choice(fillers).lower().strip() + ' ' + ' '.join(words[mid:]))
+                else:
+                    new_lines.append(random.choice(fillers) + stripped[0].lower() + stripped[1:])
+            elif noise_type == 'break':
+                if len(words) > 4:
+                    cut = random.randint(2, len(words)-1)
+                    new_lines.append(' '.join(words[:cut]) + '... ну, вы поняли.')
+                else:
+                    new_lines.append(line)
+            else:  # interjection
+                interjections = ["Чёрт!", "Вот это да!", "Ну и ну!", "Боже!", "Ого!"]
+                new_lines.append(random.choice(interjections) + ' ' + stripped[0].lower() + stripped[1:])
+        else:
+            new_lines.append(line)
     
-    return '\n\n'.join(new_paragraphs)
+    # Финальная чистка: удаляем повторяющиеся вводные слова подряд
+    final_lines = []
+    for line in new_lines:
+        line = re.sub(r'(Ну,)\s*(Ну,)\s*', r'\1 ', line)
+        line = re.sub(r'(И, знаешь,)\s*(И, знаешь,)\s*', r'\1 ', line)
+        line = re.sub(r'(Вообще,)\s*(Вообще,)\s*', r'\1 ', line)
+        line = re.sub(r'(Кстати,)\s*(Кстати,)\s*', r'\1 ', line)
+        final_lines.append(line)
+    
+    return '\n'.join(final_lines)
 
 
 def _normalize_checklist(model_checklist, chapter_text: str, revised_text: str) -> list:
@@ -465,7 +456,6 @@ def api_revise():
 
             revised_text = _normalize_output_formatting(revised_text)
             revised_text = _add_human_noise(revised_text)
-            revised_text = _aggressive_rewrite(revised_text)
 
             checklist = _normalize_checklist(parsed.get("checklist"), chapter_text, revised_text)
             yield _sse(
