@@ -3,15 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chapter Editor v3.0.2</title>
+    <title>Chapter Editor v3.1.0</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             background: #f0f4fa;
             color: #1a2634;
@@ -21,16 +16,14 @@
             flex-direction: column;
             padding: 24px;
         }
-
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             width: 100%;
             flex: 1;
             display: flex;
             flex-direction: column;
         }
-
         header {
             display: flex;
             justify-content: space-between;
@@ -40,20 +33,17 @@
             flex-wrap: wrap;
             gap: 12px;
         }
-
         .logo h1 {
             font-size: 22px;
             font-weight: 600;
             color: #1a2634;
             letter-spacing: -0.3px;
         }
-
         .logo .sub {
             font-size: 13px;
             color: #6b7f94;
             font-weight: 400;
         }
-
         .version-badge {
             background: #e4eaf2;
             padding: 6px 14px;
@@ -62,22 +52,17 @@
             color: #3d546a;
             font-weight: 500;
         }
-
         .main-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr 1.5fr;
             gap: 24px;
             margin-top: 28px;
             flex: 1;
         }
-
         @media (max-width: 768px) {
-            .main-grid {
-                grid-template-columns: 1fr;
-            }
+            .main-grid { grid-template-columns: 1fr; }
             body { padding: 16px; }
         }
-
         .panel {
             background: #ffffff;
             border-radius: 16px;
@@ -87,21 +72,18 @@
             flex-direction: column;
             box-shadow: 0 2px 8px rgba(0,0,0,0.04);
         }
-
         .panel-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 16px;
         }
-
         .panel-header h2 {
             font-size: 15px;
             font-weight: 500;
             color: #2c3e50;
             letter-spacing: 0.3px;
         }
-
         .panel-header .count {
             font-size: 12px;
             color: #6b7f94;
@@ -109,11 +91,10 @@
             padding: 4px 12px;
             border-radius: 12px;
         }
-
         textarea {
             width: 100%;
             flex: 1;
-            min-height: 300px;
+            min-height: 400px;
             background: #f7fafc;
             border: 1px solid #d0d9e4;
             border-radius: 12px;
@@ -125,21 +106,13 @@
             resize: vertical;
             transition: border-color 0.2s;
         }
-
         textarea:focus {
             outline: none;
             border-color: #6c8fc7;
         }
-
         textarea::placeholder {
             color: #8fa2b8;
         }
-
-        textarea:disabled {
-            background: #eef3f8;
-            color: #6b7f94;
-        }
-
         .controls {
             display: flex;
             gap: 12px;
@@ -148,7 +121,6 @@
             padding-top: 16px;
             border-top: 1px solid #e4eaf2;
         }
-
         .controls select {
             background: #f7fafc;
             border: 1px solid #d0d9e4;
@@ -161,12 +133,6 @@
             flex: 1;
             min-width: 120px;
         }
-
-        .controls select:focus {
-            outline: none;
-            border-color: #6c8fc7;
-        }
-
         .btn {
             padding: 10px 28px;
             border: none;
@@ -181,34 +147,22 @@
             gap: 8px;
             white-space: nowrap;
         }
-
         .btn-primary {
             background: #2c3e50;
             color: #ffffff;
         }
-
         .btn-primary:hover {
             background: #1a2a3a;
             transform: translateY(-1px);
             box-shadow: 0 4px 16px rgba(44, 62, 80, 0.2);
         }
-
-        .btn-primary:disabled {
-            background: #8fa2b8;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-
         .btn-secondary {
             background: #e4eaf2;
             color: #2c3e50;
         }
-
         .btn-secondary:hover {
             background: #d0d9e4;
         }
-
         .progress-container {
             margin-top: 12px;
             background: #eef3f8;
@@ -218,11 +172,7 @@
             opacity: 0;
             transition: opacity 0.3s;
         }
-
-        .progress-container.active {
-            opacity: 1;
-        }
-
+        .progress-container.active { opacity: 1; }
         .progress-bar {
             height: 100%;
             width: 0%;
@@ -230,62 +180,45 @@
             border-radius: 8px;
             transition: width 0.2s ease;
         }
-
         .status-text {
             font-size: 13px;
             color: #6b7f94;
             margin-top: 10px;
             min-height: 20px;
         }
-
-        .status-text.success {
-            color: #1e7e34;
-        }
-
-        .status-text.error {
-            color: #b3362a;
-        }
-
-        .checklist {
-            margin-top: 12px;
-            padding: 12px 16px;
-            background: #f7fafc;
-            border-radius: 10px;
+        .status-text.success { color: #1e7e34; }
+        .status-text.error { color: #b3362a; }
+        .copy-btn {
+            background: #eef3f8;
             border: 1px solid #d0d9e4;
-            display: none;
-        }
-
-        .checklist.visible {
-            display: block;
-        }
-
-        .checklist-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 4px 0;
-            font-size: 13px;
             color: #2c3e50;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
         }
-
-        .checklist-item .icon {
-            font-size: 16px;
-            width: 20px;
-            text-align: center;
+        .copy-btn:hover { background: #d0d9e4; }
+        .step-indicator {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+            font-size: 12px;
+            color: #6b7f94;
+            align-items: center;
+            flex-wrap: wrap;
         }
-
-        .checklist-item .icon.pass {
-            color: #1e7e34;
+        .step-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #d0d9e4;
+            transition: all 0.3s;
         }
-
-        .checklist-item .icon.fail {
-            color: #b3362a;
-        }
-
-        .checklist-item .icon.unknown {
-            color: #8fa2b8;
-        }
-
+        .step-dot.active { background: #2c3e50; transform: scale(1.2); }
+        .step-dot.done { background: #1e7e34; }
+        .step-label { font-size: 12px; color: #6b7f94; margin-left: 4px; }
         .footer {
             margin-top: 32px;
             padding-top: 16px;
@@ -297,64 +230,10 @@
             flex-wrap: wrap;
             gap: 8px;
         }
-
-        .footer a {
-            color: #6b7f94;
-            text-decoration: none;
-        }
-
-        .footer a:hover {
-            color: #2c3e50;
-        }
-
-        .copy-btn {
-            background: #eef3f8;
-            border: 1px solid #d0d9e4;
-            color: #2c3e50;
-            padding: 4px 12px;
-            border-radius: 6px;
-            font-size: 12px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .copy-btn:hover {
-            background: #d0d9e4;
-        }
-
-        .step-indicator {
-            display: flex;
-            gap: 8px;
-            margin-top: 8px;
-            font-size: 12px;
-            color: #6b7f94;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-
-        .step-dot {
-            display: inline-block;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #d0d9e4;
-            transition: all 0.3s;
-        }
-
-        .step-dot.active {
-            background: #2c3e50;
-            transform: scale(1.2);
-        }
-
-        .step-dot.done {
-            background: #1e7e34;
-        }
-
-        .step-label {
-            font-size: 12px;
-            color: #6b7f94;
-            margin-left: 4px;
-        }
+        .footer a { color: #6b7f94; text-decoration: none; }
+        .footer a:hover { color: #2c3e50; }
+        .result-panel .panel-body { flex: 1; display: flex; flex-direction: column; }
+        .result-panel .panel-body textarea { flex: 1; min-height: 400px; }
     </style>
 </head>
 <body>
@@ -364,11 +243,10 @@
         <div class="logo">
             <h1>Chapter Editor <span class="sub">— текст как живой</span></h1>
         </div>
-        <span class="version-badge">v3.0.2</span>
+        <span class="version-badge">v3.1.0</span>
     </header>
 
     <div class="main-grid">
-        <!-- Левая панель -->
         <div class="panel">
             <div class="panel-header">
                 <h2>📄 Исходный текст</h2>
@@ -401,7 +279,6 @@
             <input type="file" id="fileInput" accept=".txt,.md,.docx" style="display:none">
         </div>
 
-        <!-- Правая панель -->
         <div class="panel result-panel">
             <div class="panel-header">
                 <h2>✨ Отредактированный текст</h2>
@@ -413,14 +290,11 @@
             <div class="panel-body">
                 <textarea id="resultText" placeholder="Результат появится здесь..." readonly></textarea>
             </div>
-            <div class="checklist" id="checklist">
-                <div id="checklistItems"></div>
-            </div>
         </div>
     </div>
 
     <div class="footer">
-        <span>Chapter Editor v2.5.0 — обработка через Claude</span>
+        <span>Chapter Editor v3.1.0 — обработка через цепочку переводов Google Translate</span>
         <span><a href="#" onclick="location.reload()">Перезагрузить</a></span>
     </div>
 </div>
@@ -438,47 +312,12 @@
     const progressBar = document.getElementById('progressBar');
     const sourceCount = document.getElementById('sourceCount');
     const resultCount = document.getElementById('resultCount');
-    const checklistDiv = document.getElementById('checklist');
-    const checklistItems = document.getElementById('checklistItems');
     const copyBtn = document.getElementById('copyBtn');
 
-    // Шаги
-    const steps = {
-        step1: document.getElementById('step1'),
-        step2: document.getElementById('step2'),
-        step3: document.getElementById('step3'),
-        step4: document.getElementById('step4'),
-    };
-
-    function resetSteps() {
-        Object.values(steps).forEach(s => {
-            s.className = 'step-dot';
-        });
-    }
-
-    function setStep(step, label) {
-        resetSteps();
-        const names = ['step1', 'step2', 'step3', 'step4'];
-        for (let i = 0; i < names.length; i++) {
-            if (i < step) {
-                steps[names[i]].className = 'step-dot done';
-            } else if (i === step) {
-                steps[names[i]].className = 'step-dot active';
-            } else {
-                steps[names[i]].className = 'step-dot';
-            }
-        }
-        if (label) {
-            statusText.textContent = '⏳ ' + label;
-        }
-    }
-
-    // Подсчёт символов
     sourceText.addEventListener('input', function() {
         sourceCount.textContent = this.value.length + ' симв.';
     });
 
-    // Загрузка файла
     loadBtn.addEventListener('click', function() {
         fileInput.click();
     });
@@ -486,7 +325,6 @@
     fileInput.addEventListener('change', function(e) {
         const file = e.target.files[0];
         if (!file) return;
-
         const reader = new FileReader();
         reader.onload = function(ev) {
             sourceText.value = ev.target.result;
@@ -501,7 +339,6 @@
         reader.readAsText(file, 'UTF-8');
     });
 
-    // Копирование
     copyBtn.addEventListener('click', function() {
         if (!resultText.value) {
             statusText.textContent = '⚠️ Нет текста для копирования';
@@ -519,7 +356,6 @@
         });
     });
 
-    // Редактирование
     editBtn.addEventListener('click', function() {
         const text = sourceText.value.trim();
         if (!text) {
@@ -535,17 +371,12 @@
         statusText.className = 'status-text';
         progressContainer.classList.add('active');
         progressBar.style.width = '0%';
-        checklistDiv.classList.remove('visible');
         resultText.value = '';
         resultCount.textContent = '0 симв.';
-        resetSteps();
 
         const formData = new FormData();
         formData.append('text', text);
         formData.append('style', style);
-
-        let step = 0;
-        setStep(0, 'Отправка запроса...');
 
         fetch('/api/revise', {
             method: 'POST',
@@ -557,25 +388,17 @@
                     throw new Error(err.detail || 'Ошибка сервера');
                 });
             }
-            setStep(1, 'Генерация текста...');
             return handleStream(response);
         })
         .then(data => {
-            setStep(3, 'Готово!');
             resultText.value = data.revised_text;
             resultCount.textContent = data.revised_text.length + ' симв.';
             statusText.textContent = '✅ Готово! ' + (data.summary || '');
             statusText.className = 'status-text success';
-
-            if (data.checklist && data.checklist.length) {
-                renderChecklist(data.checklist);
-                checklistDiv.classList.add('visible');
-            }
         })
         .catch(err => {
             statusText.textContent = '❌ ' + err.message;
             statusText.className = 'status-text error';
-            setStep(-1, 'Ошибка');
         })
         .finally(() => {
             editBtn.disabled = false;
@@ -611,9 +434,7 @@
                         try {
                             const event = JSON.parse(payload);
                             handleEvent(event, resolve, reject, () => { resolved = true; });
-                        } catch (e) {
-                            // игнорируем битые JSON
-                        }
+                        } catch (e) {}
                     }
 
                     read();
@@ -631,77 +452,18 @@
                 const pct = Math.min(100, (event.chars / total) * 100);
                 progressBar.style.width = pct + '%';
                 statusText.textContent = '⏳ Генерация... ' + Math.round(pct) + '%';
-                setStep(1, 'Генерация... ' + Math.round(pct) + '%');
                 break;
-
-            case 'ping':
-                // Просто держим соединение живым
-                break;
-
             case 'done':
                 markResolved();
-                setStep(2, 'Пост-обработка...');
                 resolve(event);
                 break;
-
             case 'error':
                 markResolved();
                 reject(new Error(event.detail || 'Ошибка обработки'));
                 break;
-
-            default:
-                break;
         }
     }
 
-    function renderChecklist(checklist) {
-        checklistItems.innerHTML = '';
-        let passedCount = 0;
-        const total = checklist.length;
-
-        checklist.forEach(item => {
-            const div = document.createElement('div');
-            div.className = 'checklist-item';
-
-            const icon = document.createElement('span');
-            icon.className = 'icon';
-            if (item.passed === true) {
-                icon.textContent = '✅';
-                icon.classList.add('pass');
-                passedCount++;
-            } else if (item.passed === false) {
-                icon.textContent = '❌';
-                icon.classList.add('fail');
-            } else {
-                icon.textContent = '⏳';
-                icon.classList.add('unknown');
-            }
-
-            const label = document.createElement('span');
-            label.textContent = item.label;
-
-            if (item.note) {
-                const note = document.createElement('span');
-                note.style.cssText = 'color: #6b7f94; font-size: 12px; margin-left: 8px;';
-                note.textContent = '— ' + item.note;
-                div.appendChild(icon);
-                div.appendChild(label);
-                div.appendChild(note);
-            } else {
-                div.appendChild(icon);
-                div.appendChild(label);
-            }
-
-            checklistItems.appendChild(div);
-        });
-
-        const header = document.createElement('div');
-        header.style.cssText = 'font-weight: 500; margin-bottom: 8px; color: #2c3e50; font-size: 13px;';
-        header.textContent = `📋 Чек-лист: ${passedCount}/${total} пунктов выполнено`;
-        checklistItems.prepend(header);
-    }
-
-    // Проверка соединения
     fetch('/api/health')
         .then(res => res.json())
         .then(data => {
