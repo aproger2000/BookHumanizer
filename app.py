@@ -10,24 +10,34 @@ import os
 import re
 import random
 import time
+import sys
+import traceback
+import logging
 from pathlib import Path
 
 import requests
 from flask import Flask, Response, jsonify, request, stream_with_context
 from werkzeug.exceptions import HTTPException
 
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "2.3.2"
+APP_VERSION = "2.3.4"
 
 ANTHROPIC_API_URL = os.environ.get(
     "ANTHROPIC_API_URL", "https://api.anthropic.com/v1/messages"
 )
 ANTHROPIC_VERSION = "2023-06-01"
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
-MAX_CHARS = 20_000
-MAX_OUTPUT_TOKENS = 16_000
+MAX_CHARS = 15_000
+MAX_OUTPUT_TOKENS = 8_000  # Уменьшили для скорости
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
@@ -156,16 +166,19 @@ def _sse(event_type: str, data: dict) -> str:
 
 
 def _extract_json(raw: str) -> dict:
+    logger.info(f"_extract_json: raw length={len(raw)}")
     raw = raw.strip()
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
         start, end = raw.find("{"), raw.rfind("}")
         if start == -1 or end == -1:
+            logger.error(f"_extract_json: no JSON found in raw: {raw[:200]}...")
             raise ChapterEditError("The model did not return valid JSON.")
         try:
             return json.loads(raw[start : end + 1])
         except json.JSONDecodeError as exc:
+            logger.error(f"_extract_json: JSON decode error: {exc}")
             raise ChapterEditError("The model did not return valid JSON.") from exc
 
 
@@ -182,6 +195,7 @@ def _normalize_output_formatting(text: str) -> str:
 
 def _add_human_noise(text: str) -> str:
     """Агрессивная финишная правка: ломает оставшиеся AI-паттерны."""
+    logger.info(f"_add_human_noise: starting with {len(text)} chars")
     lines = text.splitlines()
     new_lines = []
     
@@ -226,7 +240,9 @@ def _add_human_noise(text: str) -> str:
         else:
             new_lines.append(line)
     
-    return '\n'.join(new_lines)
+    result = '\n'.join(new_lines)
+    logger.info(f"_add_human_noise: done, {len(result)} chars")
+    return result
 
 
 def _normalize_checklist(model_checklist, chapter_text: str, revised_text: str) -> list:
@@ -288,6 +304,7 @@ def _normalize_checklist(model_checklist, chapter_text: str, revised_text: str) 
 
 def _parse_anthropic_text_stream(resp, state):
     buffer = []
+    logger.info("_parse_anthropic_text_stream: starting")
     for raw_line in resp.iter_lines(decode_unicode=True):
         if not raw_line or not raw_line.startswith("data:"):
             continue
@@ -303,17 +320,25 @@ def _parse_anthropic_text_stream(resp, state):
         if event_type == "content_block_delta":
             delta = event.get("delta", {})
             if delta.get("type") == "text_delta":
-                buffer.append(delta.get("text", ""))
+                text = delta.get("text", "")
+                buffer.append(text)
+                logger.info(f"_parse_anthropic_text_stream: received {len(text)} chars, total {len(''.join(buffer))}")
                 yield "".join(buffer)
         elif event_type == "message_delta":
             stop_reason = event.get("delta", {}).get("stop_reason")
             if stop_reason:
                 state["stop_reason"] = stop_reason
+                logger.info(f"_parse_anthropic_text_stream: stop_reason={stop_reason}")
         elif event_type == "error":
             message = event.get("error", {}).get("message", "unknown error")
+            logger.error(f"_parse_anthropic_text_stream: error={message}")
             raise ChapterEditError(f"Anthropic API stream error: {message}")
         elif event_type == "message_stop":
+            logger.info("_parse_anthropic_text_stream: message_stop received")
             break
+    
+    logger.info(f"_parse_anthropic_text_stream: finished, total {len(''.join(buffer))} chars")
+    return "".join(buffer)
 
 
 @app.get("/api/health")
@@ -333,6 +358,7 @@ def health():
 
 @app.post("/api/revise")
 def api_revise():
+    logger.info("api_revise: request received")
     file_storage = request.files.get("file")
     text = request.form.get("text", "")
     style = request.form.get("style", "neutral")
@@ -340,10 +366,12 @@ def api_revise():
     if file_storage and file_storage.filename:
         try:
             chapter_text = extract_text_from_upload(file_storage)
+            logger.info(f"api_revise: file uploaded, {len(chapter_text)} chars")
         except ValueError as exc:
             return jsonify(detail=str(exc)), 400
     elif text.strip():
         chapter_text = text
+        logger.info(f"api_revise: text pasted, {len(chapter_text)} chars")
     else:
         return jsonify(detail="Provide chapter text or upload a file."), 400
 
@@ -394,11 +422,13 @@ def api_revise():
         "content-type": "application/json",
     }
 
+    logger.info("api_revise: sending request to Anthropic")
     try:
         anthropic_resp = requests.post(
-            ANTHROPIC_API_URL, headers=headers, json=payload, stream=True, timeout=(10, 300)
+            ANTHROPIC_API_URL, headers=headers, json=payload, stream=True, timeout=(10, 600)
         )
     except requests.exceptions.ReadTimeout:
+        logger.error("api_revise: ReadTimeout")
         return (
             jsonify(
                 detail=(
@@ -409,16 +439,19 @@ def api_revise():
             502,
         )
     except requests.RequestException as exc:
+        logger.error(f"api_revise: RequestException: {exc}")
         return jsonify(detail=f"Network error calling the Anthropic API: {exc}"), 502
 
     if anthropic_resp.status_code != 200:
         detail = anthropic_resp.text[:500]
         anthropic_resp.close()
+        logger.error(f"api_revise: Anthropic API error {anthropic_resp.status_code}: {detail}")
         return (
             jsonify(detail=f"Anthropic API error ({anthropic_resp.status_code}): {detail}"),
             502,
         )
 
+    logger.info("api_revise: Anthropic request successful, starting stream")
     estimated_total_chars = max(int(len(chapter_text) * 1.15), 200)
 
     def generate():
@@ -426,15 +459,21 @@ def api_revise():
         stream_state = {}
         last_ping = time.time()
         try:
+            logger.info("generate: starting stream processing")
             for cumulative_text in _parse_anthropic_text_stream(anthropic_resp, stream_state):
                 full_text = cumulative_text
                 yield _sse("progress", {"chars": len(full_text), "estimated_total": estimated_total_chars})
                 
-                # Отправляем ping каждые 10 секунд
-                if time.time() - last_ping > 10:
-                    yield _sse("ping", {"chars": len(full_text), "estimated_total": estimated_total_chars})
+                if time.time() - last_ping > 5:
+                    yield _sse("ping", {
+                        "chars": len(full_text),
+                        "estimated_total": estimated_total_chars,
+                        "percent": min(100, int(len(full_text) / estimated_total_chars * 100))
+                    })
                     last_ping = time.time()
 
+            logger.info(f"generate: stream finished, full_text length {len(full_text)}")
+            
             if stream_state.get("stop_reason") == "max_tokens":
                 raise ChapterEditError(
                     "The model's response was cut off because it ran out of "
@@ -443,21 +482,30 @@ def api_revise():
                     "pieces."
                 )
 
+            logger.info("generate: extracting JSON")
             parsed = _extract_json(full_text)
             revised_text = parsed.get("revised_text")
+            
             if not revised_text:
+                logger.error("generate: revised_text is empty")
                 raise ChapterEditError("The model response was missing the revised text.")
+            
             if revised_text.strip() == chapter_text.strip():
+                logger.warning("generate: revised_text is identical to original")
                 raise ChapterEditError(
                     "The model returned the chapter with no changes at all. "
                     "Try again, or switch to a stronger intensity (e.g. "
                     "\"Thorough\") or a different style."
                 )
 
+            logger.info("generate: formatting and adding noise")
             revised_text = _normalize_output_formatting(revised_text)
             revised_text = _add_human_noise(revised_text)
 
+            logger.info("generate: building checklist")
             checklist = _normalize_checklist(parsed.get("checklist"), chapter_text, revised_text)
+            
+            logger.info("generate: sending done event")
             yield _sse(
                 "done",
                 {
@@ -469,24 +517,34 @@ def api_revise():
                 },
             )
         except ChapterEditError as exc:
-            yield _sse("error", {"detail": str(exc)})
+            logger.error(f"generate: ChapterEditError: {exc}")
+            yield _sse("error", {
+                "detail": str(exc),
+                "type": "ChapterEditError",
+                "traceback": traceback.format_exc()
+            })
         except requests.exceptions.ReadTimeout:
-            yield _sse(
-                "error",
-                {
-                    "detail": (
-                        "The Anthropic API took too long to respond. Try a "
-                        "shorter chapter or a lighter intensity."
-                    )
-                },
-            )
+            logger.error("generate: ReadTimeout")
+            yield _sse("error", {
+                "detail": "The Anthropic API took too long to respond. Try a shorter chapter or a lighter intensity.",
+                "type": "ReadTimeout"
+            })
         except requests.RequestException as exc:
-            yield _sse("error", {"detail": f"Network error calling the Anthropic API: {exc}"})
+            logger.error(f"generate: RequestException: {exc}")
+            yield _sse("error", {
+                "detail": f"Network error calling the Anthropic API: {exc}",
+                "type": "RequestException"
+            })
         except Exception as exc:
-            app.logger.exception("Unexpected error while streaming chapter revision")
-            yield _sse("error", {"detail": f"Unexpected server error: {exc}"})
+            logger.exception("generate: Unexpected error")
+            yield _sse("error", {
+                "detail": f"Unexpected server error: {exc}",
+                "type": "UnexpectedError",
+                "traceback": traceback.format_exc()
+            })
         finally:
             anthropic_resp.close()
+            logger.info("generate: finished")
 
     return Response(
         stream_with_context(generate()),
