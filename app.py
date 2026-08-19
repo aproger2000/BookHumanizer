@@ -1,6 +1,7 @@
 """
-Chapter Editor v3.4.0 — Humanization via Translation Chain + Claude для разбиения на абзацы
+Chapter Editor v3.4.1 — Humanization via Translation Chain + интеллектуальное разбиение на абзацы
 Работает с Google Translate + Claude (или DeepSeek) для финальной разбивки.
+Возвращает логические абзацы, а не одинаковые по длине.
 """
 import io
 import json
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.4.0"
+APP_VERSION = "3.4.1"
 
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
@@ -175,86 +176,100 @@ def clean_translation_artifacts(text: str) -> str:
     return text.strip()
 
 
-def split_into_paragraphs_with_claude(text: str) -> str:
-    """Использует Claude (или DeepSeek) для разбиения текста на абзацы."""
+def split_into_paragraphs_by_logic(text: str) -> str:
+    """
+    Разбивает текст на абзацы по логике изложения (не по символам).
+    Анализирует: диалоги, смену тем, длину предложений.
+    """
     if not text or len(text) < 200:
         return text
     
-    # Пробуем Claude, если есть ключ
-    if ANTHROPIC_API_KEY:
-        try:
-            logger.info("Using Claude for paragraph splitting...")
-            headers = {
-                "x-api-key": ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json"
-            }
-            payload = {
-                "model": "claude-sonnet-5",
-                "max_tokens": 4000,
-                "system": "You are a text formatter. Your ONLY task is to split the given text into logical paragraphs. Do NOT change any words, do NOT rewrite, do NOT translate. Just add blank lines between paragraphs where natural breaks occur. Return ONLY the formatted text.",
-                "messages": [{"role": "user", "content": f"Format this text into paragraphs:\n\n{text}"}]
-            }
-            response = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers=headers,
-                json=payload,
-                timeout=60
-            )
-            response.raise_for_status()
-            result = response.json()
-            formatted = result['content'][0]['text'].strip()
-            logger.info(f"Claude formatting complete. Paragraphs: {len(formatted.split('\n\n'))}")
-            return formatted
-        except Exception as e:
-            logger.error(f"Claude formatting error: {e}")
+    # Если уже есть хорошие абзацы — не трогаем
+    existing = text.split('\n\n')
+    if len(existing) >= 3:
+        good = [p for p in existing if len(p.strip()) > 50]
+        if len(good) >= 2:
+            return text
     
-    # Пробуем DeepSeek, если есть ключ
-    if DEEPSEEK_API_KEY:
-        try:
-            logger.info("Using DeepSeek for paragraph splitting...")
-            headers = {
-                "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "model": "deepseek-chat",
-                "messages": [
-                    {"role": "system", "content": "You are a text formatter. Your ONLY task is to split the given text into logical paragraphs. Do NOT change any words, do NOT rewrite, do NOT translate. Just add blank lines between paragraphs where natural breaks occur. Return ONLY the formatted text."},
-                    {"role": "user", "content": f"Format this text into paragraphs:\n\n{text}"}
-                ],
-                "temperature": 0.1,
-                "max_tokens": 4000
-            }
-            response = requests.post(
-                "https://api.deepseek.com/v1/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=60
-            )
-            response.raise_for_status()
-            result = response.json()
-            formatted = result['choices'][0]['message']['content'].strip()
-            logger.info(f"DeepSeek formatting complete. Paragraphs: {len(formatted.split('\n\n'))}")
-            return formatted
-        except Exception as e:
-            logger.error(f"DeepSeek formatting error: {e}")
+    # Разбиваем по предложениям
+    sentences = re.split(r'(?<=[.!?])\s+', text)
     
-    # Запасной вариант: принудительное разбиение по длине
-    logger.info("Using fallback: force split by length")
-    return force_split_by_length(text)
+    if len(sentences) < 5:
+        # Если предложений мало — принудительное разбиение по длине
+        return force_split_by_length(text)
+    
+    paragraphs = []
+    current_para = []
+    current_len = 0
+    is_in_dialog = False
+    
+    for sent in sentences:
+        sent = sent.strip()
+        if not sent:
+            continue
+        
+        # Проверяем, является ли предложение диалогом
+        is_dialog = sent.startswith('"') or sent.startswith('«') or sent.startswith('—')
+        
+        # Проверяем, не начинается ли предложение с новой темы
+        is_new_topic = any(sent.startswith(w) for w in ['Алексей', 'Масарик', 'Анна', 'Кросс', 'Он', 'Она'])
+        
+        # Проверяем длину
+        is_long = len(sent) > 200
+        is_short = len(sent) < 30
+        
+        # Логика создания нового абзаца
+        should_break = False
+        
+        # 1. Если начинается новый диалог
+        if is_dialog and not is_in_dialog and current_para:
+            should_break = True
+        
+        # 2. Если заканчивается диалог и начинается новая тема
+        if is_in_dialog and is_new_topic and current_para:
+            should_break = True
+        
+        # 3. Если предложение очень длинное (>200 символов)
+        if is_long and current_para:
+            should_break = True
+        
+        # 4. Если в абзаце уже 3-5 предложений и длина > 300 символов
+        if len(current_para) >= 3 and current_len > 300 and (is_new_topic or is_dialog):
+            should_break = True
+        
+        # 5. Если в абзаце больше 5 предложений
+        if len(current_para) >= 5:
+            should_break = True
+        
+        # Если нужно разорвать
+        if should_break and current_para:
+            paragraphs.append(' '.join(current_para))
+            current_para = []
+            current_len = 0
+            is_in_dialog = False
+        
+        # Добавляем предложение в текущий абзац
+        current_para.append(sent)
+        current_len += len(sent)
+        
+        if is_dialog:
+            is_in_dialog = True
+    
+    # Добавляем последний абзац
+    if current_para:
+        paragraphs.append(' '.join(current_para))
+    
+    # Проверяем результат
+    if len(paragraphs) < 2 and len(sentences) > 10:
+        return force_split_by_length(text)
+    
+    return '\n\n'.join(paragraphs)
 
 
 def force_split_by_length(text: str, max_chars: int = 450) -> str:
-    """Принудительное разбиение по длине."""
+    """Принудительное разбиение по длине (запасной вариант)."""
     if not text or len(text) < 200:
         return text
-    
-    existing = text.split('\n\n')
-    if len(existing) >= 3:
-        good = [p for p in existing if len(p.strip()) > 30]
-        if len(good) >= 2:
-            return text
     
     words = text.split()
     if len(words) < 20:
@@ -343,9 +358,9 @@ def api_revise():
                 processed_text = clean_translation_artifacts(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 60, "log": "Артефакты удалены"})
 
-                # 3. Разбиение на абзацы через Claude/DeepSeek
-                logger.info("Step 3: Paragraph splitting with AI...")
-                processed_text = split_into_paragraphs_with_claude(processed_text)
+                # 3. Интеллектуальное разбиение на абзацы
+                logger.info("Step 3: Intelligent paragraph splitting...")
+                processed_text = split_into_paragraphs_by_logic(processed_text)
                 para_count = len(processed_text.split('\n\n'))
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 85, "log": f"Абзацев: {para_count}"})
 
@@ -363,7 +378,7 @@ def api_revise():
                     "summary": f"Текст переработан через цепочку переводов. Абзацев: {final_para_count}",
                     "changes": [
                         "Переведён через Google Translate (RU→JA→FI→EN→RU)",
-                        f"Разделён на {final_para_count} абзацев"
+                        f"Разделён на {final_para_count} логических абзацев"
                     ],
                     "checklist": []
                 })
