@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.2.0 — Humanization via Translation Chain (с умным разделением на абзацы)
+Chapter Editor v3.2.1 — Humanization via Translation Chain (с принудительным разделением на абзацы)
 Работает полностью бесплатно, без API-ключей.
 """
 import io
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.2.0"
+APP_VERSION = "3.2.1"
 
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
@@ -159,84 +159,57 @@ def clean_translation_artifacts(text: str) -> str:
     return text.strip()
 
 
-def split_into_paragraphs_by_meaning(text: str) -> str:
+def force_split_into_paragraphs(text: str) -> str:
     """
-    Разбивает текст на абзацы по смыслу.
-    Анализирует длину предложений, темы и логические переходы.
+    ПРИНУДИТЕЛЬНО разбивает текст на абзацы по длине.
+    Каждый абзац — примерно 300-500 символов.
     """
     if not text or len(text) < 200:
         return text
     
-    # Разбиваем на предложения
+    # Разбиваем по предложениям
     sentences = re.split(r'(?<=[.!?])\s+', text)
     
     if len(sentences) <= 3:
         return text
     
     paragraphs = []
-    current_paragraph = []
-    current_length = 0
+    current = []
+    current_len = 0
+    target_len = 400  # Целевая длина абзаца
     
-    for i, sent in enumerate(sentences):
+    for sent in sentences:
         sent_len = len(sent)
         
-        # Если предложение очень длинное (>200 символов) — это отдельный абзац
-        if sent_len > 200 and current_paragraph:
-            paragraphs.append(' '.join(current_paragraph))
-            current_paragraph = []
-            current_length = 0
+        # Если одно предложение очень длинное (>300 символов) — отдельный абзац
+        if sent_len > 300 and current:
+            paragraphs.append(' '.join(current))
+            current = []
+            current_len = 0
             paragraphs.append(sent)
             continue
         
-        # Если предложение очень короткое (<30 символов) — присоединяем к следующему
-        if sent_len < 30 and i < len(sentences) - 1:
-            current_paragraph.append(sent)
-            current_length += sent_len
+        # Если предложение очень короткое (<30 символов) — присоединяем к текущему
+        if sent_len < 30 and current:
+            current.append(sent)
+            current_len += sent_len
             continue
         
-        # Проверяем, не пора ли начать новый абзац
-        # 1. По длине (300-500 символов)
-        # 2. По количеству предложений (3-5)
-        # 3. По наличию диалога в начале предложения
-        is_dialog = sent.strip().startswith('"') or sent.strip().startswith('«') or sent.strip().startswith('—')
-        is_question = sent.strip().endswith('?')
-        is_short = sent_len < 50
+        # Если текущий абзац достиг целевой длины
+        if current_len > target_len and len(current) >= 2:
+            paragraphs.append(' '.join(current))
+            current = []
+            current_len = 0
         
-        should_break = False
-        
-        # Если накопилось 3-5 предложений и длина > 300 символов
-        if len(current_paragraph) >= 3 and current_length > 300:
-            should_break = True
-        # Если накопилось больше 5 предложений
-        elif len(current_paragraph) >= 5:
-            should_break = True
-        # Если текущая длина > 500 символов
-        elif current_length > 500:
-            should_break = True
-        # Если следующее предложение — диалог, а текущий абзац не диалог
-        elif is_dialog and current_paragraph and not current_paragraph[0].strip().startswith('"') and not current_paragraph[0].strip().startswith('«'):
-            should_break = True
-        # Если текущее предложение — вопрос, а в абзаце уже есть 2+ предложения
-        elif is_question and len(current_paragraph) >= 2:
-            should_break = True
-        # Если резкая смена темы (по длине предложения)
-        elif current_paragraph and sent_len > 150 and current_length > 200:
-            should_break = True
-        
-        if should_break and current_paragraph:
-            paragraphs.append(' '.join(current_paragraph))
-            current_paragraph = []
-            current_length = 0
-        
-        current_paragraph.append(sent)
-        current_length += sent_len
+        current.append(sent)
+        current_len += sent_len
     
     # Добавляем последний абзац
-    if current_paragraph:
-        paragraphs.append(' '.join(current_paragraph))
+    if current:
+        paragraphs.append(' '.join(current))
     
     # Если получился один абзац, но предложений много — разбиваем принудительно
-    if len(paragraphs) == 1 and len(sentences) > 6:
+    if len(paragraphs) == 1 and len(sentences) > 5:
         mid = len(sentences) // 2
         paragraphs = [
             ' '.join(sentences[:mid]),
@@ -298,8 +271,8 @@ def api_revise():
                 
                 processed_text = clean_translation_artifacts(processed_text)
                 
-                # Умное разделение на абзацы по смыслу
-                processed_text = split_into_paragraphs_by_meaning(processed_text)
+                # ПРИНУДИТЕЛЬНОЕ разделение на абзацы
+                processed_text = force_split_into_paragraphs(processed_text)
                 
                 processed_text = apply_light_polish(processed_text)
 
@@ -308,10 +281,10 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": "Текст переработан через цепочку переводов с умным разделением на абзацы",
+                    "summary": "Текст переработан через цепочку переводов",
                     "changes": [
                         "Переведён через Google Translate (RU→JA→FI→EN→RU)",
-                        "Разделён на абзацы по смыслу"
+                        "Разделён на абзацы по длине"
                     ],
                     "checklist": []
                 })
