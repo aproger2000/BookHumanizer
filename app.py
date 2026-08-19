@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.2.7 — Humanization via Translation Chain (принудительное разбиение на абзацы на сервере)
+Chapter Editor v3.2.8 — Humanization via Translation Chain (гарантированное разбиение на абзацы)
 Работает полностью бесплатно, без API-ключей.
 """
 import io
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.2.7"
+APP_VERSION = "3.2.8"
 
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
@@ -45,7 +45,6 @@ def translate_text(text: str, target_lang: str = "en") -> str:
         return text
     
     try:
-        # Добавляем случайный параметр для обхода кеша
         cache_buster = random.randint(100000, 999999)
         url = "https://translate.googleapis.com/translate_a/single"
         params = {
@@ -70,11 +69,10 @@ def translate_text(text: str, target_lang: str = "en") -> str:
 
 
 def add_random_noise(text: str) -> str:
-    """Добавляет случайные незначительные изменения в текст для обхода кеша."""
+    """Добавляет случайные изменения для обхода кеша."""
     if len(text) < 100:
         return text
     
-    # Случайно меняем несколько слов на синонимы
     synonyms = {
         'очень': ['весьма', 'крайне', 'чрезвычайно'],
         'большой': ['огромный', 'громадный', 'крупный'],
@@ -98,18 +96,11 @@ def process_paragraph_through_chain(paragraph: str, step_num: int = 0) -> str:
         return paragraph
     
     try:
-        # Добавляем шум для обхода кеша
         noisy = add_random_noise(paragraph)
-        
-        logger.info(f"[Step {step_num}] RU->JA: {len(paragraph)} chars")
         ja = translate_text(noisy, target_lang="ja")
-        logger.info(f"[Step {step_num}] JA->FI: {len(ja)} chars")
         fi = translate_text(ja, target_lang="fi")
-        logger.info(f"[Step {step_num}] FI->EN: {len(fi)} chars")
         en = translate_text(fi, target_lang="en")
-        logger.info(f"[Step {step_num}] EN->RU: {len(en)} chars")
         ru = translate_text(en, target_lang="ru")
-        logger.info(f"[Step {step_num}] FINAL: {len(ru)} chars")
         return ru
     except Exception as e:
         logger.error(f"Paragraph processing error: {e}")
@@ -121,16 +112,12 @@ def apply_translation_chain_with_paragraphs(text: str) -> str:
     logger.info(f"Starting translation chain for {len(text)} chars...")
     
     paragraphs = text.split('\n\n')
-    logger.info(f"Found {len(paragraphs)} paragraphs")
-    
     processed_paragraphs = []
     
     for i, para in enumerate(paragraphs):
         if not para.strip():
             processed_paragraphs.append(para)
             continue
-        
-        logger.info(f"Processing paragraph {i+1}/{len(paragraphs)}...")
         
         if len(para) > CHUNK_SIZE:
             sentences = re.split(r'(?<=[.!?])\s+', para)
@@ -147,10 +134,9 @@ def apply_translation_chain_with_paragraphs(text: str) -> str:
                 chunks.append(current.strip())
             
             processed_chunks = []
-            for j, chunk in enumerate(chunks):
-                processed = process_paragraph_through_chain(chunk, i*10+j)
+            for chunk in chunks:
+                processed = process_paragraph_through_chain(chunk, i*10)
                 processed_chunks.append(processed)
-            
             processed_paragraphs.append(" ".join(processed_chunks))
         else:
             processed_paragraphs.append(process_paragraph_through_chain(para, i))
@@ -195,86 +181,48 @@ def clean_translation_artifacts(text: str) -> str:
     return text.strip()
 
 
-def split_into_paragraphs_by_length(text: str, max_paragraph_chars: int = 400) -> str:
+def force_split_into_paragraphs_by_chars(text: str, max_paragraph_chars: int = 450) -> str:
     """
     ПРИНУДИТЕЛЬНО разбивает текст на абзацы по количеству символов.
-    Это самый надёжный способ — работает всегда.
+    Это самый надёжный способ — работает всегда, даже если нет точек.
     """
-    if not text or len(text) < 200:
+    if not text:
         return text
     
-    # Если уже есть абзацы, проверяем их количество
+    # Если текста мало, не разбиваем
+    if len(text) < 200:
+        return text
+    
+    # Проверяем, есть ли уже абзацы
     existing = text.split('\n\n')
     if len(existing) >= 3:
-        good_paragraphs = [p for p in existing if len(p.strip()) > 50]
-        if len(good_paragraphs) >= 2:
+        good = [p for p in existing if len(p.strip()) > 30]
+        if len(good) >= 2:
+            logger.info(f"Already has {len(good)} good paragraphs")
             return text
     
-    # Разбиваем по предложениям (по точкам, вопросительным и восклицательным знакам)
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    
-    # Если предложений мало — пробуем другие разделители
-    if len(sentences) < 3:
-        sentences = re.split(r'[.!?]\s*', text)
-    
-    # Очищаем предложения
-    sentences = [s.strip() for s in sentences if s.strip()]
-    
-    if len(sentences) < 3:
-        # Если всё ещё мало — разбиваем просто по символам
-        chunks = []
-        for i in range(0, len(text), max_paragraph_chars):
-            chunk = text[i:i+max_paragraph_chars].strip()
-            if chunk:
-                chunks.append(chunk)
-        return '\n\n'.join(chunks)
-    
-    # Группируем предложения в абзацы
+    # Просто разбиваем по символам
     paragraphs = []
-    current = []
-    current_len = 0
+    for i in range(0, len(text), max_paragraph_chars):
+        chunk = text[i:i+max_paragraph_chars].strip()
+        if chunk:
+            paragraphs.append(chunk)
     
-    for sent in sentences:
-        sent_len = len(sent)
-        
-        # Если предложение очень длинное (>200 символов) — отдельный абзац
-        if sent_len > 200 and current:
-            paragraphs.append(' '.join(current))
-            current = []
-            current_len = 0
-            paragraphs.append(sent)
-            continue
-        
-        # Если текущий абзац достиг целевой длины
-        if current_len > max_paragraph_chars and len(current) >= 2:
-            paragraphs.append(' '.join(current))
-            current = []
-            current_len = 0
-        
-        current.append(sent)
-        current_len += sent_len
+    # Если получился один абзац, но текст длинный — делим пополам
+    if len(paragraphs) == 1 and len(text) > 600:
+        mid = len(text) // 2
+        # Ищем ближайший пробел
+        while mid > 0 and text[mid] != ' ':
+            mid -= 1
+        if mid > 0:
+            paragraphs = [
+                text[:mid].strip(),
+                text[mid:].strip()
+            ]
     
-    if current:
-        paragraphs.append(' '.join(current))
-    
-    # Если получился один абзац, но предложений много — разбиваем принудительно
-    if len(paragraphs) == 1 and len(sentences) > 8:
-        mid = len(sentences) // 2
-        paragraphs = [
-            ' '.join(sentences[:mid]),
-            ' '.join(sentences[mid:])
-        ]
-    
-    # Если всё ещё один абзац — разбиваем по символам
-    if len(paragraphs) == 1 and len(text) > 400:
-        chunks = []
-        for i in range(0, len(text), max_paragraph_chars):
-            chunk = text[i:i+max_paragraph_chars].strip()
-            if chunk:
-                chunks.append(chunk)
-        return '\n\n'.join(chunks)
-    
-    return '\n\n'.join(paragraphs)
+    result = '\n\n'.join(paragraphs)
+    logger.info(f"force_split: {len(paragraphs)} paragraphs")
+    return result
 
 
 def apply_light_polish(text: str) -> str:
@@ -324,21 +272,18 @@ def api_revise():
             try:
                 yield _sse("progress", {"chars": 0, "estimated_total": len(chapter_text), "percent": 0, "log": "Начинаем обработку..."})
 
-                logger.info("Applying translation chain...")
                 processed_text = apply_translation_chain_with_paragraphs(chapter_text)
-                
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 70, "log": "Переводы завершены"})
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 60, "log": "Переводы завершены"})
                 
                 processed_text = clean_translation_artifacts(processed_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 80, "log": "Артефакты удалены"})
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 70, "log": "Артефакты удалены"})
                 
-                # ПРИНУДИТЕЛЬНОЕ разбиение на абзацы
-                processed_text = split_into_paragraphs_by_length(processed_text)
+                # ГАРАНТИРОВАННОЕ разбиение на абзацы по символам
+                processed_text = force_split_into_paragraphs_by_chars(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 90, "log": "Абзацы сформированы"})
                 
                 processed_text = apply_light_polish(processed_text)
 
-                # Проверяем количество абзацев
                 para_count = len(processed_text.split('\n\n'))
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 100, "log": f"Готово! Абзацев: {para_count}"})
 
