@@ -443,18 +443,17 @@
     const checklistItems = document.getElementById('checklistItems');
     const copyBtn = document.getElementById('copyBtn');
 
-    // --- ИНТЕЛЛЕКТУАЛЬНОЕ РАЗБИЕНИЕ НА АБЗАЦЫ ---
+    // --- ИНТЕЛЛЕКТУАЛЬНОЕ РАЗБИЕНИЕ НА АБЗАЦЫ (фронтенд, запасной вариант) ---
     function smartSplitIntoParagraphs(text) {
         if (!text || text.length < 150) return text;
 
-        // Если уже есть хорошие абзацы, оставляем
         const existing = text.split('\n\n');
         if (existing.length >= 3) {
             const good = existing.filter(p => p.trim().length > 50);
             if (good.length >= 2) return text;
         }
 
-        // 1. Сначала разбиваем по диалогам (—, «, »)
+        // Разбиваем по диалогам
         let parts = [];
         let currentPart = '';
         let inDialog = false;
@@ -486,10 +485,9 @@
         }
         if (currentPart) parts.push(currentPart);
 
-        // Если диалогов мало, разбиваем по предложениям
+        // Если диалогов мало — разбиваем по предложениям
         if (parts.length < 2) {
             const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
-            
             const newParts = [];
             let group = [];
             let groupLen = 0;
@@ -518,51 +516,6 @@
             parts = newParts;
         }
 
-        // Если всё ещё один абзац — разбиваем по длине с умом
-        if (parts.length === 1 && text.length > 400) {
-            const splitMarkers = ['Алексей', 'Масарик', 'Анна', 'Кросс', 'Он', 'Она', 'Но', 'И', 'Тогда', 'После'];
-            let bestSplit = -1;
-            let bestScore = -1;
-
-            for (let i = 200; i < text.length - 200; i++) {
-                if (text[i] === ' ' || text[i] === '.' || text[i] === '!' || text[i] === '?') {
-                    let score = 0;
-                    for (const marker of splitMarkers) {
-                        if (text.indexOf(marker, i) < i + 50 && text.indexOf(marker, i) > i) {
-                            score += 10;
-                            break;
-                        }
-                    }
-                    if (text[i] === '.' || text[i] === '!' || text[i] === '?') {
-                        score += 5;
-                    }
-                    if (score > bestScore) {
-                        bestScore = score;
-                        bestSplit = i + 1;
-                    }
-                }
-            }
-
-            if (bestSplit > 0 && bestSplit < text.length - 50) {
-                parts = [
-                    text.slice(0, bestSplit).trim(),
-                    text.slice(bestSplit).trim()
-                ];
-            } else {
-                const mid = Math.floor(text.length / 2);
-                let splitPos = mid;
-                while (splitPos > 0 && text[splitPos] !== ' ') {
-                    splitPos--;
-                }
-                if (splitPos > 0) {
-                    parts = [
-                        text.slice(0, splitPos).trim(),
-                        text.slice(splitPos).trim()
-                    ];
-                }
-            }
-        }
-
         return parts.join('\n\n');
     }
 
@@ -583,4 +536,270 @@
     function setStep(step, label) {
         resetSteps();
         const names = ['step1', 'step2', 'step3', 'step4'];
-        for (let i = 0; i <
+        for (let i = 0; i < names.length; i++) {
+            if (i < step) {
+                stepDots[names[i]].className = 'step-dot done';
+            } else if (i === step) {
+                stepDots[names[i]].className = 'step-dot active';
+            } else {
+                stepDots[names[i]].className = 'step-dot';
+            }
+        }
+        if (label) {
+            statusText.textContent = '⏳ ' + label;
+        }
+    }
+
+    // Подсчёт символов
+    sourceText.addEventListener('input', function() {
+        sourceCount.textContent = this.value.length + ' симв.';
+    });
+
+    // Загрузка файла
+    loadBtn.addEventListener('click', function() {
+        fileInput.click();
+    });
+
+    fileInput.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(ev) {
+            sourceText.value = ev.target.result;
+            sourceCount.textContent = sourceText.value.length + ' симв.';
+            statusText.textContent = '✅ Файл загружен: ' + file.name;
+            statusText.className = 'status-text success';
+        };
+        reader.onerror = function() {
+            statusText.textContent = '❌ Ошибка чтения файла';
+            statusText.className = 'status-text error';
+        };
+        reader.readAsText(file, 'UTF-8');
+    });
+
+    // Копирование
+    copyBtn.addEventListener('click', function() {
+        if (!resultText.value) {
+            statusText.textContent = '⚠️ Нет текста для копирования';
+            statusText.className = 'status-text error';
+            return;
+        }
+        navigator.clipboard.writeText(resultText.value).then(() => {
+            statusText.textContent = '✅ Текст скопирован в буфер обмена';
+            statusText.className = 'status-text success';
+        }).catch(() => {
+            resultText.select();
+            document.execCommand('copy');
+            statusText.textContent = '✅ Текст скопирован';
+            statusText.className = 'status-text success';
+        });
+    });
+
+    // Редактирование
+    editBtn.addEventListener('click', function() {
+        const text = sourceText.value.trim();
+        if (!text) {
+            statusText.textContent = '⚠️ Вставьте текст или загрузите файл';
+            statusText.className = 'status-text error';
+            return;
+        }
+
+        const style = styleSelect.value;
+        editBtn.disabled = true;
+        editBtn.textContent = '⏳ Обработка...';
+        statusText.textContent = '⏳ Начинаем обработку...';
+        statusText.className = 'status-text';
+        progressContainer.classList.add('active');
+        progressBar.style.width = '0%';
+        checklistDiv.classList.remove('visible');
+        resultText.value = '';
+        resultCount.textContent = '0 симв.';
+        resetSteps();
+
+        const formData = new FormData();
+        formData.append('text', text);
+        formData.append('style', style);
+
+        fetch('/api/revise', {
+            method: 'POST',
+            body: formData,
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(err => {
+                    throw new Error(err.detail || 'Ошибка сервера');
+                });
+            }
+            setStep(1, 'Генерация текста...');
+            return handleStream(response);
+        })
+        .then(data => {
+            let formattedText = data.revised_text;
+
+            // Проверяем, есть ли абзацы
+            const paragraphs = formattedText.split('\n\n');
+            if (paragraphs.length < 2) {
+                // Если нет абзацев — разбиваем интеллектуально
+                formattedText = smartSplitIntoParagraphs(formattedText);
+            }
+
+            setStep(3, 'Готово!');
+            resultText.value = formattedText;
+            resultCount.textContent = formattedText.length + ' симв.';
+            statusText.textContent = '✅ Готово! ' + (data.summary || '');
+            statusText.className = 'status-text success';
+
+            if (data.checklist && data.checklist.length) {
+                renderChecklist(data.checklist);
+                checklistDiv.classList.add('visible');
+            }
+        })
+        .catch(err => {
+            statusText.textContent = '❌ ' + err.message;
+            statusText.className = 'status-text error';
+            setStep(-1, 'Ошибка');
+        })
+        .finally(() => {
+            editBtn.disabled = false;
+            editBtn.textContent = '✏️ Редактировать';
+            progressContainer.classList.remove('active');
+            progressBar.style.width = '0%';
+        });
+    });
+
+    function handleStream(response) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let resolved = false;
+
+        return new Promise((resolve, reject) => {
+            function read() {
+                reader.read().then(({ done, value }) => {
+                    if (done) {
+                        if (!resolved) reject(new Error('Соединение закрыто'));
+                        return;
+                    }
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        const payload = line.slice(6).trim();
+                        if (!payload) continue;
+
+                        try {
+                            const event = JSON.parse(payload);
+                            handleEvent(event, resolve, reject, () => { resolved = true; });
+                        } catch (e) {
+                            // игнорируем битые JSON
+                        }
+                    }
+
+                    read();
+                }).catch(reject);
+            }
+
+            read();
+        });
+    }
+
+    function handleEvent(event, resolve, reject, markResolved) {
+        switch (event.type) {
+            case 'progress':
+                const total = event.estimated_total || 10000;
+                const pct = Math.min(100, (event.chars / total) * 100);
+                progressBar.style.width = pct + '%';
+                statusText.textContent = '⏳ ' + (event.log || 'Генерация... ' + Math.round(pct) + '%');
+                setStep(1, (event.log || 'Генерация... ' + Math.round(pct) + '%'));
+                break;
+
+            case 'ping':
+                break;
+
+            case 'done':
+                markResolved();
+                setStep(2, 'Пост-обработка...');
+                resolve(event);
+                break;
+
+            case 'error':
+                markResolved();
+                reject(new Error(event.detail || 'Ошибка обработки'));
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    function renderChecklist(checklist) {
+        checklistItems.innerHTML = '';
+        let passedCount = 0;
+        const total = checklist.length;
+
+        checklist.forEach(item => {
+            const div = document.createElement('div');
+            div.className = 'checklist-item';
+
+            const icon = document.createElement('span');
+            icon.className = 'icon';
+            if (item.passed === true) {
+                icon.textContent = '✅';
+                icon.classList.add('pass');
+                passedCount++;
+            } else if (item.passed === false) {
+                icon.textContent = '❌';
+                icon.classList.add('fail');
+            } else {
+                icon.textContent = '⏳';
+                icon.classList.add('unknown');
+            }
+
+            const label = document.createElement('span');
+            label.textContent = item.label;
+
+            if (item.note) {
+                const note = document.createElement('span');
+                note.style.cssText = 'color: #6b7f94; font-size: 12px; margin-left: 8px;';
+                note.textContent = '— ' + item.note;
+                div.appendChild(icon);
+                div.appendChild(label);
+                div.appendChild(note);
+            } else {
+                div.appendChild(icon);
+                div.appendChild(label);
+            }
+
+            checklistItems.appendChild(div);
+        });
+
+        const header = document.createElement('div');
+        header.style.cssText = 'font-weight: 500; margin-bottom: 8px; color: #2c3e50; font-size: 13px;';
+        header.textContent = `📋 Чек-лист: ${passedCount}/${total} пунктов выполнено`;
+        checklistItems.prepend(header);
+    }
+
+    // Загрузка версии с сервера
+    fetch('/api/health')
+        .then(res => res.json())
+        .then(data => {
+            const version = 'v' + data.version;
+            document.getElementById('versionBadge').textContent = version;
+            document.getElementById('footerVersion').textContent = 'Chapter Editor ' + version + ' — обработка через цепочку переводов';
+            statusText.textContent = '✅ Сервер версии ' + data.version + ' готов';
+            statusText.className = 'status-text success';
+        })
+        .catch(() => {
+            document.getElementById('versionBadge').textContent = 'v3.4.1';
+            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.4.1 — обработка через цепочку переводов';
+            statusText.textContent = '⚠️ Не удалось подключиться к серверу';
+            statusText.className = 'status-text error';
+        });
+})();
+</script>
+</body>
+</html>
