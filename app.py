@@ -9,6 +9,7 @@ import json
 import os
 import re
 import random
+import time
 from pathlib import Path
 
 import requests
@@ -20,15 +21,15 @@ STATIC_DIR = BASE_DIR / "static"
 
 # Bump this with every deployed change -- it's shown in the UI footer so you
 # can tell at a glance which version is actually live on Render.
-APP_VERSION = "2.3.0"
+APP_VERSION = "2.3.1"
 
 ANTHROPIC_API_URL = os.environ.get(
     "ANTHROPIC_API_URL", "https://api.anthropic.com/v1/messages"
 )
 ANTHROPIC_VERSION = "2023-06-01"
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
-MAX_CHARS = 60_000
-MAX_OUTPUT_TOKENS = 16_000
+MAX_CHARS = 30_000
+MAX_OUTPUT_TOKENS = 32_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20 MB upload cap
@@ -180,8 +181,6 @@ def _normalize_output_formatting(text: str) -> str:
     text = _MULTI_BLANK_LINE_RE.sub("\n\n", text)
     return text
 
-
-import random
 
 def _add_human_noise(text: str) -> str:
     """Агрессивная финишная правка: ломает оставшиеся AI-паттерны."""
@@ -427,10 +426,16 @@ def api_revise():
     def generate():
         full_text = ""
         stream_state = {}
+        last_ping = time.time()
         try:
             for cumulative_text in _parse_anthropic_text_stream(anthropic_resp, stream_state):
                 full_text = cumulative_text
                 yield _sse("progress", {"chars": len(full_text), "estimated_total": estimated_total_chars})
+                
+                # Отправляем ping каждые 15 секунд, чтобы Gunicorn не убил воркер
+                if time.time() - last_ping > 15:
+                    yield _sse("ping", {})
+                    last_ping = time.time()
 
             if stream_state.get("stop_reason") == "max_tokens":
                 raise ChapterEditError(
