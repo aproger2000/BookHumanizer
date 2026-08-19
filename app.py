@@ -20,15 +20,15 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "2.3.6"
+APP_VERSION = "2.3.7"
 
 ANTHROPIC_API_URL = os.environ.get(
     "ANTHROPIC_API_URL", "https://api.anthropic.com/v1/messages"
 )
 ANTHROPIC_VERSION = "2023-06-01"
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
-MAX_CHARS = 10_000  # Ограничиваем длину ввода
-MAX_OUTPUT_TOKENS = 8_000  # Увеличили для полного ответа
+MAX_CHARS = 10_000
+MAX_OUTPUT_TOKENS = 8_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
@@ -38,17 +38,19 @@ class ChapterEditError(RuntimeError):
     pass
 
 
-SYSTEM_PROMPT = """You are a text transformer. Rewrite the given text so it sounds more human and natural.
+SYSTEM_PROMPT = """You are a professional editor. Your task is to rewrite the provided text to make it sound MORE HUMAN and LESS LIKE AI.
 
-Rules:
-1. Break sentences that are 8-12 words long.
-2. Vary sentence structure - don't always start with subject.
-3. Use occasional filler words: "well," "so," "you know," "actually."
-4. Use dashes, ellipses, and breaks.
-5. Keep the plot, characters, and facts EXACTLY the same.
+IMPORTANT RULES:
+1. CHANGE EVERY SENTENCE. Do not leave any sentence unchanged.
+2. Break long sentences into shorter ones.
+3. Vary sentence structure - don't always start with subject.
+4. Use filler words naturally: "well," "so," "you know," "actually."
+5. Use dashes, ellipses, and breaks.
+6. Keep the plot, characters, and facts EXACTLY the same.
 
-Respond with JSON: {"revised_text": "the rewritten text", "summary": "brief summary", "changes": ["change1", "change2"]}
-Do not add anything else."""
+The rewritten text should be approximately the same length as the original.
+
+Respond with JSON: {"revised_text": "the rewritten text", "summary": "brief summary", "changes": ["change1", "change2"]}"""
 
 STYLE_PRESETS = {
     "neutral": "",
@@ -104,7 +106,6 @@ def api_revise():
 
         style_hint = STYLE_PRESETS.get(style, "")
         
-        # Упрощенный промпт
         user_content = f"{style_hint}\n\nText to rewrite:\n\n{chapter_text}"
         
         payload = {
@@ -169,7 +170,6 @@ def api_revise():
                             text_chunk = delta.get("text", "")
                             full_text += text_chunk
                             
-                            # Прогресс
                             pct = min(95, int(len(full_text) / max(estimated_total, 1) * 100))
                             yield _sse("progress", {
                                 "chars": len(full_text),
@@ -177,7 +177,6 @@ def api_revise():
                                 "percent": pct
                             })
                             
-                            # Ping
                             if time.time() - last_ping > 5:
                                 yield _sse("ping", {"percent": pct})
                                 last_ping = time.time()
@@ -192,7 +191,6 @@ def api_revise():
                 
                 logger.info(f"Received {len(full_text)} chars from Anthropic")
                 
-                # Проверяем, что ответ не пустой
                 if not full_text.strip():
                     yield _sse("error", {
                         "detail": "The model returned an empty response. Please try again with a shorter text.",
@@ -200,9 +198,7 @@ def api_revise():
                     })
                     return
                 
-                # Парсим JSON из ответа
                 try:
-                    # Ищем JSON
                     start = full_text.find("{")
                     end = full_text.rfind("}") + 1
                     
@@ -225,7 +221,6 @@ def api_revise():
                         })
                         return
                     
-                    # Простая пост-обработка
                     revised_text = revised_text.replace("—", "-")
                     
                     yield _sse("done", {
@@ -282,7 +277,7 @@ def handle_http_exception(exc):
 @app.errorhandler(Exception)
 def handle_exception(exc):
     logger.exception("Unhandled exception")
-    return jsonify(detail=f"Server error: {str(exc)}"), 500
+    return jsonify(detail=f"Server error: {str(e)}"), 500
 
 
 if __name__ == "__main__":
