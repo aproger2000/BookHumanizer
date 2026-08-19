@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.0.3 — Humanization via Translation Chain (с финальным переводом на русский)
+Chapter Editor v3.0.4 — Humanization via Translation Chain (с разбивкой на части)
 Работает полностью бесплатно, без API-ключей.
 """
 import io
@@ -20,9 +20,10 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.0.3"
+APP_VERSION = "3.0.4"
 
-MAX_CHARS = 10_000
+MAX_CHARS = 30_000  # Увеличили для больших текстов
+CHUNK_SIZE = 3000   # Размер части для перевода
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
@@ -39,6 +40,9 @@ def _sse(event_type: str, data: dict) -> str:
 
 def translate_text(text: str, target_lang: str = "en") -> str:
     """Переводит текст через публичный API Google Translate."""
+    if not text or len(text.strip()) < 2:
+        return text
+    
     try:
         url = "https://translate.googleapis.com/translate_a/single"
         params = {
@@ -61,27 +65,67 @@ def translate_text(text: str, target_lang: str = "en") -> str:
         return text
 
 
-def apply_translation_chain(text: str) -> str:
-    """Цепочка переводов через Google Translate с финальным возвратом на русский."""
-    logger.info("Starting translation chain...")
+def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> list:
+    """Разбивает текст на части по предложениям."""
+    if len(text) <= chunk_size:
+        return [text]
     
-    # Шаг 1: Русский → Японский
-    ja_text = translate_text(text, target_lang="ja")
-    logger.info(f"RU->JA complete. Length: {len(ja_text)}")
+    chunks = []
+    current_chunk = ""
     
-    # Шаг 2: Японский → Финский
-    fi_text = translate_text(ja_text, target_lang="fi")
-    logger.info(f"JA->FI complete. Length: {len(fi_text)}")
+    # Разбиваем по предложениям
+    sentences = re.split(r'(?<=[.!?])\s+', text)
     
-    # Шаг 3: Финский → Английский
-    en_text = translate_text(fi_text, target_lang="en")
-    logger.info(f"FI->EN complete. Length: {len(en_text)}")
+    for sentence in sentences:
+        if len(current_chunk) + len(sentence) + 1 <= chunk_size:
+            current_chunk += sentence + " "
+        else:
+            if current_chunk:
+                chunks.append(current_chunk.strip())
+            current_chunk = sentence + " "
     
-    # Шаг 4: Английский → Русский (финальный перевод)
-    final_text = translate_text(en_text, target_lang="ru")
-    logger.info(f"EN->RU complete. Length: {len(final_text)}")
+    if current_chunk:
+        chunks.append(current_chunk.strip())
     
-    return final_text
+    return chunks
+
+
+def process_chunk_through_chain(text: str) -> str:
+    """Обрабатывает один фрагмент через цепочку переводов."""
+    if not text or len(text.strip()) < 2:
+        return text
+    
+    try:
+        # RU -> JA
+        ja = translate_text(text, target_lang="ja")
+        # JA -> FI
+        fi = translate_text(ja, target_lang="fi")
+        # FI -> EN
+        en = translate_text(fi, target_lang="en")
+        # EN -> RU
+        ru = translate_text(en, target_lang="ru")
+        return ru
+    except Exception as e:
+        logger.error(f"Chunk processing error: {e}")
+        return text
+
+
+def apply_translation_chain_full(text: str) -> str:
+    """Обрабатывает весь текст, разбивая на части."""
+    logger.info(f"Starting translation chain for {len(text)} chars...")
+    
+    chunks = split_text_into_chunks(text)
+    logger.info(f"Split into {len(chunks)} chunks")
+    
+    processed_chunks = []
+    for i, chunk in enumerate(chunks):
+        logger.info(f"Processing chunk {i+1}/{len(chunks)}...")
+        processed = process_chunk_through_chain(chunk)
+        processed_chunks.append(processed)
+    
+    result = " ".join(processed_chunks)
+    logger.info(f"Translation complete. Result length: {len(result)}")
+    return result
 
 
 def apply_light_polish(text: str) -> str:
@@ -91,12 +135,6 @@ def apply_light_polish(text: str) -> str:
     # Восстанавливаем правильные кавычки и тире
     text = text.replace('"', '"').replace('"', '"')
     text = text.replace(' - ', ' — ')
-    # Разбиваем на абзацы, если их нет
-    if len(text) > 500 and '\n\n' not in text:
-        sentences = re.split(r'(?<=[.!?])\s+', text)
-        if len(sentences) > 5:
-            mid = len(sentences) // 2
-            text = ' '.join(sentences[:mid]) + '\n\n' + ' '.join(sentences[mid:])
     return text
 
 
@@ -140,7 +178,7 @@ def api_revise():
                 yield _sse("progress", {"chars": 0, "estimated_total": len(chapter_text), "percent": 0})
 
                 logger.info("Applying translation chain...")
-                processed_text = apply_translation_chain(chapter_text)
+                processed_text = apply_translation_chain_full(chapter_text)
                 processed_text = apply_light_polish(processed_text)
 
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 100})
