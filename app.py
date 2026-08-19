@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.0.2 — Humanization via Translation Chain (только Google Translate)
+Chapter Editor v3.0.3 — Humanization via Translation Chain (с финальным переводом на русский)
 Работает полностью бесплатно, без API-ключей.
 """
 import io
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.0.2"
+APP_VERSION = "3.0.3"
 
 MAX_CHARS = 10_000
 
@@ -62,20 +62,24 @@ def translate_text(text: str, target_lang: str = "en") -> str:
 
 
 def apply_translation_chain(text: str) -> str:
-    """Цепочка переводов через Google Translate."""
+    """Цепочка переводов через Google Translate с финальным возвратом на русский."""
     logger.info("Starting translation chain...")
     
-    # Шаг 1: Английский → Японский
+    # Шаг 1: Русский → Японский
     ja_text = translate_text(text, target_lang="ja")
-    logger.info(f"EN->JA complete. Length: {len(ja_text)}")
+    logger.info(f"RU->JA complete. Length: {len(ja_text)}")
     
     # Шаг 2: Японский → Финский
     fi_text = translate_text(ja_text, target_lang="fi")
     logger.info(f"JA->FI complete. Length: {len(fi_text)}")
     
     # Шаг 3: Финский → Английский
-    final_text = translate_text(fi_text, target_lang="en")
-    logger.info(f"FI->EN complete. Length: {len(final_text)}")
+    en_text = translate_text(fi_text, target_lang="en")
+    logger.info(f"FI->EN complete. Length: {len(en_text)}")
+    
+    # Шаг 4: Английский → Русский (финальный перевод)
+    final_text = translate_text(en_text, target_lang="ru")
+    logger.info(f"EN->RU complete. Length: {len(final_text)}")
     
     return final_text
 
@@ -144,11 +148,12 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": "Текст переработан через цепочку переводов (EN→JA→FI→EN)",
+                    "summary": "Текст переработан через цепочку переводов (RU→JA→FI→EN→RU)",
                     "changes": [
                         "Переведён через Google Translate на японский",
                         "Переведён через Google Translate на финский",
-                        "Переведён обратно на английский"
+                        "Переведён на английский",
+                        "Переведён обратно на русский"
                     ],
                     "checklist": []
                 })
