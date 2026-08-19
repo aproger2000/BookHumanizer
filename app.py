@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.2.4 — Humanization via Translation Chain (принудительное разбиение по символам)
+Chapter Editor v3.2.5 — Humanization via Translation Chain (интеллектуальное разбиение на абзацы)
 Работает полностью бесплатно, без API-ключей.
 """
 import io
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.2.4"
+APP_VERSION = "3.2.5"
 
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
@@ -162,56 +162,138 @@ def clean_translation_artifacts(text: str) -> str:
     return text.strip()
 
 
-def force_split_by_length(text: str, max_paragraph_chars: int = 450) -> str:
+def split_into_paragraphs_by_logic(text: str) -> str:
     """
-    ПРИНУДИТЕЛЬНО разбивает текст на абзацы по количеству символов.
-    Это самый надёжный способ, когда точки потеряны.
+    Разбивает текст на абзацы по логике изложения.
+    Анализирует: диалоги, смену тем, длину предложений.
     """
     if not text or len(text) < 200:
         return text
     
-    # Разбиваем по пробелам на слова
-    words = text.split()
+    # Если уже есть абзацы, проверяем их качество
+    existing = text.split('\n\n')
+    if len(existing) >= 3 and all(len(p.strip()) > 50 for p in existing):
+        # Уже хорошо разбито
+        return text
     
+    # Разбиваем по предложениям (по точкам, вопросительным и восклицательным знакам)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    
+    # Если предложений мало — принудительное разбиение
+    if len(sentences) < 5:
+        return force_split_by_length(text)
+    
+    paragraphs = []
+    current_para = []
+    current_len = 0
+    dialog_count = 0
+    is_in_dialog = False
+    
+    for sent in sentences:
+        sent = sent.strip()
+        if not sent:
+            continue
+        
+        # Проверяем, является ли предложение диалогом
+        is_dialog = sent.startswith('"') or sent.startswith('«') or sent.startswith('—')
+        
+        # Проверяем, не начинается ли предложение с новой темы (имя, местоимение)
+        is_new_topic = False
+        topic_words = ['Алексей', 'Масарик', 'Анна', 'Кросс', 'Он', 'Она', 'Они', 'Ибис']
+        for word in topic_words:
+            if sent.startswith(word):
+                is_new_topic = True
+                break
+        
+        # Проверяем длину предложения
+        sent_len = len(sent)
+        is_long = sent_len > 200
+        is_short = sent_len < 30
+        
+        # Логика создания нового абзаца:
+        should_break = False
+        
+        # 1. Если начинается новый диалог
+        if is_dialog and not is_in_dialog and current_para:
+            should_break = True
+        
+        # 2. Если заканчивается диалог и начинается новая тема
+        if is_in_dialog and is_new_topic and current_para:
+            should_break = True
+        
+        # 3. Если предложение очень длинное (>200 символов)
+        if is_long and current_para:
+            should_break = True
+        
+        # 4. Если в абзаце уже 3-5 предложений и длина > 300 символов
+        if len(current_para) >= 3 and current_len > 300 and (is_new_topic or is_dialog):
+            should_break = True
+        
+        # 5. Если в абзаце больше 5 предложений
+        if len(current_para) >= 5:
+            should_break = True
+        
+        # Если нужно разорвать
+        if should_break and current_para:
+            paragraphs.append(' '.join(current_para))
+            current_para = []
+            current_len = 0
+            is_in_dialog = False
+        
+        # Добавляем предложение в текущий абзац
+        current_para.append(sent)
+        current_len += sent_len
+        
+        if is_dialog:
+            is_in_dialog = True
+            dialog_count += 1
+    
+    # Добавляем последний абзац
+    if current_para:
+        paragraphs.append(' '.join(current_para))
+    
+    # Проверяем результат
+    result = '\n\n'.join(paragraphs)
+    
+    # Если абзацев всё ещё мало — применяем принудительное разбиение
+    if len(paragraphs) < 2 and len(sentences) > 10:
+        return force_split_by_length(text)
+    
+    return result
+
+
+def force_split_by_length(text: str, max_paragraph_chars: int = 450) -> str:
+    """
+    ПРИНУДИТЕЛЬНО разбивает текст на абзацы по количеству символов.
+    Используется как запасной вариант.
+    """
+    words = text.split()
     if len(words) < 20:
         return text
     
     paragraphs = []
-    current_paragraph = []
+    current = []
     current_len = 0
     
     for word in words:
-        word_len = len(word) + 1  # +1 для пробела
-        
-        # Если текущий абзац достиг лимита
-        if current_len > max_paragraph_chars and len(current_paragraph) >= 5:
-            paragraphs.append(' '.join(current_paragraph))
-            current_paragraph = []
+        word_len = len(word) + 1
+        if current_len > max_paragraph_chars and len(current) >= 3:
+            paragraphs.append(' '.join(current))
+            current = []
             current_len = 0
-        
-        current_paragraph.append(word)
+        current.append(word)
         current_len += word_len
     
-    # Добавляем последний абзац
-    if current_paragraph:
-        paragraphs.append(' '.join(current_paragraph))
+    if current:
+        paragraphs.append(' '.join(current))
     
-    # Если получился один абзац, но слов много — разбиваем принудительно
+    # Если получился один абзац, но слов много — разбиваем
     if len(paragraphs) == 1 and len(words) > 30:
         mid = len(words) // 2
         paragraphs = [
             ' '.join(words[:mid]),
             ' '.join(words[mid:])
         ]
-    
-    # Если всё ещё один абзац — разбиваем по 400 символов
-    if len(paragraphs) == 1 and len(text) > 500:
-        chunks = []
-        for i in range(0, len(text), 400):
-            chunk = text[i:i+400].strip()
-            if chunk:
-                chunks.append(chunk)
-        return '\n\n'.join(chunks)
     
     return '\n\n'.join(paragraphs)
 
@@ -268,8 +350,8 @@ def api_revise():
                 
                 processed_text = clean_translation_artifacts(processed_text)
                 
-                # ПРИНУДИТЕЛЬНОЕ разбиение по длине (самый надёжный способ)
-                processed_text = force_split_by_length(processed_text)
+                # Интеллектуальное разбиение на абзацы
+                processed_text = split_into_paragraphs_by_logic(processed_text)
                 
                 processed_text = apply_light_polish(processed_text)
 
@@ -281,7 +363,7 @@ def api_revise():
                     "summary": "Текст переработан через цепочку переводов",
                     "changes": [
                         "Переведён через Google Translate (RU→JA→FI→EN→RU)",
-                        "Разделён на абзацы по длине"
+                        "Разделён на абзацы по логике изложения"
                     ],
                     "checklist": []
                 })
