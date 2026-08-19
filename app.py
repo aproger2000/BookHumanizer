@@ -1,6 +1,6 @@
 """
-Chapter Editor v3.3.1 — возврат к 3.0.5 с принудительным разбиением на абзацы
-Работает полностью бесплатно, без API-ключей.
+Chapter Editor v3.4.0 — Humanization via Translation Chain + Claude для разбиения на абзацы
+Работает с Google Translate + Claude (или DeepSeek) для финальной разбивки.
 """
 import io
 import json
@@ -21,10 +21,14 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.3.1"
+APP_VERSION = "3.4.0"
 
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
+
+# API ключи
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
@@ -73,7 +77,6 @@ def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> list:
     
     chunks = []
     current_chunk = ""
-    
     paragraphs = text.split('\n\n')
     
     if len(paragraphs) > 1:
@@ -172,13 +175,86 @@ def clean_translation_artifacts(text: str) -> str:
     return text.strip()
 
 
-def force_split_into_paragraphs(text: str, max_paragraph_chars: int = 450) -> str:
+def split_into_paragraphs_with_claude(text: str) -> str:
     """
-    ПРИНУДИТЕЛЬНО разбивает текст на абзацы по количеству символов.
+    Использует Claude (или DeepSeek) для разбиения текста на абзацы.
+    Не меняет содержание, только добавляет переносы строк.
     """
     if not text or len(text) < 200:
         return text
     
+    # Пробуем Claude, если есть ключ
+    if ANTHROPIC_API_KEY:
+        try:
+            logger.info("Using Claude for paragraph splitting...")
+            headers = {
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json"
+            }
+            payload = {
+                "model": "claude-sonnet-5",
+                "max_tokens": 4000,
+                "system": "You are a text formatter. Your ONLY task is to split the given text into logical paragraphs. Do NOT change any words, do NOT rewrite, do NOT translate. Just add blank lines between paragraphs where natural breaks occur. Return ONLY the formatted text.",
+                "messages": [{"role": "user", "content": f"Format this text into paragraphs:\n\n{text}"}]
+            }
+            response = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers=headers,
+                json=payload,
+                timeout=60
+            )
+            response.raise_for_status()
+            result = response.json()
+            formatted = result['content'][0]['text'].strip()
+            logger.info(f"Claude formatting complete. Paragraphs: {len(formatted.split('\n\n'))}")
+            return formatted
+        except Exception as e:
+            logger.error(f"Claude formatting error: {e}")
+            # Падаем на DeepSeek или принудительное разбиение
+    
+    # Пробуем DeepSeek, если есть ключ
+    if DEEPSEEK_API_KEY:
+        try:
+            logger.info("Using DeepSeek for paragraph splitting...")
+            headers = {
+                "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": "deepseek-chat",
+                "messages": [
+                    {"role": "system", "content": "You are a text formatter. Your ONLY task is to split the given text into logical paragraphs. Do NOT change any words, do NOT rewrite, do NOT translate. Just add blank lines between paragraphs where natural breaks occur. Return ONLY the formatted text."},
+                    {"role": "user", "content": f"Format this text into paragraphs:\n\n{text}"}
+                ],
+                "temperature": 0.1,
+                "max_tokens": 4000
+            }
+            response = requests.post(
+                "https://api.deepseek.com/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=60
+            )
+            response.raise_for_status()
+            result = response.json()
+            formatted = result['choices'][0]['message']['content'].strip()
+            logger.info(f"DeepSeek formatting complete. Paragraphs: {len(formatted.split('\n\n'))}")
+            return formatted
+        except Exception as e:
+            logger.error(f"DeepSeek formatting error: {e}")
+    
+    # Запасной вариант: принудительное разбиение по длине
+    logger.info("Using fallback: force split by length")
+    return force_split_by_length(text)
+
+
+def force_split_by_length(text: str, max_chars: int = 450) -> str:
+    """Принудительное разбиение по длине."""
+    if not text or len(text) < 200:
+        return text
+    
+    # Если уже есть абзацы, проверяем
     existing = text.split('\n\n')
     if len(existing) >= 3:
         good = [p for p in existing if len(p.strip()) > 30]
@@ -195,7 +271,7 @@ def force_split_into_paragraphs(text: str, max_paragraph_chars: int = 450) -> st
     
     for word in words:
         word_len = len(word) + 1
-        if current_len > max_paragraph_chars and len(current) >= 3:
+        if current_len > max_chars and len(current) >= 3:
             paragraphs.append(' '.join(current))
             current = []
             current_len = 0
@@ -215,35 +291,8 @@ def force_split_into_paragraphs(text: str, max_paragraph_chars: int = 450) -> st
     return '\n\n'.join(paragraphs)
 
 
-def restore_paragraphs(text: str, original_text: str) -> str:
-    """Восстанавливает структуру абзацев из исходного текста."""
-    orig_paragraphs = [p for p in original_text.split('\n\n') if p.strip()]
-    
-    if len(orig_paragraphs) <= 1:
-        return text
-    
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    para_sizes = [len(re.split(r'(?<=[.!?])\s+', p)) for p in orig_paragraphs]
-    
-    new_paragraphs = []
-    idx = 0
-    for size in para_sizes:
-        if idx < len(sentences):
-            end = min(idx + size, len(sentences))
-            new_paragraphs.append(' '.join(sentences[idx:end]))
-            idx = end
-    
-    if idx < len(sentences):
-        if new_paragraphs:
-            new_paragraphs[-1] += ' ' + ' '.join(sentences[idx:])
-        else:
-            new_paragraphs.append(' '.join(sentences[idx:]))
-    
-    return '\n\n'.join(new_paragraphs)
-
-
 def apply_light_polish(text: str) -> str:
-    """Лёгкая пост-обработка для естественности."""
+    """Лёгкая пост-обработка."""
     text = re.sub(r'\s+', ' ', text)
     text = text.replace('"', '"').replace('"', '"')
     text = text.replace(' - ', ' — ')
@@ -287,32 +336,39 @@ def api_revise():
 
         def generate():
             try:
-                yield _sse("progress", {"chars": 0, "estimated_total": len(chapter_text), "percent": 0})
+                yield _sse("progress", {"chars": 0, "estimated_total": len(chapter_text), "percent": 0, "log": "Начинаем обработку..."})
 
-                logger.info("Applying translation chain...")
+                # 1. Цепочка переводов
+                logger.info("Step 1: Translation chain...")
                 processed_text = apply_translation_chain_full(chapter_text)
-                
-                processed_text = clean_translation_artifacts(processed_text)
-                
-                # Восстанавливаем абзацы
-                processed_text = restore_paragraphs(processed_text, chapter_text)
-                
-                # Принудительное разбиение, если абзацев мало
-                if len(processed_text.split('\n\n')) < 2:
-                    processed_text = force_split_into_paragraphs(processed_text)
-                
-                processed_text = apply_light_polish(processed_text)
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 40, "log": "Переводы завершены"})
 
+                # 2. Очистка артефактов
+                logger.info("Step 2: Cleaning artifacts...")
+                processed_text = clean_translation_artifacts(processed_text)
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 60, "log": "Артефакты удалены"})
+
+                # 3. Разбиение на абзацы через Claude/DeepSeek
+                logger.info("Step 3: Paragraph splitting with AI...")
+                processed_text = split_into_paragraphs_with_claude(processed_text)
                 para_count = len(processed_text.split('\n\n'))
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 100})
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 85, "log": f"Абзацев: {para_count}"})
+
+                # 4. Финальная полировка
+                logger.info("Step 4: Final polish...")
+                processed_text = apply_light_polish(processed_text)
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 100, "log": "Готово!"})
+
+                final_para_count = len(processed_text.split('\n\n'))
+                logger.info(f"Final: {len(processed_text)} chars, {final_para_count} paragraphs")
 
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": f"Текст переработан через цепочку переводов. Абзацев: {para_count}",
+                    "summary": f"Текст переработан через цепочку переводов. Абзацев: {final_para_count}",
                     "changes": [
                         "Переведён через Google Translate (RU→JA→FI→EN→RU)",
-                        f"Разделён на {para_count} абзацев"
+                        f"Разделён на {final_para_count} абзацев"
                     ],
                     "checklist": []
                 })
