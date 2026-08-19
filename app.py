@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.0.5 — Humanization via Translation Chain (с восстановлением абзацев и чисткой артефактов)
+Chapter Editor v3.0.6 — Humanization via Translation Chain (с сохранением абзацев)
 Работает полностью бесплатно, без API-ключей.
 """
 import io
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.0.5"
+APP_VERSION = "3.0.6"
 
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
@@ -65,53 +65,14 @@ def translate_text(text: str, target_lang: str = "en") -> str:
         return text
 
 
-def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> list:
-    """Разбивает текст на части, сохраняя абзацы."""
-    if len(text) <= chunk_size:
-        return [text]
-    
-    chunks = []
-    current_chunk = ""
-    
-    # Сначала пробуем разбить по абзацам
-    paragraphs = text.split('\n\n')
-    
-    if len(paragraphs) > 1:
-        for para in paragraphs:
-            if len(current_chunk) + len(para) + 2 <= chunk_size:
-                current_chunk += para + "\n\n"
-            else:
-                if current_chunk:
-                    chunks.append(current_chunk.strip())
-                current_chunk = para + "\n\n"
-        if current_chunk:
-            chunks.append(current_chunk.strip())
-        return chunks
-    
-    # Если нет абзацев, разбиваем по предложениям
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    for sentence in sentences:
-        if len(current_chunk) + len(sentence) + 1 <= chunk_size:
-            current_chunk += sentence + " "
-        else:
-            if current_chunk:
-                chunks.append(current_chunk.strip())
-            current_chunk = sentence + " "
-    
-    if current_chunk:
-        chunks.append(current_chunk.strip())
-    
-    return chunks
-
-
-def process_chunk_through_chain(text: str) -> str:
-    """Обрабатывает один фрагмент через цепочку переводов."""
-    if not text or len(text.strip()) < 2:
-        return text
+def process_paragraph_through_chain(paragraph: str) -> str:
+    """Обрабатывает один абзац через цепочку переводов."""
+    if not paragraph or len(paragraph.strip()) < 2:
+        return paragraph
     
     try:
         # RU -> JA
-        ja = translate_text(text, target_lang="ja")
+        ja = translate_text(paragraph, target_lang="ja")
         # JA -> FI
         fi = translate_text(ja, target_lang="fi")
         # FI -> EN
@@ -120,44 +81,76 @@ def process_chunk_through_chain(text: str) -> str:
         ru = translate_text(en, target_lang="ru")
         return ru
     except Exception as e:
-        logger.error(f"Chunk processing error: {e}")
-        return text
+        logger.error(f"Paragraph processing error: {e}")
+        return paragraph
 
 
-def apply_translation_chain_full(text: str) -> str:
-    """Обрабатывает весь текст, разбивая на части."""
+def apply_translation_chain_with_paragraphs(text: str) -> str:
+    """Обрабатывает текст, сохраняя структуру абзацев."""
     logger.info(f"Starting translation chain for {len(text)} chars...")
     
-    chunks = split_text_into_chunks(text)
-    logger.info(f"Split into {len(chunks)} chunks")
+    # Разбиваем на абзацы
+    paragraphs = text.split('\n\n')
+    logger.info(f"Found {len(paragraphs)} paragraphs")
     
-    processed_chunks = []
-    for i, chunk in enumerate(chunks):
-        logger.info(f"Processing chunk {i+1}/{len(chunks)}...")
-        processed = process_chunk_through_chain(chunk)
-        processed_chunks.append(processed)
+    processed_paragraphs = []
     
-    result = "\n\n".join(processed_chunks)
+    for i, para in enumerate(paragraphs):
+        if not para.strip():
+            processed_paragraphs.append(para)
+            continue
+        
+        logger.info(f"Processing paragraph {i+1}/{len(paragraphs)}...")
+        
+        # Если абзац слишком длинный, разбиваем его на части
+        if len(para) > CHUNK_SIZE:
+            # Разбиваем по предложениям
+            sentences = re.split(r'(?<=[.!?])\s+', para)
+            chunks = []
+            current = ""
+            for sent in sentences:
+                if len(current) + len(sent) + 1 <= CHUNK_SIZE:
+                    current += sent + " "
+                else:
+                    if current:
+                        chunks.append(current.strip())
+                    current = sent + " "
+            if current:
+                chunks.append(current.strip())
+            
+            # Обрабатываем каждую часть
+            processed_chunks = []
+            for chunk in chunks:
+                processed = process_paragraph_through_chain(chunk)
+                processed_chunks.append(processed)
+            
+            processed_paragraphs.append(" ".join(processed_chunks))
+        else:
+            processed_paragraphs.append(process_paragraph_through_chain(para))
+    
+    # Собираем обратно с сохранением абзацев
+    result = "\n\n".join(processed_paragraphs)
     logger.info(f"Translation complete. Result length: {len(result)}")
     return result
 
 
 def clean_translation_artifacts(text: str) -> str:
-    """Удаляет артефакты перевода и восстанавливает русский текст."""
-    # Список финских и английских фраз, которые могут остаться
+    """Удаляет артефакты перевода."""
+    # Убираем финские фразы
     finnish_patterns = [
         r'\bTietenkin\b', r'\bhe tarvitsevat\b', r'\bJos se toimii\b',
         r'\bvaikka se ei\b', r'\btoimi\b', r'\bpuolella\b',
         r'\bvaltamerta\b', r'\bRakennamme\b', r'\bsiis\b',
         r'\bsademeren\b', r'\bJa lentää\b', r'\bsinne\b',
         r'\baamiaiseksi\b', r'\bkuvaan\b', r'\bMikä tämä on\b',
-        r'\bAleksei kysyi\b', r'\bTalomme suunnitelma\b'
+        r'\bAleksei kysyi\b', r'\bTalomme suunnitelma\b',
+        r'\bKuussa ei ole\b', r'\brannoille\b'
     ]
     
     for pattern in finnish_patterns:
         text = re.sub(pattern, '', text, flags=re.IGNORECASE)
     
-    # Убираем случайные английские фразы
+    # Убираем английские фразы
     english_phrases = [
         r'\bfirst to spot\b', r'\bthe genius\b', r'\bof a student\b',
         r'\bfrom Siberia\b', r'\bnow he watched\b', r'\bas that spark\b',
@@ -170,53 +163,12 @@ def clean_translation_artifacts(text: str) -> str:
     for pattern in english_phrases:
         text = re.sub(pattern, '', text, flags=re.IGNORECASE)
     
-    # Убираем двойные пробелы и лишние знаки препинания
+    # Убираем двойные пробелы
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
     text = re.sub(r'\s+', ' ', text)
     
     return text.strip()
-
-
-def restore_paragraphs(text: str, original_text: str) -> str:
-    """Восстанавливает структуру абзацев из исходного текста."""
-    # Если в оригинале есть абзацы, пытаемся их восстановить
-    orig_paragraphs = [p for p in original_text.split('\n\n') if p.strip()]
-    
-    if len(orig_paragraphs) <= 1:
-        # Если абзацев нет, просто разбиваем по смыслу
-        sentences = re.split(r'(?<=[.!?])\s+', text)
-        if len(sentences) > 5:
-            mid = len(sentences) // 3
-            return ' '.join(sentences[:mid]) + '\n\n' + ' '.join(sentences[mid:2*mid]) + '\n\n' + ' '.join(sentences[2*mid:])
-        return text
-    
-    # Разбиваем обработанный текст на предложения
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    
-    # Определяем примерное количество предложений в каждом абзаце оригинала
-    para_sizes = []
-    for p in orig_paragraphs:
-        p_sentences = re.split(r'(?<=[.!?])\s+', p)
-        para_sizes.append(len(p_sentences))
-    
-    # Восстанавливаем абзацы
-    new_paragraphs = []
-    idx = 0
-    for size in para_sizes:
-        if idx < len(sentences):
-            end = min(idx + size, len(sentences))
-            new_paragraphs.append(' '.join(sentences[idx:end]))
-            idx = end
-    
-    # Если остались предложения, добавляем их в последний абзац
-    if idx < len(sentences):
-        if new_paragraphs:
-            new_paragraphs[-1] += ' ' + ' '.join(sentences[idx:])
-        else:
-            new_paragraphs.append(' '.join(sentences[idx:]))
-    
-    return '\n\n'.join(new_paragraphs)
 
 
 def apply_light_polish(text: str) -> str:
@@ -269,13 +221,10 @@ def api_revise():
                 yield _sse("progress", {"chars": 0, "estimated_total": len(chapter_text), "percent": 0})
 
                 logger.info("Applying translation chain...")
-                processed_text = apply_translation_chain_full(chapter_text)
+                processed_text = apply_translation_chain_with_paragraphs(chapter_text)
                 
                 # Чистка артефактов
                 processed_text = clean_translation_artifacts(processed_text)
-                
-                # Восстановление абзацев
-                processed_text = restore_paragraphs(processed_text, chapter_text)
                 
                 # Финальная полировка
                 processed_text = apply_light_polish(processed_text)
@@ -285,14 +234,14 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": "Текст переработан через цепочку переводов (RU→JA→FI→EN→RU)",
+                    "summary": "Текст переработан через цепочку переводов с сохранением абзацев",
                     "changes": [
+                        "Каждый абзац обработан отдельно",
                         "Переведён через Google Translate на японский",
                         "Переведён через Google Translate на финский",
                         "Переведён на английский",
                         "Переведён обратно на русский",
-                        "Восстановлены абзацы",
-                        "Удалены артефакты перевода"
+                        "Структура абзацев сохранена"
                     ],
                     "checklist": []
                 })
