@@ -1,7 +1,6 @@
 """
-Chapter Editor v3.4.1 — Humanization via Translation Chain + интеллектуальное разбиение на абзацы
-Работает с Google Translate + Claude (или DeepSeek) для финальной разбивки.
-Возвращает логические абзацы, а не одинаковые по длине.
+Chapter Editor v3.5.0 — Humanization via Translation Chain + выделение диалогов в абзацы
+Работает с Google Translate.
 """
 import io
 import json
@@ -22,14 +21,10 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.4.1"
+APP_VERSION = "3.5.0"
 
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
-
-# API ключи
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
@@ -178,24 +173,23 @@ def clean_translation_artifacts(text: str) -> str:
 
 def split_into_paragraphs_by_logic(text: str) -> str:
     """
-    Разбивает текст на абзацы по логике изложения (не по символам).
-    Анализирует: диалоги, смену тем, длину предложений.
+    Разбивает текст на абзацы по логике изложения.
+    Каждый диалог — отдельный абзац.
     """
     if not text or len(text) < 200:
         return text
     
     # Если уже есть хорошие абзацы — не трогаем
     existing = text.split('\n\n')
-    if len(existing) >= 3:
-        good = [p for p in existing if len(p.strip()) > 50]
-        if len(good) >= 2:
+    if len(existing) >= 4:
+        good = [p for p in existing if len(p.strip()) > 30]
+        if len(good) >= 3:
             return text
     
     # Разбиваем по предложениям
     sentences = re.split(r'(?<=[.!?])\s+', text)
     
     if len(sentences) < 5:
-        # Если предложений мало — принудительное разбиение по длине
         return force_split_by_length(text)
     
     paragraphs = []
@@ -209,35 +203,56 @@ def split_into_paragraphs_by_logic(text: str) -> str:
             continue
         
         # Проверяем, является ли предложение диалогом
-        is_dialog = sent.startswith('"') or sent.startswith('«') or sent.startswith('—')
+        is_dialog = (
+            sent.startswith('—') or 
+            sent.startswith('"') or 
+            sent.startswith('«') or
+            sent.startswith('–')
+        )
         
         # Проверяем, не начинается ли предложение с новой темы
-        is_new_topic = any(sent.startswith(w) for w in ['Алексей', 'Масарик', 'Анна', 'Кросс', 'Он', 'Она'])
+        is_new_topic = any(sent.startswith(w) for w in ['Алексей', 'Масарик', 'Анна', 'Кросс', 'Он', 'Она', 'Они'])
         
         # Проверяем длину
         is_long = len(sent) > 200
-        is_short = len(sent) < 30
         
-        # Логика создания нового абзаца
+        # === НОВАЯ ЛОГИКА ДЛЯ ДИАЛОГОВ ===
+        if is_dialog:
+            # Если это диалог, а текущий абзац не пустой — закрываем его
+            if current_para:
+                paragraphs.append(' '.join(current_para))
+                current_para = []
+                current_len = 0
+            # Добавляем диалог как отдельный абзац
+            paragraphs.append(sent)
+            is_in_dialog = True
+            continue
+        
+        # Если вышли из диалога
+        if is_in_dialog and not is_dialog:
+            is_in_dialog = False
+            # Если есть накопленный текст — начинаем новый абзац
+            if current_para:
+                paragraphs.append(' '.join(current_para))
+                current_para = []
+                current_len = 0
+        
+        # === ЛОГИКА ДЛЯ ОБЫЧНЫХ ПРЕДЛОЖЕНИЙ ===
         should_break = False
         
-        # 1. Если начинается новый диалог
-        if is_dialog and not is_in_dialog and current_para:
+        # 1. Если начинается новая тема
+        if is_new_topic and current_para:
             should_break = True
         
-        # 2. Если заканчивается диалог и начинается новая тема
-        if is_in_dialog and is_new_topic and current_para:
-            should_break = True
-        
-        # 3. Если предложение очень длинное (>200 символов)
+        # 2. Если предложение очень длинное
         if is_long and current_para:
             should_break = True
         
-        # 4. Если в абзаце уже 3-5 предложений и длина > 300 символов
-        if len(current_para) >= 3 and current_len > 300 and (is_new_topic or is_dialog):
+        # 3. Если в абзаце уже 3-5 предложений и длина > 300 символов
+        if len(current_para) >= 3 and current_len > 300 and is_new_topic:
             should_break = True
         
-        # 5. Если в абзаце больше 5 предложений
+        # 4. Если в абзаце больше 5 предложений
         if len(current_para) >= 5:
             should_break = True
         
@@ -246,14 +261,10 @@ def split_into_paragraphs_by_logic(text: str) -> str:
             paragraphs.append(' '.join(current_para))
             current_para = []
             current_len = 0
-            is_in_dialog = False
         
         # Добавляем предложение в текущий абзац
         current_para.append(sent)
         current_len += len(sent)
-        
-        if is_dialog:
-            is_in_dialog = True
     
     # Добавляем последний абзац
     if current_para:
@@ -358,7 +369,7 @@ def api_revise():
                 processed_text = clean_translation_artifacts(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 60, "log": "Артефакты удалены"})
 
-                # 3. Интеллектуальное разбиение на абзацы
+                # 3. Интеллектуальное разбиение на абзацы (с выделением диалогов)
                 logger.info("Step 3: Intelligent paragraph splitting...")
                 processed_text = split_into_paragraphs_by_logic(processed_text)
                 para_count = len(processed_text.split('\n\n'))
