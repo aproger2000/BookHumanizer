@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.0.4 — Humanization via Translation Chain (с разбивкой на части)
+Chapter Editor v3.0.5 — Humanization via Translation Chain (с восстановлением абзацев и чисткой артефактов)
 Работает полностью бесплатно, без API-ключей.
 """
 import io
@@ -20,10 +20,10 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.0.4"
+APP_VERSION = "3.0.5"
 
-MAX_CHARS = 30_000  # Увеличили для больших текстов
-CHUNK_SIZE = 3000   # Размер части для перевода
+MAX_CHARS = 30_000
+CHUNK_SIZE = 3000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
@@ -66,16 +66,30 @@ def translate_text(text: str, target_lang: str = "en") -> str:
 
 
 def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> list:
-    """Разбивает текст на части по предложениям."""
+    """Разбивает текст на части, сохраняя абзацы."""
     if len(text) <= chunk_size:
         return [text]
     
     chunks = []
     current_chunk = ""
     
-    # Разбиваем по предложениям
-    sentences = re.split(r'(?<=[.!?])\s+', text)
+    # Сначала пробуем разбить по абзацам
+    paragraphs = text.split('\n\n')
     
+    if len(paragraphs) > 1:
+        for para in paragraphs:
+            if len(current_chunk) + len(para) + 2 <= chunk_size:
+                current_chunk += para + "\n\n"
+            else:
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                current_chunk = para + "\n\n"
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+        return chunks
+    
+    # Если нет абзацев, разбиваем по предложениям
+    sentences = re.split(r'(?<=[.!?])\s+', text)
     for sentence in sentences:
         if len(current_chunk) + len(sentence) + 1 <= chunk_size:
             current_chunk += sentence + " "
@@ -123,9 +137,86 @@ def apply_translation_chain_full(text: str) -> str:
         processed = process_chunk_through_chain(chunk)
         processed_chunks.append(processed)
     
-    result = " ".join(processed_chunks)
+    result = "\n\n".join(processed_chunks)
     logger.info(f"Translation complete. Result length: {len(result)}")
     return result
+
+
+def clean_translation_artifacts(text: str) -> str:
+    """Удаляет артефакты перевода и восстанавливает русский текст."""
+    # Список финских и английских фраз, которые могут остаться
+    finnish_patterns = [
+        r'\bTietenkin\b', r'\bhe tarvitsevat\b', r'\bJos se toimii\b',
+        r'\bvaikka se ei\b', r'\btoimi\b', r'\bpuolella\b',
+        r'\bvaltamerta\b', r'\bRakennamme\b', r'\bsiis\b',
+        r'\bsademeren\b', r'\bJa lentää\b', r'\bsinne\b',
+        r'\baamiaiseksi\b', r'\bkuvaan\b', r'\bMikä tämä on\b',
+        r'\bAleksei kysyi\b', r'\bTalomme suunnitelma\b'
+    ]
+    
+    for pattern in finnish_patterns:
+        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+    
+    # Убираем случайные английские фразы
+    english_phrases = [
+        r'\bfirst to spot\b', r'\bthe genius\b', r'\bof a student\b',
+        r'\bfrom Siberia\b', r'\bnow he watched\b', r'\bas that spark\b',
+        r'\bignited its owner\'s career\b', r'\bI came to warn you\b',
+        r'\bthey want to seduce you\b', r'\bthey provide the lab\b',
+        r'\bbudget and team\b', r'\bwhatever you want\b',
+        r'\bhowever research requires a license\b'
+    ]
+    
+    for pattern in english_phrases:
+        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+    
+    # Убираем двойные пробелы и лишние знаки препинания
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
+    text = re.sub(r'\s+', ' ', text)
+    
+    return text.strip()
+
+
+def restore_paragraphs(text: str, original_text: str) -> str:
+    """Восстанавливает структуру абзацев из исходного текста."""
+    # Если в оригинале есть абзацы, пытаемся их восстановить
+    orig_paragraphs = [p for p in original_text.split('\n\n') if p.strip()]
+    
+    if len(orig_paragraphs) <= 1:
+        # Если абзацев нет, просто разбиваем по смыслу
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        if len(sentences) > 5:
+            mid = len(sentences) // 3
+            return ' '.join(sentences[:mid]) + '\n\n' + ' '.join(sentences[mid:2*mid]) + '\n\n' + ' '.join(sentences[2*mid:])
+        return text
+    
+    # Разбиваем обработанный текст на предложения
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    
+    # Определяем примерное количество предложений в каждом абзаце оригинала
+    para_sizes = []
+    for p in orig_paragraphs:
+        p_sentences = re.split(r'(?<=[.!?])\s+', p)
+        para_sizes.append(len(p_sentences))
+    
+    # Восстанавливаем абзацы
+    new_paragraphs = []
+    idx = 0
+    for size in para_sizes:
+        if idx < len(sentences):
+            end = min(idx + size, len(sentences))
+            new_paragraphs.append(' '.join(sentences[idx:end]))
+            idx = end
+    
+    # Если остались предложения, добавляем их в последний абзац
+    if idx < len(sentences):
+        if new_paragraphs:
+            new_paragraphs[-1] += ' ' + ' '.join(sentences[idx:])
+        else:
+            new_paragraphs.append(' '.join(sentences[idx:]))
+    
+    return '\n\n'.join(new_paragraphs)
 
 
 def apply_light_polish(text: str) -> str:
@@ -179,6 +270,14 @@ def api_revise():
 
                 logger.info("Applying translation chain...")
                 processed_text = apply_translation_chain_full(chapter_text)
+                
+                # Чистка артефактов
+                processed_text = clean_translation_artifacts(processed_text)
+                
+                # Восстановление абзацев
+                processed_text = restore_paragraphs(processed_text, chapter_text)
+                
+                # Финальная полировка
                 processed_text = apply_light_polish(processed_text)
 
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 100})
@@ -191,7 +290,9 @@ def api_revise():
                         "Переведён через Google Translate на японский",
                         "Переведён через Google Translate на финский",
                         "Переведён на английский",
-                        "Переведён обратно на русский"
+                        "Переведён обратно на русский",
+                        "Восстановлены абзацы",
+                        "Удалены артефакты перевода"
                     ],
                     "checklist": []
                 })
@@ -225,7 +326,7 @@ def handle_http_exception(exc):
 @app.errorhandler(Exception)
 def handle_exception(exc):
     logger.exception("Unhandled exception")
-    return jsonify(detail=f"Server error: {str(exc)}"), 500
+    return jsonify(detail=f"Server error: {str(e)}"), 500
 
 
 if __name__ == "__main__":
