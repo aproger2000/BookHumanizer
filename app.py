@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.1.0 — Humanization via Translation Chain (с принудительным восстановлением абзацев)
+Chapter Editor v3.2.0 — Humanization via Translation Chain (с умным разделением на абзацы)
 Работает полностью бесплатно, без API-ключей.
 """
 import io
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.1.0"
+APP_VERSION = "3.2.0"
 
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
@@ -85,7 +85,6 @@ def apply_translation_chain_with_paragraphs(text: str) -> str:
     """Обрабатывает текст, сохраняя структуру абзацев."""
     logger.info(f"Starting translation chain for {len(text)} chars...")
     
-    # Разбиваем на абзацы
     paragraphs = text.split('\n\n')
     logger.info(f"Found {len(paragraphs)} paragraphs")
     
@@ -128,7 +127,6 @@ def apply_translation_chain_with_paragraphs(text: str) -> str:
 
 def clean_translation_artifacts(text: str) -> str:
     """Удаляет артефакты перевода."""
-    # Убираем финские фразы
     finnish_patterns = [
         r'\bTietenkin\b', r'\bhe tarvitsevat\b', r'\bJos se toimii\b',
         r'\bvaikka se ei\b', r'\btoimi\b', r'\bpuolella\b',
@@ -142,7 +140,6 @@ def clean_translation_artifacts(text: str) -> str:
     for pattern in finnish_patterns:
         text = re.sub(pattern, '', text, flags=re.IGNORECASE)
     
-    # Убираем английские фразы
     english_phrases = [
         r'\bfirst to spot\b', r'\bthe genius\b', r'\bof a student\b',
         r'\bfrom Siberia\b', r'\bnow he watched\b', r'\bas that spark\b',
@@ -155,7 +152,6 @@ def clean_translation_artifacts(text: str) -> str:
     for pattern in english_phrases:
         text = re.sub(pattern, '', text, flags=re.IGNORECASE)
     
-    # Убираем двойные пробелы
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
     text = re.sub(r'\s+', ' ', text)
@@ -163,49 +159,91 @@ def clean_translation_artifacts(text: str) -> str:
     return text.strip()
 
 
-def force_restore_paragraphs(text: str, original_text: str) -> str:
-    """Принудительно восстанавливает абзацы на основе оригинального текста."""
-    # Получаем количество абзацев в оригинале
-    orig_paragraphs = [p.strip() for p in original_text.split('\n\n') if p.strip()]
-    
-    if len(orig_paragraphs) <= 1:
-        # Если в оригинале нет абзацев, разбиваем по длине
-        sentences = re.split(r'(?<=[.!?])\s+', text)
-        if len(sentences) > 5:
-            # Группируем предложения в абзацы по 3-5 предложений
-            chunk_size = max(3, min(5, len(sentences) // 3))
-            new_paragraphs = []
-            for i in range(0, len(sentences), chunk_size):
-                new_paragraphs.append(' '.join(sentences[i:i+chunk_size]))
-            return '\n\n'.join(new_paragraphs)
+def split_into_paragraphs_by_meaning(text: str) -> str:
+    """
+    Разбивает текст на абзацы по смыслу.
+    Анализирует длину предложений, темы и логические переходы.
+    """
+    if not text or len(text) < 200:
         return text
     
-    # Восстанавливаем абзацы по количеству предложений
+    # Разбиваем на предложения
     sentences = re.split(r'(?<=[.!?])\s+', text)
     
-    # Определяем примерное количество предложений в каждом абзаце
-    para_sizes = []
-    for p in orig_paragraphs:
-        p_sentences = re.split(r'(?<=[.!?])\s+', p)
-        para_sizes.append(max(1, len(p_sentences)))
+    if len(sentences) <= 3:
+        return text
     
-    new_paragraphs = []
-    idx = 0
-    for size in para_sizes:
-        if idx < len(sentences):
-            end = min(idx + size, len(sentences))
-            if idx < end:
-                new_paragraphs.append(' '.join(sentences[idx:end]))
-            idx = end
+    paragraphs = []
+    current_paragraph = []
+    current_length = 0
     
-    # Если остались предложения, добавляем их
-    if idx < len(sentences):
-        if new_paragraphs:
-            new_paragraphs[-1] += ' ' + ' '.join(sentences[idx:])
-        else:
-            new_paragraphs.append(' '.join(sentences[idx:]))
+    for i, sent in enumerate(sentences):
+        sent_len = len(sent)
+        
+        # Если предложение очень длинное (>200 символов) — это отдельный абзац
+        if sent_len > 200 and current_paragraph:
+            paragraphs.append(' '.join(current_paragraph))
+            current_paragraph = []
+            current_length = 0
+            paragraphs.append(sent)
+            continue
+        
+        # Если предложение очень короткое (<30 символов) — присоединяем к следующему
+        if sent_len < 30 and i < len(sentences) - 1:
+            current_paragraph.append(sent)
+            current_length += sent_len
+            continue
+        
+        # Проверяем, не пора ли начать новый абзац
+        # 1. По длине (300-500 символов)
+        # 2. По количеству предложений (3-5)
+        # 3. По наличию диалога в начале предложения
+        is_dialog = sent.strip().startswith('"') or sent.strip().startswith('«') or sent.strip().startswith('—')
+        is_question = sent.strip().endswith('?')
+        is_short = sent_len < 50
+        
+        should_break = False
+        
+        # Если накопилось 3-5 предложений и длина > 300 символов
+        if len(current_paragraph) >= 3 and current_length > 300:
+            should_break = True
+        # Если накопилось больше 5 предложений
+        elif len(current_paragraph) >= 5:
+            should_break = True
+        # Если текущая длина > 500 символов
+        elif current_length > 500:
+            should_break = True
+        # Если следующее предложение — диалог, а текущий абзац не диалог
+        elif is_dialog and current_paragraph and not current_paragraph[0].strip().startswith('"') and not current_paragraph[0].strip().startswith('«'):
+            should_break = True
+        # Если текущее предложение — вопрос, а в абзаце уже есть 2+ предложения
+        elif is_question and len(current_paragraph) >= 2:
+            should_break = True
+        # Если резкая смена темы (по длине предложения)
+        elif current_paragraph and sent_len > 150 and current_length > 200:
+            should_break = True
+        
+        if should_break and current_paragraph:
+            paragraphs.append(' '.join(current_paragraph))
+            current_paragraph = []
+            current_length = 0
+        
+        current_paragraph.append(sent)
+        current_length += sent_len
     
-    return '\n\n'.join(new_paragraphs)
+    # Добавляем последний абзац
+    if current_paragraph:
+        paragraphs.append(' '.join(current_paragraph))
+    
+    # Если получился один абзац, но предложений много — разбиваем принудительно
+    if len(paragraphs) == 1 and len(sentences) > 6:
+        mid = len(sentences) // 2
+        paragraphs = [
+            ' '.join(sentences[:mid]),
+            ' '.join(sentences[mid:])
+        ]
+    
+    return '\n\n'.join(paragraphs)
 
 
 def apply_light_polish(text: str) -> str:
@@ -260,8 +298,8 @@ def api_revise():
                 
                 processed_text = clean_translation_artifacts(processed_text)
                 
-                # Принудительное восстановление абзацев
-                processed_text = force_restore_paragraphs(processed_text, chapter_text)
+                # Умное разделение на абзацы по смыслу
+                processed_text = split_into_paragraphs_by_meaning(processed_text)
                 
                 processed_text = apply_light_polish(processed_text)
 
@@ -270,11 +308,10 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": "Текст переработан через цепочку переводов",
+                    "summary": "Текст переработан через цепочку переводов с умным разделением на абзацы",
                     "changes": [
-                        "Каждый абзац обработан отдельно",
                         "Переведён через Google Translate (RU→JA→FI→EN→RU)",
-                        "Структура абзацев сохранена"
+                        "Разделён на абзацы по смыслу"
                     ],
                     "checklist": []
                 })
