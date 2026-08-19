@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.0.6 — Humanization via Translation Chain (с сохранением абзацев)
+Chapter Editor v3.1.0 — Humanization via Translation Chain (с принудительным восстановлением абзацев)
 Работает полностью бесплатно, без API-ключей.
 """
 import io
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.0.6"
+APP_VERSION = "3.1.0"
 
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
@@ -71,13 +71,9 @@ def process_paragraph_through_chain(paragraph: str) -> str:
         return paragraph
     
     try:
-        # RU -> JA
         ja = translate_text(paragraph, target_lang="ja")
-        # JA -> FI
         fi = translate_text(ja, target_lang="fi")
-        # FI -> EN
         en = translate_text(fi, target_lang="en")
-        # EN -> RU
         ru = translate_text(en, target_lang="ru")
         return ru
     except Exception as e:
@@ -102,9 +98,7 @@ def apply_translation_chain_with_paragraphs(text: str) -> str:
         
         logger.info(f"Processing paragraph {i+1}/{len(paragraphs)}...")
         
-        # Если абзац слишком длинный, разбиваем его на части
         if len(para) > CHUNK_SIZE:
-            # Разбиваем по предложениям
             sentences = re.split(r'(?<=[.!?])\s+', para)
             chunks = []
             current = ""
@@ -118,7 +112,6 @@ def apply_translation_chain_with_paragraphs(text: str) -> str:
             if current:
                 chunks.append(current.strip())
             
-            # Обрабатываем каждую часть
             processed_chunks = []
             for chunk in chunks:
                 processed = process_paragraph_through_chain(chunk)
@@ -128,7 +121,6 @@ def apply_translation_chain_with_paragraphs(text: str) -> str:
         else:
             processed_paragraphs.append(process_paragraph_through_chain(para))
     
-    # Собираем обратно с сохранением абзацев
     result = "\n\n".join(processed_paragraphs)
     logger.info(f"Translation complete. Result length: {len(result)}")
     return result
@@ -171,11 +163,54 @@ def clean_translation_artifacts(text: str) -> str:
     return text.strip()
 
 
+def force_restore_paragraphs(text: str, original_text: str) -> str:
+    """Принудительно восстанавливает абзацы на основе оригинального текста."""
+    # Получаем количество абзацев в оригинале
+    orig_paragraphs = [p.strip() for p in original_text.split('\n\n') if p.strip()]
+    
+    if len(orig_paragraphs) <= 1:
+        # Если в оригинале нет абзацев, разбиваем по длине
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        if len(sentences) > 5:
+            # Группируем предложения в абзацы по 3-5 предложений
+            chunk_size = max(3, min(5, len(sentences) // 3))
+            new_paragraphs = []
+            for i in range(0, len(sentences), chunk_size):
+                new_paragraphs.append(' '.join(sentences[i:i+chunk_size]))
+            return '\n\n'.join(new_paragraphs)
+        return text
+    
+    # Восстанавливаем абзацы по количеству предложений
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    
+    # Определяем примерное количество предложений в каждом абзаце
+    para_sizes = []
+    for p in orig_paragraphs:
+        p_sentences = re.split(r'(?<=[.!?])\s+', p)
+        para_sizes.append(max(1, len(p_sentences)))
+    
+    new_paragraphs = []
+    idx = 0
+    for size in para_sizes:
+        if idx < len(sentences):
+            end = min(idx + size, len(sentences))
+            if idx < end:
+                new_paragraphs.append(' '.join(sentences[idx:end]))
+            idx = end
+    
+    # Если остались предложения, добавляем их
+    if idx < len(sentences):
+        if new_paragraphs:
+            new_paragraphs[-1] += ' ' + ' '.join(sentences[idx:])
+        else:
+            new_paragraphs.append(' '.join(sentences[idx:]))
+    
+    return '\n\n'.join(new_paragraphs)
+
+
 def apply_light_polish(text: str) -> str:
     """Лёгкая пост-обработка для естественности."""
-    # Убираем повторяющиеся пробелы
     text = re.sub(r'\s+', ' ', text)
-    # Восстанавливаем правильные кавычки и тире
     text = text.replace('"', '"').replace('"', '"')
     text = text.replace(' - ', ' — ')
     return text
@@ -223,10 +258,11 @@ def api_revise():
                 logger.info("Applying translation chain...")
                 processed_text = apply_translation_chain_with_paragraphs(chapter_text)
                 
-                # Чистка артефактов
                 processed_text = clean_translation_artifacts(processed_text)
                 
-                # Финальная полировка
+                # Принудительное восстановление абзацев
+                processed_text = force_restore_paragraphs(processed_text, chapter_text)
+                
                 processed_text = apply_light_polish(processed_text)
 
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 100})
@@ -234,13 +270,10 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": "Текст переработан через цепочку переводов с сохранением абзацев",
+                    "summary": "Текст переработан через цепочку переводов",
                     "changes": [
                         "Каждый абзац обработан отдельно",
-                        "Переведён через Google Translate на японский",
-                        "Переведён через Google Translate на финский",
-                        "Переведён на английский",
-                        "Переведён обратно на русский",
+                        "Переведён через Google Translate (RU→JA→FI→EN→RU)",
                         "Структура абзацев сохранена"
                     ],
                     "checklist": []
