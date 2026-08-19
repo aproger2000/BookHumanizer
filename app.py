@@ -1,410 +1,786 @@
-"""
-Chapter Editor v3.4.0 — Humanization via Translation Chain + Claude для разбиения на абзацы
-Работает с Google Translate + Claude (или DeepSeek) для финальной разбивки.
-"""
-import io
-import json
-import os
-import re
-import time
-import logging
-import random
-from pathlib import Path
-
-import requests
-from flask import Flask, Response, jsonify, request, stream_with_context
-from werkzeug.exceptions import HTTPException
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-BASE_DIR = Path(__file__).resolve().parent
-STATIC_DIR = BASE_DIR / "static"
-
-APP_VERSION = "3.4.0"
-
-MAX_CHARS = 30_000
-CHUNK_SIZE = 3000
-
-# API ключи
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
-
-app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
-app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
-
-
-class ChapterEditError(RuntimeError):
-    pass
-
-
-def _sse(event_type: str, data: dict) -> str:
-    payload = {"type": event_type, **data}
-    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
-
-def translate_text(text: str, target_lang: str = "en") -> str:
-    """Переводит текст через публичный API Google Translate."""
-    if not text or len(text.strip()) < 2:
-        return text
-    
-    try:
-        url = "https://translate.googleapis.com/translate_a/single"
-        params = {
-            "client": "gtx",
-            "sl": "auto",
-            "tl": target_lang,
-            "dt": "t",
-            "q": text
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chapter Editor</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
-        response = requests.get(url, params=params, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        translated = ""
-        for item in data[0]:
-            if item[0]:
-                translated += item[0]
-        return translated or text
-    except Exception as e:
-        logger.error(f"Translate error: {e}")
-        return text
 
+        body {
+            background: #f0f4fa;
+            color: #1a2634;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 24px;
+        }
 
-def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> list:
-    """Разбивает текст на части, сохраняя абзацы."""
-    if len(text) <= chunk_size:
-        return [text]
-    
-    chunks = []
-    current_chunk = ""
-    paragraphs = text.split('\n\n')
-    
-    if len(paragraphs) > 1:
-        for para in paragraphs:
-            if len(current_chunk) + len(para) + 2 <= chunk_size:
-                current_chunk += para + "\n\n"
-            else:
-                if current_chunk:
-                    chunks.append(current_chunk.strip())
-                current_chunk = para + "\n\n"
-        if current_chunk:
-            chunks.append(current_chunk.strip())
-        return chunks
-    
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    for sentence in sentences:
-        if len(current_chunk) + len(sentence) + 1 <= chunk_size:
-            current_chunk += sentence + " "
-        else:
-            if current_chunk:
-                chunks.append(current_chunk.strip())
-            current_chunk = sentence + " "
-    
-    if current_chunk:
-        chunks.append(current_chunk.strip())
-    
-    return chunks
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            width: 100%;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
 
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 0 24px;
+            border-bottom: 1px solid #d0d9e4;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
 
-def process_chunk_through_chain(text: str) -> str:
-    """Обрабатывает один фрагмент через цепочку переводов."""
-    if not text or len(text.strip()) < 2:
-        return text
-    
-    try:
-        ja = translate_text(text, target_lang="ja")
-        fi = translate_text(ja, target_lang="fi")
-        en = translate_text(fi, target_lang="en")
-        ru = translate_text(en, target_lang="ru")
-        return ru
-    except Exception as e:
-        logger.error(f"Chunk processing error: {e}")
-        return text
+        .logo h1 {
+            font-size: 22px;
+            font-weight: 600;
+            color: #1a2634;
+            letter-spacing: -0.3px;
+        }
 
+        .logo .sub {
+            font-size: 13px;
+            color: #6b7f94;
+            font-weight: 400;
+        }
 
-def apply_translation_chain_full(text: str) -> str:
-    """Обрабатывает весь текст, разбивая на части."""
-    logger.info(f"Starting translation chain for {len(text)} chars...")
-    
-    chunks = split_text_into_chunks(text)
-    logger.info(f"Split into {len(chunks)} chunks")
-    
-    processed_chunks = []
-    for i, chunk in enumerate(chunks):
-        logger.info(f"Processing chunk {i+1}/{len(chunks)}...")
-        processed = process_chunk_through_chain(chunk)
-        processed_chunks.append(processed)
-    
-    result = "\n\n".join(processed_chunks)
-    logger.info(f"Translation complete. Result length: {len(result)}")
-    return result
+        .version-badge {
+            background: #e4eaf2;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            color: #3d546a;
+            font-weight: 500;
+        }
 
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1.5fr;
+            gap: 24px;
+            margin-top: 28px;
+            flex: 1;
+        }
 
-def clean_translation_artifacts(text: str) -> str:
-    """Удаляет артефакты перевода."""
-    finnish_patterns = [
-        r'\bTietenkin\b', r'\bhe tarvitsevat\b', r'\bJos se toimii\b',
-        r'\bvaikka se ei\b', r'\btoimi\b', r'\bpuolella\b',
-        r'\bvaltamerta\b', r'\bRakennamme\b', r'\bsiis\b',
-        r'\bsademeren\b', r'\bJa lentää\b', r'\bsinne\b',
-        r'\baamiaiseksi\b', r'\bkuvaan\b', r'\bMikä tämä on\b',
-        r'\bAleksei kysyi\b', r'\bTalomme suunnitelma\b',
-        r'\bKuussa ei ole\b', r'\brannoille\b'
-    ]
-    
-    for pattern in finnish_patterns:
-        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
-    
-    english_phrases = [
-        r'\bfirst to spot\b', r'\bthe genius\b', r'\bof a student\b',
-        r'\bfrom Siberia\b', r'\bnow he watched\b', r'\bas that spark\b',
-        r'\bignited its owner\'s career\b', r'\bI came to warn you\b',
-        r'\bthey want to seduce you\b', r'\bthey provide the lab\b',
-        r'\bbudget and team\b', r'\bwhatever you want\b',
-        r'\bhowever research requires a license\b'
-    ]
-    
-    for pattern in english_phrases:
-        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
-    
-    text = re.sub(r'(\w)\.(\w)', r'\1\2', text)
-    text = re.sub(r'\s+', ' ', text)
-    text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
-    text = re.sub(r'\s+', ' ', text)
-    
-    return text.strip()
-
-
-def split_into_paragraphs_with_claude(text: str) -> str:
-    """
-    Использует Claude (или DeepSeek) для разбиения текста на абзацы.
-    Не меняет содержание, только добавляет переносы строк.
-    """
-    if not text or len(text) < 200:
-        return text
-    
-    # Пробуем Claude, если есть ключ
-    if ANTHROPIC_API_KEY:
-        try:
-            logger.info("Using Claude for paragraph splitting...")
-            headers = {
-                "x-api-key": ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json"
+        @media (max-width: 768px) {
+            .main-grid {
+                grid-template-columns: 1fr;
             }
-            payload = {
-                "model": "claude-sonnet-5",
-                "max_tokens": 4000,
-                "system": "You are a text formatter. Your ONLY task is to split the given text into logical paragraphs. Do NOT change any words, do NOT rewrite, do NOT translate. Just add blank lines between paragraphs where natural breaks occur. Return ONLY the formatted text.",
-                "messages": [{"role": "user", "content": f"Format this text into paragraphs:\n\n{text}"}]
+            body { padding: 16px; }
+        }
+
+        .panel {
+            background: #ffffff;
+            border-radius: 16px;
+            border: 1px solid #d0d9e4;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .panel-header h2 {
+            font-size: 15px;
+            font-weight: 500;
+            color: #2c3e50;
+            letter-spacing: 0.3px;
+        }
+
+        .panel-header .count {
+            font-size: 12px;
+            color: #6b7f94;
+            background: #eef3f8;
+            padding: 4px 12px;
+            border-radius: 12px;
+        }
+
+        textarea {
+            width: 100%;
+            flex: 1;
+            min-height: 400px;
+            background: #f7fafc;
+            border: 1px solid #d0d9e4;
+            border-radius: 12px;
+            color: #1a2634;
+            font-family: 'Inter', monospace;
+            font-size: 14px;
+            line-height: 1.7;
+            padding: 16px;
+            resize: vertical;
+            transition: border-color 0.2s;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: #6c8fc7;
+        }
+
+        textarea::placeholder {
+            color: #8fa2b8;
+        }
+
+        .controls {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid #e4eaf2;
+        }
+
+        .controls select {
+            background: #f7fafc;
+            border: 1px solid #d0d9e4;
+            border-radius: 10px;
+            padding: 10px 16px;
+            color: #1a2634;
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            cursor: pointer;
+            flex: 1;
+            min-width: 120px;
+        }
+
+        .btn {
+            padding: 10px 28px;
+            border: none;
+            border-radius: 10px;
+            font-family: 'Inter', sans-serif;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+        }
+
+        .btn-primary {
+            background: #2c3e50;
+            color: #ffffff;
+        }
+
+        .btn-primary:hover {
+            background: #1a2a3a;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 16px rgba(44, 62, 80, 0.2);
+        }
+
+        .btn-primary:disabled {
+            background: #8fa2b8;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .btn-secondary {
+            background: #e4eaf2;
+            color: #2c3e50;
+        }
+
+        .btn-secondary:hover {
+            background: #d0d9e4;
+        }
+
+        .progress-container {
+            margin-top: 12px;
+            background: #eef3f8;
+            border-radius: 8px;
+            height: 6px;
+            overflow: hidden;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .progress-container.active {
+            opacity: 1;
+        }
+
+        .progress-bar {
+            height: 100%;
+            width: 0%;
+            background: #2c3e50;
+            border-radius: 8px;
+            transition: width 0.2s ease;
+        }
+
+        .status-text {
+            font-size: 13px;
+            color: #6b7f94;
+            margin-top: 10px;
+            min-height: 20px;
+        }
+
+        .status-text.success {
+            color: #1e7e34;
+        }
+
+        .status-text.error {
+            color: #b3362a;
+        }
+
+        .step-indicator {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+            font-size: 12px;
+            color: #6b7f94;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .step-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #d0d9e4;
+            transition: all 0.3s;
+        }
+
+        .step-dot.active {
+            background: #2c3e50;
+            transform: scale(1.2);
+        }
+
+        .step-dot.done {
+            background: #1e7e34;
+        }
+
+        .step-label {
+            font-size: 12px;
+            color: #6b7f94;
+            margin-left: 4px;
+        }
+
+        .result-panel .panel-body {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .result-panel .panel-body textarea {
+            flex: 1;
+            min-height: 400px;
+        }
+
+        .checklist {
+            margin-top: 12px;
+            padding: 12px 16px;
+            background: #f7fafc;
+            border-radius: 10px;
+            border: 1px solid #d0d9e4;
+            display: none;
+        }
+
+        .checklist.visible {
+            display: block;
+        }
+
+        .checklist-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 4px 0;
+            font-size: 13px;
+            color: #2c3e50;
+        }
+
+        .checklist-item .icon {
+            font-size: 16px;
+            width: 20px;
+            text-align: center;
+        }
+
+        .checklist-item .icon.pass {
+            color: #1e7e34;
+        }
+
+        .checklist-item .icon.fail {
+            color: #b3362a;
+        }
+
+        .checklist-item .icon.unknown {
+            color: #8fa2b8;
+        }
+
+        .footer {
+            margin-top: 32px;
+            padding-top: 16px;
+            border-top: 1px solid #d0d9e4;
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #8fa2b8;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .footer a {
+            color: #6b7f94;
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            color: #2c3e50;
+        }
+
+        .copy-btn {
+            background: #eef3f8;
+            border: 1px solid #d0d9e4;
+            color: #2c3e50;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .copy-btn:hover {
+            background: #d0d9e4;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <div class="logo">
+            <h1>Chapter Editor <span class="sub">— текст как живой</span></h1>
+        </div>
+        <span class="version-badge" id="versionBadge">v...</span>
+    </header>
+
+    <div class="main-grid">
+        <!-- Левая панель -->
+        <div class="panel">
+            <div class="panel-header">
+                <h2>📄 Исходный текст</h2>
+                <span class="count" id="sourceCount">0 симв.</span>
+            </div>
+            <textarea id="sourceText" placeholder="Вставьте главу сюда или загрузите файл..."></textarea>
+            <div class="controls">
+                <select id="styleSelect">
+                    <option value="neutral">Нейтральный</option>
+                    <option value="dynamic_scifi" selected>Динамичная НФ</option>
+                </select>
+                <button class="btn btn-secondary" id="loadBtn">📂 Загрузить</button>
+                <button class="btn btn-primary" id="editBtn">✏️ Редактировать</button>
+            </div>
+            <div class="progress-container" id="progressContainer">
+                <div class="progress-bar" id="progressBar"></div>
+            </div>
+            <div class="step-indicator" id="stepIndicator">
+                <span>Шаги:</span>
+                <span class="step-dot" id="step1"></span>
+                <span class="step-label" id="step1Label">Отправка</span>
+                <span class="step-dot" id="step2"></span>
+                <span class="step-label" id="step2Label">Генерация</span>
+                <span class="step-dot" id="step3"></span>
+                <span class="step-label" id="step3Label">Пост-обработка</span>
+                <span class="step-dot" id="step4"></span>
+                <span class="step-label" id="step4Label">Готово</span>
+            </div>
+            <div class="status-text" id="statusText">Готов к работе</div>
+            <input type="file" id="fileInput" accept=".txt,.md,.docx" style="display:none">
+        </div>
+
+        <!-- Правая панель -->
+        <div class="panel result-panel">
+            <div class="panel-header">
+                <h2>✨ Отредактированный текст</h2>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <span class="count" id="resultCount">0 симв.</span>
+                    <button class="copy-btn" id="copyBtn">📋 Копировать</button>
+                </div>
+            </div>
+            <div class="panel-body">
+                <textarea id="resultText" placeholder="Результат появится здесь..." readonly></textarea>
+            </div>
+            <div class="checklist" id="checklist">
+                <div id="checklistItems"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <span id="footerVersion">Chapter Editor — обработка через цепочку переводов</span>
+        <span><a href="#" onclick="location.reload()">Перезагрузить</a></span>
+    </div>
+</div>
+
+<script>
+(function() {
+    const sourceText = document.getElementById('sourceText');
+    const resultText = document.getElementById('resultText');
+    const editBtn = document.getElementById('editBtn');
+    const loadBtn = document.getElementById('loadBtn');
+    const fileInput = document.getElementById('fileInput');
+    const styleSelect = document.getElementById('styleSelect');
+    const statusText = document.getElementById('statusText');
+    const progressContainer = document.getElementById('progressContainer');
+    const progressBar = document.getElementById('progressBar');
+    const sourceCount = document.getElementById('sourceCount');
+    const resultCount = document.getElementById('resultCount');
+    const checklistDiv = document.getElementById('checklist');
+    const checklistItems = document.getElementById('checklistItems');
+    const copyBtn = document.getElementById('copyBtn');
+
+    // --- НОВАЯ ФУНКЦИЯ: принудительное разбиение на абзацы ---
+    function forceSplitIntoParagraphs(text, maxChars = 400) {
+        if (!text || text.length < 150) return text;
+
+        // Если уже есть абзацы, проверяем их количество
+        const existing = text.split('\n\n');
+        if (existing.length >= 3) {
+            const good = existing.filter(p => p.trim().length > 30);
+            if (good.length >= 2) return text;
+        }
+
+        // Разбиваем по предложениям
+        let sentences = text.match(/[^.!?]+[.!?]+/g);
+        if (!sentences || sentences.length < 3) {
+            // Если нет предложений, разбиваем просто по символам
+            const chunks = [];
+            for (let i = 0; i < text.length; i += maxChars) {
+                let chunk = text.slice(i, i + maxChars).trim();
+                if (chunk) chunks.push(chunk);
             }
-            response = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers=headers,
-                json=payload,
-                timeout=60
-            )
-            response.raise_for_status()
-            result = response.json()
-            formatted = result['content'][0]['text'].strip()
-            logger.info(f"Claude formatting complete. Paragraphs: {len(formatted.split('\n\n'))}")
-            return formatted
-        except Exception as e:
-            logger.error(f"Claude formatting error: {e}")
-            # Падаем на DeepSeek или принудительное разбиение
-    
-    # Пробуем DeepSeek, если есть ключ
-    if DEEPSEEK_API_KEY:
-        try:
-            logger.info("Using DeepSeek for paragraph splitting...")
-            headers = {
-                "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-                "Content-Type": "application/json"
+            return chunks.join('\n\n');
+        }
+
+        // Группируем предложения в абзацы
+        const paragraphs = [];
+        let current = [];
+        let currentLen = 0;
+
+        for (const sent of sentences) {
+            const sentLen = sent.length;
+            if (currentLen > maxChars && current.length >= 2) {
+                paragraphs.push(current.join(' '));
+                current = [];
+                currentLen = 0;
             }
-            payload = {
-                "model": "deepseek-chat",
-                "messages": [
-                    {"role": "system", "content": "You are a text formatter. Your ONLY task is to split the given text into logical paragraphs. Do NOT change any words, do NOT rewrite, do NOT translate. Just add blank lines between paragraphs where natural breaks occur. Return ONLY the formatted text."},
-                    {"role": "user", "content": f"Format this text into paragraphs:\n\n{text}"}
-                ],
-                "temperature": 0.1,
-                "max_tokens": 4000
+            current.push(sent.trim());
+            currentLen += sentLen;
+        }
+
+        if (current.length > 0) {
+            paragraphs.push(current.join(' '));
+        }
+
+        // Если получился один абзац — делим пополам
+        if (paragraphs.length === 1 && sentences.length > 6) {
+            const mid = Math.floor(sentences.length / 2);
+            paragraphs.length = 0;
+            paragraphs.push(sentences.slice(0, mid).join(' '));
+            paragraphs.push(sentences.slice(mid).join(' '));
+        }
+
+        return paragraphs.join('\n\n');
+    }
+
+    // Шаги
+    const stepDots = {
+        step1: document.getElementById('step1'),
+        step2: document.getElementById('step2'),
+        step3: document.getElementById('step3'),
+        step4: document.getElementById('step4')
+    };
+
+    function resetSteps() {
+        Object.values(stepDots).forEach(s => {
+            s.className = 'step-dot';
+        });
+    }
+
+    function setStep(step, label) {
+        resetSteps();
+        const names = ['step1', 'step2', 'step3', 'step4'];
+        for (let i = 0; i < names.length; i++) {
+            if (i < step) {
+                stepDots[names[i]].className = 'step-dot done';
+            } else if (i === step) {
+                stepDots[names[i]].className = 'step-dot active';
+            } else {
+                stepDots[names[i]].className = 'step-dot';
             }
-            response = requests.post(
-                "https://api.deepseek.com/v1/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=60
-            )
-            response.raise_for_status()
-            result = response.json()
-            formatted = result['choices'][0]['message']['content'].strip()
-            logger.info(f"DeepSeek formatting complete. Paragraphs: {len(formatted.split('\n\n'))}")
-            return formatted
-        except Exception as e:
-            logger.error(f"DeepSeek formatting error: {e}")
-    
-    # Запасной вариант: принудительное разбиение по длине
-    logger.info("Using fallback: force split by length")
-    return force_split_by_length(text)
+        }
+        if (label) {
+            statusText.textContent = '⏳ ' + label;
+        }
+    }
 
+    // Подсчёт символов
+    sourceText.addEventListener('input', function() {
+        sourceCount.textContent = this.value.length + ' симв.';
+    });
 
-def force_split_by_length(text: str, max_chars: int = 450) -> str:
-    """Принудительное разбиение по длине."""
-    if not text or len(text) < 200:
-        return text
-    
-    # Если уже есть абзацы, проверяем
-    existing = text.split('\n\n')
-    if len(existing) >= 3:
-        good = [p for p in existing if len(p.strip()) > 30]
-        if len(good) >= 2:
-            return text
-    
-    words = text.split()
-    if len(words) < 20:
-        return text
-    
-    paragraphs = []
-    current = []
-    current_len = 0
-    
-    for word in words:
-        word_len = len(word) + 1
-        if current_len > max_chars and len(current) >= 3:
-            paragraphs.append(' '.join(current))
-            current = []
-            current_len = 0
-        current.append(word)
-        current_len += word_len
-    
-    if current:
-        paragraphs.append(' '.join(current))
-    
-    if len(paragraphs) == 1 and len(words) > 30:
-        mid = len(words) // 2
-        paragraphs = [
-            ' '.join(words[:mid]),
-            ' '.join(words[mid:])
-        ]
-    
-    return '\n\n'.join(paragraphs)
+    // Загрузка файла
+    loadBtn.addEventListener('click', function() {
+        fileInput.click();
+    });
 
+    fileInput.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
 
-def apply_light_polish(text: str) -> str:
-    """Лёгкая пост-обработка."""
-    text = re.sub(r'\s+', ' ', text)
-    text = text.replace('"', '"').replace('"', '"')
-    text = text.replace(' - ', ' — ')
-    return text
+        const reader = new FileReader();
+        reader.onload = function(ev) {
+            sourceText.value = ev.target.result;
+            sourceCount.textContent = sourceText.value.length + ' симв.';
+            statusText.textContent = '✅ Файл загружен: ' + file.name;
+            statusText.className = 'status-text success';
+        };
+        reader.onerror = function() {
+            statusText.textContent = '❌ Ошибка чтения файла';
+            statusText.className = 'status-text error';
+        };
+        reader.readAsText(file, 'UTF-8');
+    });
 
+    // Копирование
+    copyBtn.addEventListener('click', function() {
+        if (!resultText.value) {
+            statusText.textContent = '⚠️ Нет текста для копирования';
+            statusText.className = 'status-text error';
+            return;
+        }
+        navigator.clipboard.writeText(resultText.value).then(() => {
+            statusText.textContent = '✅ Текст скопирован в буфер обмена';
+            statusText.className = 'status-text success';
+        }).catch(() => {
+            resultText.select();
+            document.execCommand('copy');
+            statusText.textContent = '✅ Текст скопирован';
+            statusText.className = 'status-text success';
+        });
+    });
 
-@app.get("/api/health")
-def health():
-    return jsonify(status="ok", version=APP_VERSION)
+    // Редактирование
+    editBtn.addEventListener('click', function() {
+        const text = sourceText.value.trim();
+        if (!text) {
+            statusText.textContent = '⚠️ Вставьте текст или загрузите файл';
+            statusText.className = 'status-text error';
+            return;
+        }
 
+        const style = styleSelect.value;
+        editBtn.disabled = true;
+        editBtn.textContent = '⏳ Обработка...';
+        statusText.textContent = '⏳ Начинаем обработку...';
+        statusText.className = 'status-text';
+        progressContainer.classList.add('active');
+        progressBar.style.width = '0%';
+        checklistDiv.classList.remove('visible');
+        resultText.value = '';
+        resultCount.textContent = '0 симв.';
+        resetSteps();
 
-STYLE_PRESETS = {
-    "neutral": "",
-    "dynamic_scifi": "",
-}
+        const formData = new FormData();
+        formData.append('text', text);
+        formData.append('style', style);
 
+        let step = 0;
+        setStep(0, 'Отправка запроса...');
 
-@app.post("/api/revise")
-def api_revise():
-    logger.info("=== api_revise: START ===")
-    try:
-        file_storage = request.files.get("file")
-        text = request.form.get("text", "")
-        style = request.form.get("style", "neutral")
+        fetch('/api/revise', {
+            method: 'POST',
+            body: formData,
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(err => {
+                    throw new Error(err.detail || 'Ошибка сервера');
+                });
+            }
+            setStep(1, 'Генерация текста...');
+            return handleStream(response);
+        })
+        .then(data => {
+            // --- ПРИНУДИТЕЛЬНОЕ РАЗБИЕНИЕ НА АБЗАЦЫ (на фронтенде) ---
+            let formattedText = data.revised_text;
+            // Если абзацев нет или слишком мало — разбиваем принудительно
+            const paragraphs = formattedText.split('\n\n');
+            if (paragraphs.length < 2) {
+                formattedText = forceSplitIntoParagraphs(formattedText);
+            }
 
-        if file_storage and file_storage.filename:
-            raw = file_storage.read()
-            chapter_text = raw.decode("utf-8", errors="replace")
-        elif text.strip():
-            chapter_text = text
-        else:
-            return jsonify(detail="Provide chapter text or upload a file."), 400
+            setStep(3, 'Готово!');
+            resultText.value = formattedText;
+            resultCount.textContent = formattedText.length + ' симв.';
+            statusText.textContent = '✅ Готово! ' + (data.summary || '');
+            statusText.className = 'status-text success';
 
-        chapter_text = chapter_text.strip()
-        if not chapter_text:
-            return jsonify(detail="Chapter text is empty."), 400
+            if (data.checklist && data.checklist.length) {
+                renderChecklist(data.checklist);
+                checklistDiv.classList.add('visible');
+            }
+        })
+        .catch(err => {
+            statusText.textContent = '❌ ' + err.message;
+            statusText.className = 'status-text error';
+            setStep(-1, 'Ошибка');
+        })
+        .finally(() => {
+            editBtn.disabled = false;
+            editBtn.textContent = '✏️ Редактировать';
+            progressContainer.classList.remove('active');
+            progressBar.style.width = '0%';
+        });
+    });
 
-        if len(chapter_text) > MAX_CHARS:
-            chapter_text = chapter_text[:MAX_CHARS]
-            logger.warning(f"Truncated text to {MAX_CHARS} chars")
+    function handleStream(response) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let resolved = false;
 
-        def generate():
-            try:
-                yield _sse("progress", {"chars": 0, "estimated_total": len(chapter_text), "percent": 0, "log": "Начинаем обработку..."})
+        return new Promise((resolve, reject) => {
+            function read() {
+                reader.read().then(({ done, value }) => {
+                    if (done) {
+                        if (!resolved) reject(new Error('Соединение закрыто'));
+                        return;
+                    }
 
-                # 1. Цепочка переводов
-                logger.info("Step 1: Translation chain...")
-                processed_text = apply_translation_chain_full(chapter_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 40, "log": "Переводы завершены"})
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
 
-                # 2. Очистка артефактов
-                logger.info("Step 2: Cleaning artifacts...")
-                processed_text = clean_translation_artifacts(processed_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 60, "log": "Артефакты удалены"})
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        const payload = line.slice(6).trim();
+                        if (!payload) continue;
 
-                # 3. Разбиение на абзацы через Claude/DeepSeek
-                logger.info("Step 3: Paragraph splitting with AI...")
-                processed_text = split_into_paragraphs_with_claude(processed_text)
-                para_count = len(processed_text.split('\n\n'))
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 85, "log": f"Абзацев: {para_count}"})
+                        try {
+                            const event = JSON.parse(payload);
+                            handleEvent(event, resolve, reject, () => { resolved = true; });
+                        } catch (e) {
+                            // игнорируем битые JSON
+                        }
+                    }
 
-                # 4. Финальная полировка
-                logger.info("Step 4: Final polish...")
-                processed_text = apply_light_polish(processed_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 100, "log": "Готово!"})
+                    read();
+                }).catch(reject);
+            }
 
-                final_para_count = len(processed_text.split('\n\n'))
-                logger.info(f"Final: {len(processed_text)} chars, {final_para_count} paragraphs")
+            read();
+        });
+    }
 
-                yield _sse("done", {
-                    "revised_text": processed_text,
-                    "original_text": chapter_text,
-                    "summary": f"Текст переработан через цепочку переводов. Абзацев: {final_para_count}",
-                    "changes": [
-                        "Переведён через Google Translate (RU→JA→FI→EN→RU)",
-                        f"Разделён на {final_para_count} абзацев"
-                    ],
-                    "checklist": []
-                })
-            except ChapterEditError as e:
-                yield _sse("error", {"detail": str(e)})
-            except Exception as e:
-                logger.exception("Unexpected error in generate")
-                yield _sse("error", {"detail": f"Unexpected error: {str(e)}"})
+    function handleEvent(event, resolve, reject, markResolved) {
+        switch (event.type) {
+            case 'progress':
+                const total = event.estimated_total || 10000;
+                const pct = Math.min(100, (event.chars / total) * 100);
+                progressBar.style.width = pct + '%';
+                statusText.textContent = '⏳ ' + (event.log || 'Генерация... ' + Math.round(pct) + '%');
+                setStep(1, (event.log || 'Генерация... ' + Math.round(pct) + '%'));
+                break;
 
-        return Response(
-            stream_with_context(generate()),
-            mimetype="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
-        )
+            case 'ping':
+                // Просто держим соединение живым
+                break;
 
-    except Exception as e:
-        logger.exception("api_revise: Unexpected error")
-        return jsonify(detail=f"Server error: {str(e)}"), 500
+            case 'done':
+                markResolved();
+                setStep(2, 'Пост-обработка...');
+                resolve(event);
+                break;
 
+            case 'error':
+                markResolved();
+                reject(new Error(event.detail || 'Ошибка обработки'));
+                break;
 
-@app.get("/")
-def index():
-    return app.send_static_file("index.html")
+            default:
+                break;
+        }
+    }
 
+    function renderChecklist(checklist) {
+        checklistItems.innerHTML = '';
+        let passedCount = 0;
+        const total = checklist.length;
 
-@app.errorhandler(HTTPException)
-def handle_http_exception(exc):
-    return jsonify(detail=exc.description or str(exc)), exc.code or 500
+        checklist.forEach(item => {
+            const div = document.createElement('div');
+            div.className = 'checklist-item';
 
+            const icon = document.createElement('span');
+            icon.className = 'icon';
+            if (item.passed === true) {
+                icon.textContent = '✅';
+                icon.classList.add('pass');
+                passedCount++;
+            } else if (item.passed === false) {
+                icon.textContent = '❌';
+                icon.classList.add('fail');
+            } else {
+                icon.textContent = '⏳';
+                icon.classList.add('unknown');
+            }
 
-@app.errorhandler(Exception)
-def handle_exception(exc):
-    logger.exception("Unhandled exception")
-    return jsonify(detail=f"Server error: {str(e)}"), 500
+            const label = document.createElement('span');
+            label.textContent = item.label;
 
+            if (item.note) {
+                const note = document.createElement('span');
+                note.style.cssText = 'color: #6b7f94; font-size: 12px; margin-left: 8px;';
+                note.textContent = '— ' + item.note;
+                div.appendChild(icon);
+                div.appendChild(label);
+                div.appendChild(note);
+            } else {
+                div.appendChild(icon);
+                div.appendChild(label);
+            }
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+            checklistItems.appendChild(div);
+        });
+
+        const header = document.createElement('div');
+        header.style.cssText = 'font-weight: 500; margin-bottom: 8px; color: #2c3e50; font-size: 13px;';
+        header.textContent = `📋 Чек-лист: ${passedCount}/${total} пунктов выполнено`;
+        checklistItems.prepend(header);
+    }
+
+    // Загрузка версии с сервера
+    fetch('/api/health')
+        .then(res => res.json())
+        .then(data => {
+            const version = 'v' + data.version;
+            document.getElementById('versionBadge').textContent = version;
+            document.getElementById('footerVersion').textContent = 'Chapter Editor ' + version + ' — обработка через цепочку переводов';
+            statusText.textContent = '✅ Сервер версии ' + data.version + ' готов';
+            statusText.className = 'status-text success';
+        })
+        .catch(() => {
+            document.getElementById('versionBadge').textContent = 'v3.4.0';
+            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.4.0 — обработка через цепочку переводов';
+            statusText.textContent = '⚠️ Не удалось подключиться к серверу';
+            statusText.className = 'status-text error';
+        });
+})();
+</script>
+</body>
+</html>
