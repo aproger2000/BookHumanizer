@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.2.2 — Humanization via Translation Chain (с принудительным восстановлением точек и абзацев)
+Chapter Editor v3.2.3 — Humanization via Translation Chain (полный фикс разделения на абзацы)
 Работает полностью бесплатно, без API-ключей.
 """
 import io
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.2.2"
+APP_VERSION = "3.2.3"
 
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
@@ -152,6 +152,9 @@ def clean_translation_artifacts(text: str) -> str:
     for pattern in english_phrases:
         text = re.sub(pattern, '', text, flags=re.IGNORECASE)
     
+    # Убираем лишние точки внутри слов
+    text = re.sub(r'(\w)\.(\w)', r'\1\2', text)
+    
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
     text = re.sub(r'\s+', ' ', text)
@@ -168,7 +171,6 @@ def force_restore_periods_and_split(text: str) -> str:
         return text
     
     # 1. Восстанавливаем точки после предложений без знаков препинания
-    # Ищем предложения, которые заканчиваются на букву или цифру
     text = re.sub(r'([a-zA-Zа-яА-Я0-9])\s+([А-ЯA-Z])', r'\1. \2', text)
     
     # 2. Разбиваем по точкам, восклицательным и вопросительным знакам
@@ -188,7 +190,7 @@ def force_restore_periods_and_split(text: str) -> str:
         s = s.strip()
         if s:
             # Добавляем точку в конце, если её нет
-            if s and s[-1] not in ['.', '!', '?']:
+            if s[-1] not in ['.', '!', '?']:
                 s += '.'
             cleaned_sentences.append(s)
     
@@ -204,7 +206,7 @@ def force_restore_periods_and_split(text: str) -> str:
                 chunks.append(chunk)
         return '\n\n'.join(chunks)
     
-    # Группируем предложения в абзацы (по 3-5 предложений)
+    # Группируем предложения в абзацы
     paragraphs = []
     target_paragraph_len = 400
     current_paragraph = []
