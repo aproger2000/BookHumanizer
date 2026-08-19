@@ -443,6 +443,51 @@
     const checklistItems = document.getElementById('checklistItems');
     const copyBtn = document.getElementById('copyBtn');
 
+    // --- НОВАЯ ФУНКЦИЯ: принудительное разбиение по символам (ГАРАНТИРОВАННО) ---
+    function forceSplitByChars(text, maxChars = 400) {
+        if (!text || text.length < 150) return text;
+
+        // Если уже есть абзацы, проверяем их качество
+        const existing = text.split('\n\n');
+        if (existing.length >= 3) {
+            const good = existing.filter(p => p.trim().length > 30);
+            if (good.length >= 2) return text;
+        }
+
+        // ГАРАНТИРОВАННОЕ разбиение по символам
+        const chunks = [];
+        for (let i = 0; i < text.length; i += maxChars) {
+            let chunk = text.slice(i, i + maxChars).trim();
+            if (chunk) chunks.push(chunk);
+        }
+
+        // Если получился один абзац, но текст длинный — делим пополам
+        if (chunks.length === 1 && text.length > 600) {
+            const mid = Math.floor(text.length / 2);
+            // Ищем ближайший пробел
+            let splitPos = mid;
+            while (splitPos > 0 && text[splitPos] !== ' ') {
+                splitPos--;
+            }
+            if (splitPos > 0) {
+                return text.slice(0, splitPos).trim() + '\n\n' + text.slice(splitPos).trim();
+            }
+        }
+
+        return chunks.join('\n\n');
+    }
+
+    // --- Функция для визуализации разбиения ---
+    function visualizeParagraphs(text) {
+        if (!text) return '';
+        const paragraphs = text.split('\n\n');
+        let result = '';
+        paragraphs.forEach((p, i) => {
+            result += `[Абзац ${i+1}] ${p}\n\n`;
+        });
+        return result;
+    }
+
     // Шаги
     const stepDots = {
         step1: document.getElementById('step1'),
@@ -562,10 +607,30 @@
             return handleStream(response);
         })
         .then(data => {
+            // --- ГАРАНТИРОВАННОЕ РАЗБИЕНИЕ НА АБЗАЦЫ (по символам) ---
+            let formattedText = data.revised_text;
+
+            // Проверяем, есть ли абзацы
+            const paragraphs = formattedText.split('\n\n');
+            if (paragraphs.length < 2) {
+                // Если нет абзацев — разбиваем принудительно
+                formattedText = forceSplitByChars(formattedText);
+            }
+
+            // Дополнительная проверка: если абзацев всё ещё мало — разбиваем по 350 символов
+            const finalParagraphs = formattedText.split('\n\n');
+            if (finalParagraphs.length < 2 && formattedText.length > 300) {
+                formattedText = forceSplitByChars(formattedText, 350);
+            }
+
+            // Визуализация разбиения (для отладки)
+            console.log('Абзацев:', formattedText.split('\n\n').length);
+            console.log(visualizeParagraphs(formattedText));
+
             setStep(3, 'Готово!');
-            resultText.value = data.revised_text;
-            resultCount.textContent = data.revised_text.length + ' симв.';
-            statusText.textContent = '✅ Готово! ' + (data.summary || '');
+            resultText.value = formattedText;
+            resultCount.textContent = formattedText.length + ' симв.';
+            statusText.textContent = '✅ Готово! ' + (data.summary || '') + ' Абзацев: ' + formattedText.split('\n\n').length;
             statusText.className = 'status-text success';
 
             if (data.checklist && data.checklist.length) {
@@ -636,7 +701,6 @@
                 break;
 
             case 'ping':
-                // Просто держим соединение живым
                 break;
 
             case 'done':
