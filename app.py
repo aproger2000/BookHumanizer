@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.2.1 — Humanization via Translation Chain (с принудительным разделением на абзацы)
+Chapter Editor v3.2.2 — Humanization via Translation Chain (с принудительным восстановлением точек и абзацев)
 Работает полностью бесплатно, без API-ключей.
 """
 import io
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.2.1"
+APP_VERSION = "3.2.2"
 
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
@@ -159,61 +159,87 @@ def clean_translation_artifacts(text: str) -> str:
     return text.strip()
 
 
-def force_split_into_paragraphs(text: str) -> str:
+def force_restore_periods_and_split(text: str) -> str:
     """
-    ПРИНУДИТЕЛЬНО разбивает текст на абзацы по длине.
-    Каждый абзац — примерно 300-500 символов.
+    ПРИНУДИТЕЛЬНО восстанавливает точки в конце предложений
+    и разбивает текст на абзацы по длине.
     """
     if not text or len(text) < 200:
         return text
     
-    # Разбиваем по предложениям
+    # 1. Восстанавливаем точки после предложений без знаков препинания
+    # Ищем предложения, которые заканчиваются на букву или цифру
+    text = re.sub(r'([a-zA-Zа-яА-Я0-9])\s+([А-ЯA-Z])', r'\1. \2', text)
+    
+    # 2. Разбиваем по точкам, восклицательным и вопросительным знакам
     sentences = re.split(r'(?<=[.!?])\s+', text)
     
-    if len(sentences) <= 3:
-        return text
+    # Если предложений мало, пробуем разбить по длине
+    if len(sentences) <= 2:
+        # Разбиваем по точкам с пробелом
+        sentences = re.split(r'\.\s+', text)
+        if len(sentences) <= 2:
+            # Если всё ещё мало — разбиваем по запятым с большой буквы
+            sentences = re.split(r',\s*(?=[А-ЯA-Z])', text)
     
+    # Очищаем каждое предложение
+    cleaned_sentences = []
+    for s in sentences:
+        s = s.strip()
+        if s:
+            # Добавляем точку в конце, если её нет
+            if s and s[-1] not in ['.', '!', '?']:
+                s += '.'
+            cleaned_sentences.append(s)
+    
+    # Если предложений всё ещё мало — разбиваем принудительно по длине
+    if len(cleaned_sentences) <= 2:
+        # Разбиваем текст на части по 400 символов
+        chunks = []
+        for i in range(0, len(text), 400):
+            chunk = text[i:i+400].strip()
+            if chunk:
+                if chunk[-1] not in ['.', '!', '?']:
+                    chunk += '.'
+                chunks.append(chunk)
+        return '\n\n'.join(chunks)
+    
+    # Группируем предложения в абзацы (по 3-5 предложений)
     paragraphs = []
-    current = []
+    target_paragraph_len = 400
+    current_paragraph = []
     current_len = 0
-    target_len = 400  # Целевая длина абзаца
     
-    for sent in sentences:
+    for sent in cleaned_sentences:
         sent_len = len(sent)
         
-        # Если одно предложение очень длинное (>300 символов) — отдельный абзац
-        if sent_len > 300 and current:
-            paragraphs.append(' '.join(current))
-            current = []
+        # Если предложение очень длинное (>300 символов) — отдельный абзац
+        if sent_len > 300 and current_paragraph:
+            paragraphs.append(' '.join(current_paragraph))
+            current_paragraph = []
             current_len = 0
             paragraphs.append(sent)
             continue
         
-        # Если предложение очень короткое (<30 символов) — присоединяем к текущему
-        if sent_len < 30 and current:
-            current.append(sent)
-            current_len += sent_len
-            continue
-        
         # Если текущий абзац достиг целевой длины
-        if current_len > target_len and len(current) >= 2:
-            paragraphs.append(' '.join(current))
-            current = []
+        if current_len > target_paragraph_len and len(current_paragraph) >= 2:
+            paragraphs.append(' '.join(current_paragraph))
+            current_paragraph = []
             current_len = 0
         
-        current.append(sent)
+        current_paragraph.append(sent)
         current_len += sent_len
     
     # Добавляем последний абзац
-    if current:
-        paragraphs.append(' '.join(current))
+    if current_paragraph:
+        paragraphs.append(' '.join(current_paragraph))
     
     # Если получился один абзац, но предложений много — разбиваем принудительно
-    if len(paragraphs) == 1 and len(sentences) > 5:
-        mid = len(sentences) // 2
+    if len(paragraphs) == 1 and len(cleaned_sentences) > 5:
+        mid = len(cleaned_sentences) // 2
         paragraphs = [
-            ' '.join(sentences[:mid]),
-            ' '.join(sentences[mid:])
+            ' '.join(cleaned_sentences[:mid]),
+            ' '.join(cleaned_sentences[mid:])
         ]
     
     return '\n\n'.join(paragraphs)
@@ -271,8 +297,8 @@ def api_revise():
                 
                 processed_text = clean_translation_artifacts(processed_text)
                 
-                # ПРИНУДИТЕЛЬНОЕ разделение на абзацы
-                processed_text = force_split_into_paragraphs(processed_text)
+                # ПРИНУДИТЕЛЬНОЕ восстановление точек и разделение на абзацы
+                processed_text = force_restore_periods_and_split(processed_text)
                 
                 processed_text = apply_light_polish(processed_text)
 
@@ -284,6 +310,7 @@ def api_revise():
                     "summary": "Текст переработан через цепочку переводов",
                     "changes": [
                         "Переведён через Google Translate (RU→JA→FI→EN→RU)",
+                        "Восстановлены точки в конце предложений",
                         "Разделён на абзацы по длине"
                     ],
                     "checklist": []
