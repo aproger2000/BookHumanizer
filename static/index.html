@@ -359,15 +359,14 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(res => res.json())
         .then(data => {
             const version = 'v' + data.version;
-            const chain = (data.chain || 'en').toUpperCase();
-            document.getElementById('versionBadge').textContent = version + ' (' + chain + ')';
-            document.getElementById('footerVersion').textContent = 'Chapter Editor ' + version + ' — цепочка: RU→' + chain + '→RU';
-            statusText.textContent = '✅ Сервер версии ' + data.version + ' готов, цепочка: RU→' + chain + '→RU';
+            document.getElementById('versionBadge').textContent = version;
+            document.getElementById('footerVersion').textContent = 'Chapter Editor ' + version + ' — обработка через цепочку переводов';
+            statusText.textContent = '✅ Сервер версии ' + data.version + ' готов';
             statusText.className = 'status-text success';
         })
         .catch(() => {
-            document.getElementById('versionBadge').textContent = 'v3.6.4 (EN)';
-            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.6.4 — цепочка: RU→EN→RU';
+            document.getElementById('versionBadge').textContent = 'v3.6.2';
+            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.6.2 — обработка через цепочку переводов';
             statusText.textContent = '⚠️ Не удалось подключиться к серверу';
             statusText.className = 'status-text error';
         });
