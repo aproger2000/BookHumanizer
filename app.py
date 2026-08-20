@@ -1,7 +1,6 @@
 """
-Chapter Editor v3.6.0 — упрощённая цепочка переводов (RU→EN→RU) + принудительное разбиение
+Chapter Editor v3.6.0 — упрощённая цепочка переводов (RU→EN→RU), без разбиения на абзацы
 """
-import io
 import json
 import os
 import re
@@ -21,7 +20,6 @@ BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
 APP_VERSION = "3.6.0"
-
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
 
@@ -90,7 +88,6 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
 
 
 def process_chunk_through_chain(text: str) -> str:
-    """Упрощённая цепочка: RU → EN → RU."""
     if not text or len(text.strip()) < 2:
         return text
     try:
@@ -200,41 +197,6 @@ def clean_translation_artifacts(text: str) -> str:
     return text.strip()
 
 
-def split_into_paragraphs_by_logic(text: str) -> str:
-    """
-    Принудительное разбиение на абзацы по длине (400 символов, без разрыва слов).
-    """
-    if not text or len(text) < 200:
-        return text
-
-    chunk_size = 400
-    words = text.split()
-    paragraphs = []
-    current = []
-    current_len = 0
-
-    for word in words:
-        if current_len + len(word) + 1 > chunk_size and current:
-            paragraphs.append(' '.join(current))
-            current = []
-            current_len = 0
-        current.append(word)
-        current_len += len(word) + 1
-
-    if current:
-        paragraphs.append(' '.join(current))
-
-    # Если получился один абзац, а текст длинный — режем посимвольно (но сохраняя слова)
-    if len(paragraphs) == 1 and len(text) > 500:
-        paragraphs = []
-        for i in range(0, len(text), chunk_size):
-            chunk = text[i:i+chunk_size].strip()
-            if chunk:
-                paragraphs.append(chunk)
-
-    return '\n\n'.join(paragraphs)
-
-
 def apply_light_polish(text: str) -> str:
     text = re.sub(r'\s+', ' ', text)
     text = text.replace('"', '"').replace('"', '"')
@@ -288,27 +250,23 @@ def api_revise():
                 processed_text = clean_translation_artifacts(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 60, "log": "Артефакты удалены"})
 
-                # 3. Принудительное разбиение на абзацы
-                logger.info("Step 3: Forced paragraph splitting...")
-                processed_text = split_into_paragraphs_by_logic(processed_text)
-                para_count = len(processed_text.split('\n\n'))
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 85, "log": f"Абзацев: {para_count}"})
-
-                # 4. Финальная полировка
-                logger.info("Step 4: Final polish...")
+                # 3. Финальная полировка (без разбиения на абзацы)
+                logger.info("Step 3: Final polish...")
                 processed_text = apply_light_polish(processed_text)
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 85, "log": "Полировка выполнена"})
+
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 100, "log": "Готово!"})
 
-                final_para_count = len(processed_text.split('\n\n'))
-                logger.info(f"Final: {len(processed_text)} chars, {final_para_count} paragraphs")
+                final_len = len(processed_text)
+                loss = (original_len - final_len) / original_len
+                logger.info(f"Final: {final_len} chars, loss {loss:.2%}")
 
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": f"Текст переработан через упрощённую цепочку переводов (RU→EN→RU). Абзацев: {final_para_count}",
+                    "summary": f"Текст переработан через упрощённую цепочку переводов (RU→EN→RU). Потеря: {loss:.1%}.",
                     "changes": [
                         "Переведён через Google Translate / MyMemory (RU→EN→RU)",
-                        f"Разделён на {final_para_count} абзацев",
                         "Удалены артефакты перевода"
                     ],
                     "checklist": []
