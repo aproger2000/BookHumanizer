@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.6.3 — поддержка цепочек переводов (EN или ZH)
+Chapter Editor v3.6.4 — поддержка цепочек (EN/ZH) + пост-редактор для коррекции артефактов
 """
 import json
 import os
@@ -14,13 +14,21 @@ import requests
 from flask import Flask, Response, jsonify, request, stream_with_context
 from werkzeug.exceptions import HTTPException
 
+# Импорт пост-редактора (новый модуль)
+try:
+    import post_editor
+    POST_EDITOR_AVAILABLE = True
+except ImportError:
+    POST_EDITOR_AVAILABLE = False
+    logging.warning("post_editor module not found. Post-editing disabled.")
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.6.3"
+APP_VERSION = "3.6.4"
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
 
@@ -34,8 +42,9 @@ if CHAIN_TYPE not in ("en", "zh"):
     CHAIN_TYPE = "en"
 
 logger.info(f"Using translation chain: {CHAIN_TYPE} (RU→{CHAIN_TYPE.upper()}→RU)")
+logger.info(f"Post-editor available: {POST_EDITOR_AVAILABLE}")
 
-# Humanizer отключён (можно включить отдельно, но пока не будем)
+# Humanizer отключён (можно включить позже)
 ENABLE_HUMANIZER = False
 HUMANIZER_AVAILABLE = False
 
@@ -101,20 +110,17 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
 
 
 def process_chunk_through_chain(text: str) -> str:
-    """Цепочка в зависимости от CHAIN_TYPE."""
     if not text or len(text.strip()) < 2:
         return text
     try:
         if CHAIN_TYPE == "en":
-            # RU → EN → RU
             mid = translate_with_fallback(text, target_lang="en")
             result = translate_with_fallback(mid, target_lang="ru")
         elif CHAIN_TYPE == "zh":
-            # RU → ZH → RU
             mid = translate_with_fallback(text, target_lang="zh")
             result = translate_with_fallback(mid, target_lang="ru")
         else:
-            result = text  # fallback
+            result = text
         return result
     except Exception as e:
         logger.error(f"Chunk processing error: {e}")
@@ -174,7 +180,6 @@ def apply_translation_chain_full(text: str) -> str:
 
 
 def clean_translation_artifacts(text: str) -> str:
-    # Базовые паттерны (финские, английские, японские)
     finnish_patterns = [
         r'\bTietenkin\b', r'\bhe tarvitsevat\b', r'\bJos se toimii\b',
         r'\bvaikka se ei\b', r'\btoimi\b', r'\bpuolella\b',
@@ -198,8 +203,6 @@ def clean_translation_artifacts(text: str) -> str:
         r'\bresearch\b', r'\blicense\b', r'\brequires\b', r'\bcame from\b'
     ]
     japanese_patterns = [r'[\u3040-\u30FF]+']
-
-    # Китайские паттерны (иероглифы)
     chinese_patterns = [r'[\u4e00-\u9fff]+']
 
     all_patterns = finnish_patterns + english_phrases + japanese_patterns + chinese_patterns
@@ -228,12 +231,10 @@ def diversify_dialog_tags(text: str) -> str:
         'сказал': ['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал'],
         'сказала': ['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала']
     }
-
     pattern = r'(—[^—]+?—\s*)(сказал|сказала)(\s+[а-яА-Я]+[.,!?]?)'
     matches = list(re.finditer(pattern, text, re.DOTALL))
     if not matches:
         return text
-
     replacements = []
     for match in matches:
         before = match.group(1)
@@ -242,10 +243,8 @@ def diversify_dialog_tags(text: str) -> str:
         if verb in synonyms:
             new_verb = random.choice(synonyms[verb])
             replacements.append((match.start(), match.end(), before + new_verb + after))
-
     for start, end, repl in reversed(replacements):
         text = text[:start] + repl + text[end:]
-
     return text
 
 
@@ -321,47 +320,59 @@ def api_revise():
                 # 1. Цепочка переводов
                 logger.info(f"Step 1: Translation chain (RU→{CHAIN_TYPE.upper()}→RU)...")
                 processed_text = apply_translation_chain_full(chapter_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 35, "log": "Переводы завершены"})
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 30, "log": "Переводы завершены"})
 
                 # 2. Очистка артефактов
                 logger.info("Step 2: Cleaning artifacts...")
                 processed_text = clean_translation_artifacts(processed_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 50, "log": "Артефакты удалены"})
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 45, "log": "Артефакты удалены"})
 
                 # 3. Разнообразие диалоговых тегов
                 logger.info("Step 3: Diversifying dialog tags...")
                 processed_text = diversify_dialog_tags(processed_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 65, "log": "Диалоговые теги обновлены"})
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 60, "log": "Диалоговые теги обновлены"})
 
                 # 4. Принудительное разбиение на абзацы
                 logger.info("Step 4: Forced paragraph splitting...")
                 processed_text = split_into_paragraphs_by_logic(processed_text)
                 para_count = len(processed_text.split('\n\n'))
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 80, "log": f"Абзацев: {para_count}"})
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 75, "log": f"Абзацев: {para_count}"})
 
                 # 5. Финальная полировка
                 logger.info("Step 5: Final polish...")
                 processed_text = apply_light_polish(processed_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 90, "log": "Полировка выполнена"})
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 85, "log": "Полировка выполнена"})
 
-                # 6. Humanizer отключён (можно будет включить отдельно)
+                # 6. Пост-редактор (коррекция артефактов по оригиналу)
+                if POST_EDITOR_AVAILABLE and len(processed_text) > 100:
+                    logger.info("Step 6: Post-editing (artifact correction)...")
+                    try:
+                        processed_text = post_editor.process(chapter_text, processed_text)
+                        yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 95, "log": "Пост-коррекция выполнена"})
+                    except Exception as e:
+                        logger.exception("Post-editor error")
+                        yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 90, "log": f"Ошибка пост-редактора: {str(e)}"})
+
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 100, "log": "Готово!"})
 
                 final_len = len(processed_text)
                 final_para_count = len(processed_text.split('\n\n'))
                 loss = (original_len - final_len) / original_len
-                logger.info(f"Final: {final_len} chars, loss {loss:.2%}, {final_para_count} paragraphs, chain={CHAIN_TYPE}")
+                logger.info(f"Final: {final_len} chars, loss {loss:.2%}, {final_para_count} paragraphs")
 
+                summary = f"Текст переработан через цепочку RU→{CHAIN_TYPE.upper()}→RU с пост-коррекцией. Потеря: {loss:.1%}. Абзацев: {final_para_count}"
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": f"Текст переработан через цепочку RU→{CHAIN_TYPE.upper()}→RU. Потеря: {loss:.1%}. Абзацев: {final_para_count}",
+                    "summary": summary,
                     "changes": [
                         f"Переведён через Google Translate / MyMemory (RU→{CHAIN_TYPE.upper()}→RU)",
                         "Разнообразие диалоговых тегов",
+                        "Пост-коррекция артефактов",
                         f"Разделён на {final_para_count} абзацев",
                         "Удалены артефакты перевода"
                     ],
+                    "chain": CHAIN_TYPE,
                     "checklist": []
                 })
             except Exception as e:
