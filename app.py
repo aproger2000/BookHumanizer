@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.6.2 — упрощённая цепочка (RU→EN→RU) + разнообразие диалоговых тегов
+Chapter Editor v3.6.3 — цепочка RU→EN→DE→RU (три перевода) для улучшения HUMAN
 """
 import io
 import json
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.6.2"
+APP_VERSION = "3.6.3"
 
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
@@ -89,13 +89,14 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
     return text
 
 
+# === ИЗМЕНЕНО: цепочка RU → EN → DE → RU ===
 def process_chunk_through_chain(text: str) -> str:
-    """Упрощённая цепочка: RU → EN → RU."""
     if not text or len(text.strip()) < 2:
         return text
     try:
         en = translate_with_fallback(text, target_lang="en")
-        ru = translate_with_fallback(en, target_lang="ru")
+        de = translate_with_fallback(en, target_lang="de")
+        ru = translate_with_fallback(de, target_lang="ru")
         return ru
     except Exception as e:
         logger.error(f"Chunk processing error: {e}")
@@ -137,7 +138,7 @@ def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> list:
 
 
 def apply_translation_chain_full(text: str) -> str:
-    logger.info(f"Starting translation chain for {len(text)} chars...")
+    logger.info(f"Starting translation chain (RU→EN→DE→RU) for {len(text)} chars...")
     chunks = split_text_into_chunks(text)
     logger.info(f"Split into {len(chunks)} chunks")
     processed_chunks = []
@@ -154,8 +155,8 @@ def apply_translation_chain_full(text: str) -> str:
     return result
 
 
+# === ИЗМЕНЕНО: добавлены немецкие артефакты ===
 def clean_translation_artifacts(text: str) -> str:
-    """Удаление финских, английских вставок и восстановление пунктуации."""
     finnish_patterns = [
         r'\bTietenkin\b', r'\bhe tarvitsevat\b', r'\bJos se toimii\b',
         r'\bvaikka se ei\b', r'\btoimi\b', r'\bpuolella\b',
@@ -179,11 +180,16 @@ def clean_translation_artifacts(text: str) -> str:
         r'\bresearch\b', r'\blicense\b', r'\brequires\b', r'\bcame from\b'
     ]
     japanese_patterns = [r'[\u3040-\u30FF]+']
+    german_patterns = [
+        r'\bder\b', r'\bdie\b', r'\bdas\b', r'\bden\b', r'\bdem\b',
+        r'\bdes\b', r'\bmit\b', r'\bfür\b', r'\bauf\b', r'\bvon\b',
+        r'\bzu\b', r'\bund\b', r'\boder\b', r'\baber\b', r'\bdoch\b',
+        r'\bist\b', r'\bwar\b', r'\bhat\b', r'\bsagte\b', r'\bsagten\b',
+    ]
 
-    for pattern in finnish_patterns + english_phrases:
+    all_patterns = finnish_patterns + english_phrases + japanese_patterns + german_patterns
+    for pattern in all_patterns:
         text = re.sub(pattern, '', text, flags=re.IGNORECASE)
-    for pattern in japanese_patterns:
-        text = re.sub(pattern, '', text)
 
     text = re.sub(r'(\w)\.(\w)', r'\1\2', text)
     text = re.sub(r'\s+', ' ', text)
@@ -201,50 +207,6 @@ def clean_translation_artifacts(text: str) -> str:
             text = '. '.join(sentences) + '.'
 
     return text.strip()
-
-
-def diversify_dialog_tags(text: str) -> str:
-    """
-    Заменяет диалоговые теги 'сказал' и 'сказала' на синонимы.
-    Работает только в конструкциях вида: "— текст, — сказал он."
-    """
-    # Словарь замен (только для диалоговых глаголов)
-    replacements = {
-        r'(—[^—]+?—\s*)(сказал)(\s+[а-яА-Я]+[.,!?]?)': [
-            (r'\1произнёс\3', r'\1бросил\3', r'\1выдохнул\3', r'\1усмехнулся\3', r'\1пробормотал\3')
-        ],
-        r'(—[^—]+?—\s*)(сказала)(\s+[а-яА-Я]+[.,!?]?)': [
-            (r'\1произнесла\3', r'\1бросила\3', r'\1выдохнула\3', r'\1усмехнулась\3', r'\1пробормотала\3')
-        ]
-    }
-
-    # Проходим по каждому паттерну
-    for pattern, variants in replacements.items():
-        # Находим все вхождения
-        matches = list(re.finditer(pattern, text, re.DOTALL))
-        if not matches:
-            continue
-        # Заменяем с конца, чтобы не сбивать индексы
-        for match in reversed(matches):
-            start, end = match.span()
-            # Выбираем случайный вариант замены
-            variant = random.choice(variants)
-            # Применяем замену (variant — это строка с \1, \2, \3)
-            # Но проще: заменяем только глагол в match.group(2)
-            before = match.group(1)
-            verb = match.group(2)
-            after = match.group(3)
-            # Выбираем случайный синоним для глагола
-            synonyms = {
-                'сказал': ['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал'],
-                'сказала': ['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала']
-            }
-            if verb in synonyms:
-                new_verb = random.choice(synonyms[verb])
-                # Собираем новую строку
-                new_text = text[:start] + before + new_verb + after + text[end:]
-                text = new_text
-    return text
 
 
 def split_into_paragraphs_by_logic(text: str) -> str:
@@ -316,8 +278,8 @@ def api_revise():
             try:
                 yield _sse("progress", {"chars": 0, "estimated_total": original_len, "percent": 0, "log": "Начинаем обработку..."})
 
-                # 1. Упрощённая цепочка переводов
-                logger.info("Step 1: Translation chain (RU→EN→RU)...")
+                # 1. Цепочка RU→EN→DE→RU
+                logger.info("Step 1: Translation chain (RU→EN→DE→RU)...")
                 processed_text = apply_translation_chain_full(chapter_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 40, "log": "Переводы завершены"})
 
@@ -326,19 +288,14 @@ def api_revise():
                 processed_text = clean_translation_artifacts(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 60, "log": "Артефакты удалены"})
 
-                # 3. Разнообразие диалоговых тегов (только это!)
-                logger.info("Step 3: Diversifying dialog tags...")
-                processed_text = diversify_dialog_tags(processed_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 75, "log": "Диалоговые теги обновлены"})
-
-                # 4. Принудительное разбиение на абзацы
-                logger.info("Step 4: Forced paragraph splitting...")
+                # 3. Принудительное разбиение на абзацы
+                logger.info("Step 3: Forced paragraph splitting...")
                 processed_text = split_into_paragraphs_by_logic(processed_text)
                 para_count = len(processed_text.split('\n\n'))
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 90, "log": f"Абзацев: {para_count}"})
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 85, "log": f"Абзацев: {para_count}"})
 
-                # 5. Финальная полировка
-                logger.info("Step 5: Final polish...")
+                # 4. Финальная полировка
+                logger.info("Step 4: Final polish...")
                 processed_text = apply_light_polish(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 100, "log": "Готово!"})
 
@@ -350,10 +307,9 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": f"Текст переработан через упрощённую цепочку (RU→EN→RU) с разнообразием диалогов. Потеря: {loss:.1%}. Абзацев: {final_para_count}",
+                    "summary": f"Текст переработан через цепочку RU→EN→DE→RU. Потеря: {loss:.1%}. Абзацев: {final_para_count}",
                     "changes": [
-                        "Переведён через Google Translate / MyMemory (RU→EN→RU)",
-                        "Разнообразие диалоговых тегов",
+                        "Переведён через Google Translate / MyMemory (RU→EN→DE→RU)",
                         f"Разделён на {final_para_count} абзацев",
                         "Удалены артефакты перевода"
                     ],
