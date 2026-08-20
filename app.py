@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.6.1 — упрощённая цепочка (RU→EN→RU) + лёгкая синонимизация и редкие вставки
+Chapter Editor v3.6.2 — упрощённая цепочка (RU→EN→RU) + разнообразие диалоговых тегов
 """
 import io
 import json
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.6.1"
+APP_VERSION = "3.6.2"
 
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
@@ -203,52 +203,48 @@ def clean_translation_artifacts(text: str) -> str:
     return text.strip()
 
 
-# === НОВЫЕ ФУНКЦИИ ДЛЯ ЛЁГКОГО УЛУЧШЕНИЯ ===
-
-def apply_light_synonymization(text: str) -> str:
-    """Заменяет некоторые слова на синонимы, но очень аккуратно (20% вероятности)."""
-    synonyms = {
-        r'\bсказал\b': ['произнёс', 'бросил', 'выдохнул', 'усмехнулся'],
-        r'\bсказала\b': ['произнесла', 'бросила', 'выдохнула', 'усмехнулась'],
-        r'\bспросил\b': ['поинтересовался', 'осведомился'],
-        r'\bспросила\b': ['поинтересовалась', 'осведомилась'],
-        r'\bответил\b': ['откликнулся', 'парировал'],
-        r'\bответила\b': ['откликнулась', 'парировала'],
-        r'\bочень\b': ['весьма', 'крайне'],
-        r'\bхорошо\b': ['превосходно', 'отлично'],
-        r'\bбыстро\b': ['стремительно', 'мгновенно'],
-        r'\bмедленно\b': ['неспешно', 'неторопливо'],
+def diversify_dialog_tags(text: str) -> str:
+    """
+    Заменяет диалоговые теги 'сказал' и 'сказала' на синонимы.
+    Работает только в конструкциях вида: "— текст, — сказал он."
+    """
+    # Словарь замен (только для диалоговых глаголов)
+    replacements = {
+        r'(—[^—]+?—\s*)(сказал)(\s+[а-яА-Я]+[.,!?]?)': [
+            (r'\1произнёс\3', r'\1бросил\3', r'\1выдохнул\3', r'\1усмехнулся\3', r'\1пробормотал\3')
+        ],
+        r'(—[^—]+?—\s*)(сказала)(\s+[а-яА-Я]+[.,!?]?)': [
+            (r'\1произнесла\3', r'\1бросила\3', r'\1выдохнула\3', r'\1усмехнулась\3', r'\1пробормотала\3')
+        ]
     }
-    words = text.split(' ')
-    new_words = []
-    for word in words:
-        clean = re.sub(r'[^a-zA-Zа-яА-Я]', '', word)
-        if clean.lower() in synonyms and random.random() < 0.2:  # только 20% замен
-            syn = random.choice(synonyms[clean.lower()])
-            if clean[0].isupper():
-                syn = syn.capitalize()
-            suffix = word[len(clean):]
-            new_words.append(syn + suffix)
-        else:
-            new_words.append(word)
-    return ' '.join(new_words)
 
-
-def apply_rare_insertions(text: str) -> str:
-    """Добавляет вводные слова в редкие предложения (5%), только в длинные (>30 слов)."""
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    insertions = ['впрочем', 'кстати', 'разумеется', 'пожалуй']
-    new_sentences = []
-    for sent in sentences:
-        if len(sent.split()) > 30 and random.random() < 0.05:  # только 5% длинных предложений
-            words = sent.split()
-            if len(words) > 3:
-                pos = random.randint(1, len(words)-2)
-                ins = random.choice(insertions)
-                words.insert(pos, ins + ',')
-                sent = ' '.join(words)
-        new_sentences.append(sent)
-    return '. '.join(new_sentences)
+    # Проходим по каждому паттерну
+    for pattern, variants in replacements.items():
+        # Находим все вхождения
+        matches = list(re.finditer(pattern, text, re.DOTALL))
+        if not matches:
+            continue
+        # Заменяем с конца, чтобы не сбивать индексы
+        for match in reversed(matches):
+            start, end = match.span()
+            # Выбираем случайный вариант замены
+            variant = random.choice(variants)
+            # Применяем замену (variant — это строка с \1, \2, \3)
+            # Но проще: заменяем только глагол в match.group(2)
+            before = match.group(1)
+            verb = match.group(2)
+            after = match.group(3)
+            # Выбираем случайный синоним для глагола
+            synonyms = {
+                'сказал': ['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал'],
+                'сказала': ['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала']
+            }
+            if verb in synonyms:
+                new_verb = random.choice(synonyms[verb])
+                # Собираем новую строку
+                new_text = text[:start] + before + new_verb + after + text[end:]
+                text = new_text
+    return text
 
 
 def split_into_paragraphs_by_logic(text: str) -> str:
@@ -330,24 +326,19 @@ def api_revise():
                 processed_text = clean_translation_artifacts(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 60, "log": "Артефакты удалены"})
 
-                # 3. Лёгкая синонимизация (только 20% слов)
-                logger.info("Step 3: Light synonymization...")
-                processed_text = apply_light_synonymization(processed_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 70, "log": "Синонимизация выполнена"})
+                # 3. Разнообразие диалоговых тегов (только это!)
+                logger.info("Step 3: Diversifying dialog tags...")
+                processed_text = diversify_dialog_tags(processed_text)
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 75, "log": "Диалоговые теги обновлены"})
 
-                # 4. Редкие вставки (только в 5% длинных предложений)
-                logger.info("Step 4: Rare insertions...")
-                processed_text = apply_rare_insertions(processed_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 80, "log": "Вставки добавлены"})
-
-                # 5. Принудительное разбиение на абзацы
-                logger.info("Step 5: Forced paragraph splitting...")
+                # 4. Принудительное разбиение на абзацы
+                logger.info("Step 4: Forced paragraph splitting...")
                 processed_text = split_into_paragraphs_by_logic(processed_text)
                 para_count = len(processed_text.split('\n\n'))
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 90, "log": f"Абзацев: {para_count}"})
 
-                # 6. Финальная полировка
-                logger.info("Step 6: Final polish...")
+                # 5. Финальная полировка
+                logger.info("Step 5: Final polish...")
                 processed_text = apply_light_polish(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 100, "log": "Готово!"})
 
@@ -359,11 +350,10 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": f"Текст переработан через упрощённую цепочку (RU→EN→RU) с лёгкой синонимизацией. Потеря: {loss:.1%}. Абзацев: {final_para_count}",
+                    "summary": f"Текст переработан через упрощённую цепочку (RU→EN→RU) с разнообразием диалогов. Потеря: {loss:.1%}. Абзацев: {final_para_count}",
                     "changes": [
                         "Переведён через Google Translate / MyMemory (RU→EN→RU)",
-                        "Лёгкая синонимизация (20% слов)",
-                        "Редкие вставки (5% длинных предложений)",
+                        "Разнообразие диалоговых тегов",
                         f"Разделён на {final_para_count} абзацев",
                         "Удалены артефакты перевода"
                     ],
