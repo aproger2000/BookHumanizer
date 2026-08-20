@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.8.1 — локальное «очеловечивание» (только синонимы и диалоговые теги, без агрессивных вставок)
+Chapter Editor v3.6.0 — упрощённая цепочка переводов (RU→EN→RU) + принудительное разбиение
 """
 import io
 import json
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.8.1"
+APP_VERSION = "3.6.0"
 
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
@@ -38,137 +38,185 @@ def _sse(event_type: str, data: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-class Humanizer:
-    """Локальное «очеловечивание»: безопасные замены без нарушения структуры."""
-
-    def __init__(self):
-        # Словарь синонимов (выбираем случайный синоним для слова)
-        self.synonyms = {
-            r'\bсказал\b': ['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал', 'отозвался'],
-            r'\bсказала\b': ['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала', 'отозвалась'],
-            r'\bспросил\b': ['поинтересовался', 'осведомился', 'полюбопытствовал'],
-            r'\bспросила\b': ['поинтересовалась', 'осведомилась', 'полюбопытствовала'],
-            r'\bответил\b': ['откликнулся', 'парировал', 'возразил', 'подтвердил'],
-            r'\bответила\b': ['откликнулась', 'парировала', 'возразила', 'подтвердила'],
-            r'\bочень\b': ['весьма', 'крайне', 'чрезвычайно'],
-            r'\bхорошо\b': ['превосходно', 'отлично', 'замечательно'],
-            r'\bплохо\b': ['скверно', 'неважно'],
-            r'\bбыстро\b': ['стремительно', 'мгновенно'],
-            r'\bмедленно\b': ['неспешно', 'неторопливо'],
-            r'\bбольшой\b': ['огромный', 'громадный', 'колоссальный'],
-            r'\bмаленький\b': ['крошечный', 'миниатюрный', 'небольшой'],
-            r'\bсмотреть\b': ['вглядываться', 'всматриваться', 'наблюдать'],
-            r'\bувидел\b': ['заметил', 'приметил', 'углядел'],
-            r'\bпонял\b': ['осознал', 'сообразил', 'смекнул'],
-            r'\bдумать\b': ['размышлять', 'соображать', 'прикидывать'],
-            r'\bзнать\b': ['ведать', 'понимать', 'осознавать'],
-            r'\bидти\b': ['шагать', 'двигаться', 'направляться'],
-            r'\bстоять\b': ['выситься', 'возвышаться', 'находиться'],
-            r'\bсидеть\b': ['восседать', 'расположиться', 'устроиться'],
-            r'\bлежать\b': ['покоиться', 'валяться', 'возлежать'],
-            r'\bснова\b': ['опять', 'вновь', 'заново'],
-            r'\bтолько\b': ['лишь', 'едва', 'всего лишь'],
-            r'\bвдруг\b': ['неожиданно', 'внезапно', 'врасплох'],
-            r'\bконечно\b': ['разумеется', 'естественно', 'безусловно'],
-            r'\bвозможно\b': ['вероятно', 'похоже', 'должно быть'],
-            r'\bпоэтому\b': ['потому', 'оттого', 'следовательно'],
-        }
-
-        # Замена устойчивых фраз (редко)
-        self.phrase_replaces = {
-            r'в конце концов': ['в итоге', 'в конечном счёте'],
-            r'с самого начала': ['изначально', 'сразу же'],
-            r'в одно мгновение': ['мгновенно', 'вмиг'],
-            r'время от времени': ['иногда', 'изредка'],
-            r'так или иначе': ['в любом случае', 'как бы там ни было'],
-            r'как правило': ['обычно', 'чаще всего'],
-            r'в целом': ['в общем', 'в основном'],
-        }
-
-    def apply_synonymization(self, text: str) -> str:
-        """Заменяет слова на синонимы, сохраняя длину."""
-        words = text.split(' ')
-        new_words = []
-        for word in words:
-            # Убираем знаки препинания для поиска
-            clean_word = re.sub(r'[^a-zA-Zа-яА-Я]', '', word)
-            if clean_word.lower() in self.synonyms:
-                # С вероятностью 40% заменяем
-                if random.random() < 0.4:
-                    syn = random.choice(self.synonyms[clean_word.lower()])
-                    # Сохраняем регистр первой буквы
-                    if clean_word[0].isupper():
-                        syn = syn.capitalize()
-                    # Восстанавливаем знаки препинания
-                    suffix = word[len(clean_word):]
-                    new_words.append(syn + suffix)
-                    continue
-            new_words.append(word)
-        return ' '.join(new_words)
-
-    def apply_phrase_replacement(self, text: str) -> str:
-        """Заменяет устойчивые фразы с вероятностью 30%."""
-        for pattern, variants in self.phrase_replaces.items():
-            if random.random() < 0.3:
-                replacement = random.choice(variants)
-                text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int = 2) -> str:
+    """Перевод: Google (GET), при ошибке — MyMemory (POST)."""
+    if not text or len(text.strip()) < 2:
         return text
 
-    def apply_dialog_variety(self, text: str) -> str:
-        """Разнообразит диалоговые теги (только для прямых речей с тире)."""
-        # Ищем диалоги вида: "— текст, — сказал он." и заменяем глагол
-        pattern = r'(—[^—]+?—\s*)(\w+)(\s+[а-яА-Я]+[.,!?]?)'
-        matches = list(re.finditer(pattern, text, re.DOTALL))
-        if not matches:
-            return text
-        # Собираем замены в обратном порядке
-        replacements = []
-        for match in matches:
-            prefix = match.group(1)
-            verb = match.group(2)
-            suffix = match.group(3)
-            if verb.lower() in self.synonyms:
-                new_verb = random.choice(self.synonyms[verb.lower()])
-                replacements.append((match.start(), match.end(), f"{prefix}{new_verb}{suffix}"))
-        # Применяем замены с конца
-        for start, end, repl in reversed(replacements):
-            text = text[:start] + repl + text[end:]
+    # Google Translate (публичный)
+    url_google = "https://translate.googleapis.com/translate_a/single"
+    params = {
+        "client": "gtx",
+        "sl": "auto",
+        "tl": target_lang,
+        "dt": "t",
+        "q": text
+    }
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(url_google, params=params, timeout=15)
+            if resp.status_code == 200:
+                data = resp.json()
+                translated = "".join(item[0] for item in data[0] if item[0])
+                if translated:
+                    return translated
+            logger.warning(f"Google attempt {attempt+1} failed: {resp.status_code}")
+            time.sleep(1 + random.random())
+        except Exception as e:
+            logger.warning(f"Google exception: {e}")
+            time.sleep(1 + random.random())
+
+    # Fallback: MyMemory (POST)
+    logger.info(f"Falling back to MyMemory (POST) for {target_lang}")
+    url_mymemory = "https://api.mymemory.translated.net/get"
+    payload = {
+        "q": text,
+        "langpair": f"auto|{target_lang}",
+        "de": "user@example.com"
+    }
+    for attempt in range(2):
+        try:
+            resp = requests.post(url_mymemory, data=payload, timeout=20)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("responseStatus") == 200:
+                    translated = data.get("responseData", {}).get("translatedText")
+                    if translated:
+                        return translated
+            logger.warning(f"MyMemory attempt {attempt+1} failed: {resp.status_code}")
+            time.sleep(1 + random.random())
+        except Exception as e:
+            logger.warning(f"MyMemory exception: {e}")
+            time.sleep(1 + random.random())
+
+    return text
+
+
+def process_chunk_through_chain(text: str) -> str:
+    """Упрощённая цепочка: RU → EN → RU."""
+    if not text or len(text.strip()) < 2:
+        return text
+    try:
+        en = translate_with_fallback(text, target_lang="en")
+        ru = translate_with_fallback(en, target_lang="ru")
+        return ru
+    except Exception as e:
+        logger.error(f"Chunk processing error: {e}")
         return text
 
-    def humanize(self, text: str) -> str:
-        """Полный цикл «очеловечивания»."""
-        original_len = len(text)
 
-        # 1. Замена устойчивых фраз (редко)
-        text = self.apply_phrase_replacement(text)
+def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> list:
+    if len(text) <= chunk_size:
+        return [text]
 
-        # 2. Синонимизация
-        text = self.apply_synonymization(text)
+    chunks = []
+    current_chunk = ""
+    paragraphs = text.split('\n\n')
+    if len(paragraphs) > 1:
+        for para in paragraphs:
+            if len(current_chunk) + len(para) + 2 <= chunk_size:
+                current_chunk += para + "\n\n"
+            else:
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                current_chunk = para + "\n\n"
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+        return chunks
 
-        # 3. Разнообразие диалогов
-        text = self.apply_dialog_variety(text)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    for sentence in sentences:
+        if len(current_chunk) + len(sentence) + 1 <= chunk_size:
+            current_chunk += sentence + " "
+        else:
+            if current_chunk:
+                chunks.append(current_chunk.strip())
+            current_chunk = sentence + " "
 
-        # 4. Чистка лишних пробелов (без добавления точек)
-        text = re.sub(r'\s+', ' ', text)
-        text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
-        text = re.sub(r'\s+', ' ', text)
+    if current_chunk:
+        chunks.append(current_chunk.strip())
 
-        # 5. Контроль длины: если уменьшилась более чем на 8%, добавляем случайные синонимы ещё раз
-        if len(text) < original_len * 0.92:
-            # Повторная синонимизация некоторых слов (безопасно)
-            text = self.apply_synonymization(text)
+    return chunks
 
-        return text.strip()
+
+def apply_translation_chain_full(text: str) -> str:
+    logger.info(f"Starting translation chain for {len(text)} chars...")
+    chunks = split_text_into_chunks(text)
+    logger.info(f"Split into {len(chunks)} chunks")
+    processed_chunks = []
+    for i, chunk in enumerate(chunks):
+        logger.info(f"Processing chunk {i+1}/{len(chunks)}...")
+        processed = process_chunk_through_chain(chunk)
+        processed_chunks.append(processed)
+
+    if '\n\n' in text:
+        result = "\n\n".join(processed_chunks)
+    else:
+        result = " ".join(processed_chunks)
+    logger.info(f"Translation complete. Result length: {len(result)}")
+    return result
+
+
+def clean_translation_artifacts(text: str) -> str:
+    """Удаление финских, английских вставок и восстановление пунктуации."""
+    finnish_patterns = [
+        r'\bTietenkin\b', r'\bhe tarvitsevat\b', r'\bJos se toimii\b',
+        r'\bvaikka se ei\b', r'\btoimi\b', r'\bpuolella\b',
+        r'\bvaltamerta\b', r'\bRakennamme\b', r'\bsiis\b',
+        r'\bsademeren\b', r'\bJa lentää\b', r'\bsinne\b',
+        r'\baamiaiseksi\b', r'\bkuvaan\b', r'\bMikä tämä on\b',
+        r'\bAleksei kysyi\b', r'\bTalomme suunnitelma\b',
+        r'\bKuussa ei ole\b', r'\brannoille\b',
+        r'\bettä\b', r'\bjoka\b', r'\bmitä\b', r'\bniin\b',
+        r'\bkun\b', r'\bvoi\b', r'\bse\b', r'\bja\b'
+    ]
+    english_phrases = [
+        r'\bfirst to spot\b', r'\bthe genius\b', r'\bof a student\b',
+        r'\bfrom Siberia\b', r'\bnow he watched\b', r'\bas that spark\b',
+        r'\bignited its owner\'s career\b', r'\bI came to warn you\b',
+        r'\bthey want to seduce you\b', r'\bthey provide the lab\b',
+        r'\bbudget and team\b', r'\bwhatever you want\b',
+        r'\bhowever research requires a license\b',
+        r'\bA group came from\b', r'\bMIT\b', r'\bthey need\b',
+        r'\bsaid more quietly\b', r'\bbudget\b', r'\bteam\b',
+        r'\bresearch\b', r'\blicense\b', r'\brequires\b', r'\bcame from\b'
+    ]
+    japanese_patterns = [r'[\u3040-\u30FF]+']
+
+    for pattern in finnish_patterns + english_phrases:
+        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+    for pattern in japanese_patterns:
+        text = re.sub(pattern, '', text)
+
+    text = re.sub(r'(\w)\.(\w)', r'\1\2', text)
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'^[.,!?;:\s]+$', '', text, flags=re.MULTILINE)
+
+    # Восстанавливаем кавычки и тире
+    text = re.sub(r'—\s*', '— ', text)
+
+    # Если нет знаков препинания, вставляем точки по заглавным
+    if not re.search(r'[.!?]', text):
+        sentences = re.split(r'(?<=[а-яa-z])\s+(?=[А-ЯA-Z])', text)
+        if len(sentences) > 1:
+            text = '. '.join(sentences) + '.'
+
+    return text.strip()
 
 
 def split_into_paragraphs_by_logic(text: str) -> str:
+    """Принудительное разбиение на абзацы по длине (400 символов, без разрыва слов)."""
     if not text or len(text) < 200:
         return text
+
     chunk_size = 400
     words = text.split()
     paragraphs = []
     current = []
     current_len = 0
+
     for word in words:
         if current_len + len(word) + 1 > chunk_size and current:
             paragraphs.append(' '.join(current))
@@ -178,12 +226,14 @@ def split_into_paragraphs_by_logic(text: str) -> str:
         current_len += len(word) + 1
     if current:
         paragraphs.append(' '.join(current))
+
     if len(paragraphs) == 1 and len(text) > 500:
         paragraphs = []
         for i in range(0, len(text), chunk_size):
             chunk = text[i:i+chunk_size].strip()
             if chunk:
                 paragraphs.append(chunk)
+
     return '\n\n'.join(paragraphs)
 
 
@@ -228,35 +278,38 @@ def api_revise():
             try:
                 yield _sse("progress", {"chars": 0, "estimated_total": len(chapter_text), "percent": 0, "log": "Начинаем обработку..."})
 
-                # 1. Локальное очеловечивание (без агрессивных вставок)
-                logger.info("Step 1: Local humanization (safe replacements)...")
-                humanizer = Humanizer()
-                processed_text = humanizer.humanize(chapter_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 50, "log": "Очеловечивание выполнено"})
+                # 1. Упрощённая цепочка переводов
+                logger.info("Step 1: Translation chain (RU→EN→RU)...")
+                processed_text = apply_translation_chain_full(chapter_text)
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 40, "log": "Переводы завершены"})
 
-                # 2. Разбиение на абзацы
-                logger.info("Step 2: Paragraph splitting...")
+                # 2. Очистка артефактов
+                logger.info("Step 2: Cleaning artifacts...")
+                processed_text = clean_translation_artifacts(processed_text)
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 60, "log": "Артефакты удалены"})
+
+                # 3. Принудительное разбиение на абзацы
+                logger.info("Step 3: Forced paragraph splitting...")
                 processed_text = split_into_paragraphs_by_logic(processed_text)
                 para_count = len(processed_text.split('\n\n'))
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 80, "log": f"Абзацев: {para_count}"})
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 85, "log": f"Абзацев: {para_count}"})
 
-                # 3. Финальная полировка
-                logger.info("Step 3: Final polish...")
+                # 4. Финальная полировка
+                logger.info("Step 4: Final polish...")
                 processed_text = apply_light_polish(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 100, "log": "Готово!"})
 
-                final_len = len(processed_text)
                 final_para_count = len(processed_text.split('\n\n'))
-                logger.info(f"Final: {final_len} chars, {final_para_count} paragraphs, loss: {(1 - final_len/len(chapter_text)):.2%}")
+                logger.info(f"Final: {len(processed_text)} chars, {final_para_count} paragraphs")
 
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": f"Текст обработан локально (синонимы, диалоговые теги). Изменение длины: {(final_len/len(chapter_text)-1):.1%}. Абзацев: {final_para_count}",
+                    "summary": f"Текст переработан через упрощённую цепочку переводов (RU→EN→RU). Абзацев: {final_para_count}",
                     "changes": [
-                        "Локальное «очеловечивание» (синонимы, разнообразие диалогов)",
-                        "Без внешних API и агрессивных вставок",
-                        f"Разделён на {final_para_count} абзацев"
+                        "Переведён через Google Translate / MyMemory (RU→EN→RU)",
+                        f"Разделён на {final_para_count} абзацев",
+                        "Удалены артефакты перевода"
                     ],
                     "checklist": []
                 })
