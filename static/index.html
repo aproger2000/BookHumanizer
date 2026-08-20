@@ -713,8 +713,20 @@
             return handleStream(response);
         })
         .then(data => {
+            // === ОТЛАДКА: проверяем, что пришло с сервера ===
+            console.log('=== ДО обработки ===');
+            console.log('Длина текста:', data.revised_text.length);
+            console.log('Абзацев:', data.revised_text.split('\n\n').length);
+            console.log('Первые 200 символов:', data.revised_text.substring(0, 200));
+
             // ВСЕГДА обрабатываем текст через smartSplitIntoParagraphs
             let formattedText = smartSplitIntoParagraphs(data.revised_text);
+
+            // === ОТЛАДКА: проверяем, что получилось ===
+            console.log('=== ПОСЛЕ обработки ===');
+            console.log('Длина текста:', formattedText.length);
+            console.log('Абзацев:', formattedText.split('\n\n').length);
+            console.log('Первые 200 символов:', formattedText.substring(0, 200));
 
             setStep(3, 'Готово!');
             resultText.value = formattedText;
