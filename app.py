@@ -1,26 +1,18 @@
 """
-Chapter Editor v3.6.2 — базовая версия с опциональным модулем перефразирования
+Chapter Editor v3.6.2 — улучшенное логирование (humanizer отключён по умолчанию)
 """
-import io
 import json
 import os
 import re
 import time
 import logging
 import random
+import traceback
 from pathlib import Path
 
 import requests
 from flask import Flask, Response, jsonify, request, stream_with_context
 from werkzeug.exceptions import HTTPException
-
-# Импорт опционального модуля humanizer
-try:
-    import humanizer
-    HUMANIZER_AVAILABLE = True
-except ImportError:
-    HUMANIZER_AVAILABLE = False
-    logging.warning("humanizer module not found. Humanizer disabled.")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,11 +27,18 @@ CHUNK_SIZE = 3000
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 
-# Переменная окружения для включения humanizer
+# Humanizer отключён по умолчанию
 ENABLE_HUMANIZER = os.environ.get("ENABLE_HUMANIZER", "false").lower() == "true"
-if ENABLE_HUMANIZER and not HUMANIZER_AVAILABLE:
-    logger.warning("ENABLE_HUMANIZER=true but humanizer module not available.")
-    ENABLE_HUMANIZER = False
+if ENABLE_HUMANIZER:
+    try:
+        import humanizer
+        HUMANIZER_AVAILABLE = True
+    except ImportError:
+        logger.warning("humanizer module not found. Humanizer disabled.")
+        HUMANIZER_AVAILABLE = False
+        ENABLE_HUMANIZER = False
+else:
+    HUMANIZER_AVAILABLE = False
 
 
 class ChapterEditError(RuntimeError):
@@ -103,7 +102,6 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
 
 
 def process_chunk_through_chain(text: str) -> str:
-    """Упрощённая цепочка: RU → EN → RU."""
     if not text or len(text.strip()) < 2:
         return text
     try:
@@ -214,13 +212,11 @@ def clean_translation_artifacts(text: str) -> str:
 
 
 def diversify_dialog_tags(text: str) -> str:
-    """Заменяет диалоговые теги на синонимы."""
     synonyms = {
         'сказал': ['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал'],
         'сказала': ['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала']
     }
 
-    # Ищем диалоги вида: "— текст, — сказал он." и заменяем глагол
     pattern = r'(—[^—]+?—\s*)(сказал|сказала)(\s+[а-яА-Я]+[.,!?]?)'
     matches = list(re.finditer(pattern, text, re.DOTALL))
     if not matches:
@@ -336,11 +332,16 @@ def api_revise():
                 processed_text = apply_light_polish(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 90, "log": "Полировка выполнена"})
 
-                # 6. Опциональное перефразирование (humanizer)
+                # 6. Опциональное перефразирование (humanizer) — только если включено и доступно
                 if ENABLE_HUMANIZER and HUMANIZER_AVAILABLE and len(processed_text) > 200:
                     logger.info("Step 6: Applying humanizer (local paraphrasing)...")
-                    processed_text = humanizer.enhance_text(processed_text, probability=0.25)
-                    yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 98, "log": "Перефразирование выполнено"})
+                    try:
+                        processed_text = humanizer.enhance_text(processed_text, probability=0.25)
+                        yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 98, "log": "Перефразирование выполнено"})
+                    except Exception as e:
+                        logger.exception("Humanizer error")
+                        # Отправляем ошибку в SSE, но продолжаем работу (без humanizer)
+                        yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 95, "log": f"Ошибка humanizer: {str(e)}"})
 
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 100, "log": "Готово!"})
 
@@ -365,12 +366,13 @@ def api_revise():
                     ] + (["Локальное перефразирование"] if ENABLE_HUMANIZER and HUMANIZER_AVAILABLE else []),
                     "checklist": []
                 })
-            except ChapterEditError as e:
-                logger.exception("ChapterEditError")
-                yield _sse("error", {"detail": str(e)})
             except Exception as e:
-                logger.exception("Unexpected error in generate")
-                yield _sse("error", {"detail": f"Unexpected error: {str(e)}"})
+                # Полный стек трейс в лог
+                error_trace = traceback.format_exc()
+                logger.error(f"Error in generate: {error_trace}")
+                # Отправляем детальную ошибку в SSE
+                yield _sse("error", {"detail": f"{str(e)}\n\n{error_trace}"})
+                raise  # перевыбрасываем, чтобы поймать на верхнем уровне
 
         return Response(
             stream_with_context(generate()),
@@ -380,7 +382,7 @@ def api_revise():
 
     except Exception as e:
         logger.exception("api_revise: Unexpected error")
-        return jsonify(detail=f"Server error: {str(e)}"), 500
+        return jsonify(detail=f"Server error: {str(e)}\n{traceback.format_exc()}"), 500
 
 
 @app.get("/")
@@ -396,7 +398,7 @@ def handle_http_exception(exc):
 @app.errorhandler(Exception)
 def handle_exception(exc):
     logger.exception("Unhandled exception")
-    return jsonify(detail=f"Server error: {str(exc)}"), 500
+    return jsonify(detail=f"Server error: {str(exc)}\n{traceback.format_exc()}"), 500
 
 
 if __name__ == "__main__":
