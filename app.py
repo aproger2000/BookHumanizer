@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.7.0 — полная цепочка переводов + усиленная очистка и синонимизация
+Chapter Editor v3.7.1 — гибридный выбор цепочки переводов для сохранения длины
 """
 import io
 import json
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.7.0"
+APP_VERSION = "3.7.1"
 
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
@@ -94,7 +94,7 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
 
 
 # === ПОЛНАЯ ЦЕПОЧКА: RU → JA → FI → EN → RU ===
-def process_chunk_through_chain(text: str) -> str:
+def process_chunk_full_chain(text: str) -> str:
     if not text or len(text.strip()) < 2:
         return text
     try:
@@ -104,7 +104,20 @@ def process_chunk_through_chain(text: str) -> str:
         ru = translate_with_fallback(en, target_lang="ru")
         return ru
     except Exception as e:
-        logger.error(f"Chunk processing error: {e}")
+        logger.error(f"Full chain chunk error: {e}")
+        return text
+
+
+# === УПРОЩЁННАЯ ЦЕПОЧКА: RU → EN → RU ===
+def process_chunk_simple_chain(text: str) -> str:
+    if not text or len(text.strip()) < 2:
+        return text
+    try:
+        en = translate_with_fallback(text, target_lang="en")
+        ru = translate_with_fallback(en, target_lang="ru")
+        return ru
+    except Exception as e:
+        logger.error(f"Simple chain chunk error: {e}")
         return text
 
 
@@ -142,14 +155,19 @@ def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> list:
     return chunks
 
 
-def apply_translation_chain_full(text: str) -> str:
-    logger.info(f"Starting translation chain (RU→JA→FI→EN→RU) for {len(text)} chars...")
+def apply_translation_chain(text: str, chain_type: str = "full") -> str:
+    """Применяет цепочку переводов к тексту."""
+    logger.info(f"Starting {chain_type} translation chain for {len(text)} chars...")
     chunks = split_text_into_chunks(text)
     logger.info(f"Split into {len(chunks)} chunks")
     processed_chunks = []
+
     for i, chunk in enumerate(chunks):
         logger.info(f"Processing chunk {i+1}/{len(chunks)}...")
-        processed = process_chunk_through_chain(chunk)
+        if chain_type == "full":
+            processed = process_chunk_full_chain(chunk)
+        else:
+            processed = process_chunk_simple_chain(chunk)
         processed_chunks.append(processed)
 
     if '\n\n' in text:
@@ -160,10 +178,14 @@ def apply_translation_chain_full(text: str) -> str:
     return result
 
 
-def clean_translation_artifacts(text: str) -> str:
-    """Расширенная очистка с заменой типичных ошибок."""
-    # --- Удаление иноязычных вставок ---
-    finnish_patterns = [
+def clean_translation_artifacts(text: str, aggressive: bool = True) -> str:
+    """
+    Очистка артефактов.
+    aggressive=True — удаляем все возможные артефакты (для полной цепочки).
+    aggressive=False — только явные мусорные вставки (для упрощённой).
+    """
+    # Базовые паттерны (всегда удаляем)
+    base_patterns = [
         r'\bTietenkin\b', r'\bhe tarvitsevat\b', r'\bJos se toimii\b',
         r'\bvaikka se ei\b', r'\btoimi\b', r'\bpuolella\b',
         r'\bvaltamerta\b', r'\bRakennamme\b', r'\bsiis\b',
@@ -171,39 +193,43 @@ def clean_translation_artifacts(text: str) -> str:
         r'\baamiaiseksi\b', r'\bkuvaan\b', r'\bMikä tämä on\b',
         r'\bAleksei kysyi\b', r'\bTalomme suunnitelma\b',
         r'\bKuussa ei ole\b', r'\brannoille\b',
-        r'\bettä\b', r'\bjoka\b', r'\bmitä\b', r'\bniin\b',
-        r'\bkun\b', r'\bvoi\b', r'\bse\b', r'\bja\b',
-        r'\bniin\b', r'\bkuin\b', r'\bsitä\b', r'\bettä\b'
+        r'\bakkuni\b', r'\bakkujasi\b', r'\bтоими\b'
     ]
-    english_phrases = [
-        r'\bfirst to spot\b', r'\bthe genius\b', r'\bof a student\b',
-        r'\bfrom Siberia\b', r'\bnow he watched\b', r'\bas that spark\b',
-        r'\bignited its owner\'s career\b', r'\bI came to warn you\b',
-        r'\bthey want to seduce you\b', r'\bthey provide the lab\b',
-        r'\bbudget and team\b', r'\bwhatever you want\b',
-        r'\bhowever research requires a license\b',
-        r'\bA group came from\b', r'\bMIT\b', r'\bthey need\b',
-        r'\bsaid more quietly\b', r'\bbudget\b', r'\bteam\b',
-        r'\bresearch\b', r'\blicense\b', r'\brequires\b', r'\bcame from\b'
-    ]
-    japanese_patterns = [r'[\u3040-\u30FF]+']
 
-    for pattern in finnish_patterns + english_phrases:
+    # Дополнительные паттерны для агрессивной очистки
+    extra_patterns = []
+    if aggressive:
+        extra_patterns = [
+            r'\bettä\b', r'\bjoka\b', r'\bmitä\b', r'\bniin\b',
+            r'\bkun\b', r'\bvoi\b', r'\bse\b', r'\bja\b',
+            r'\bfirst to spot\b', r'\bthe genius\b', r'\bof a student\b',
+            r'\bfrom Siberia\b', r'\bnow he watched\b', r'\bas that spark\b',
+            r'\bignited its owner\'s career\b', r'\bI came to warn you\b',
+            r'\bthey want to seduce you\b', r'\bthey provide the lab\b',
+            r'\bbudget and team\b', r'\bwhatever you want\b',
+            r'\bhowever research requires a license\b',
+            r'\bA group came from\b', r'\bMIT\b', r'\bthey need\b',
+            r'\bsaid more quietly\b', r'\bbudget\b', r'\bteam\b',
+            r'\bresearch\b', r'\blicense\b', r'\brequires\b', r'\bcame from\b',
+            r'[\u3040-\u30FF]+'  # японские символы
+        ]
+
+    all_patterns = base_patterns + extra_patterns
+
+    for pattern in all_patterns:
         text = re.sub(pattern, '', text, flags=re.IGNORECASE)
-    for pattern in japanese_patterns:
-        text = re.sub(pattern, '', text)
 
-    # --- Исправление пунктуации ---
+    # Исправление пунктуации
     text = re.sub(r'(\w)\.(\w)', r'\1\2', text)
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'^[.,!?;:\s]+$', '', text, flags=re.MULTILINE)
 
-    # --- Восстановление диалоговых тире ---
+    # Восстановление диалоговых тире
     text = re.sub(r'—\s*', '— ', text)
 
-    # --- Замена типичных ошибок перевода ---
+    # Замена типичных ошибок
     fixes = {
         r'черного вина': 'черного кофе',
         r'черное вино': 'черный кофе',
@@ -211,17 +237,14 @@ def clean_translation_artifacts(text: str) -> str:
         r'не испортил': 'не шутил',
         r'—\s*знать': '— Я знаю',
         r'—\s*Знать': '— Я знаю',
-        r'тоими': 'тому',
         r'Босимом': 'Босиком'
     }
     for pattern, replacement in fixes.items():
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
 
-    # --- Удаление лишних кавычек ---
-    text = text.replace('""', '"')
-    text = text.replace('""', '"')
+    text = text.replace('""', '"').replace('""', '"')
 
-    # --- Если нет знаков препинания, вставляем точки по заглавным ---
+    # Если нет знаков препинания, вставляем точки по заглавным
     if not re.search(r'[.!?]', text):
         sentences = re.split(r'(?<=[а-яa-z])\s+(?=[А-ЯA-Z])', text)
         if len(sentences) > 1:
@@ -231,8 +254,6 @@ def clean_translation_artifacts(text: str) -> str:
 
 
 def apply_synonymization(text: str) -> str:
-    """Лёгкая синонимизация для улучшения естественности."""
-    # Безопасные замены (только в контексте)
     synonyms = {
         r'\bсказал\b': 'произнёс',
         r'\bсказала\b': 'произнесла',
@@ -251,10 +272,33 @@ def split_into_paragraphs_by_logic(text: str) -> str:
     """Гарантированное разбиение на абзацы (оставляем как есть)."""
     if not text or len(text) < 200:
         return text
-    # ... (полный код из предыдущей версии, без изменений)
-    # Я опускаю для краткости, но он должен быть здесь.
-    # В реальном файле нужно вставить полную функцию.
-    return text
+
+    # Принудительное разбиение по словам (400 символов)
+    chunk_size = 400
+    words = text.split()
+    paragraphs = []
+    current = []
+    current_len = 0
+
+    for word in words:
+        if current_len + len(word) + 1 > chunk_size and current:
+            paragraphs.append(' '.join(current))
+            current = []
+            current_len = 0
+        current.append(word)
+        current_len += len(word) + 1
+    if current:
+        paragraphs.append(' '.join(current))
+
+    # Если получился один абзац, а текст длинный — режем посимвольно (но сохраняя слова)
+    if len(paragraphs) == 1 and len(text) > 500:
+        paragraphs = []
+        for i in range(0, len(text), chunk_size):
+            chunk = text[i:i+chunk_size].strip()
+            if chunk:
+                paragraphs.append(chunk)
+
+    return '\n\n'.join(paragraphs)
 
 
 def apply_light_polish(text: str) -> str:
@@ -300,40 +344,62 @@ def api_revise():
 
                 # 1. Полная цепочка переводов
                 logger.info("Step 1: Full translation chain (RU→JA→FI→EN→RU)...")
-                processed_text = apply_translation_chain_full(chapter_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 35, "log": "Переводы завершены"})
+                full_processed = apply_translation_chain(chapter_text, chain_type="full")
+                yield _sse("progress", {"chars": len(full_processed), "estimated_total": len(chapter_text), "percent": 35, "log": "Переводы (полные) завершены"})
 
-                # 2. Очистка артефактов
-                logger.info("Step 2: Cleaning artifacts...")
-                processed_text = clean_translation_artifacts(processed_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 55, "log": "Артефакты удалены"})
+                # 2. Очистка артефактов (агрессивная)
+                logger.info("Step 2: Cleaning artifacts (aggressive)...")
+                full_cleaned = clean_translation_artifacts(full_processed, aggressive=True)
+                yield _sse("progress", {"chars": len(full_cleaned), "estimated_total": len(chapter_text), "percent": 50, "log": "Артефакты удалены"})
 
-                # 3. Синонимизация
+                # 3. Проверка потери длины
+                original_len = len(chapter_text)
+                current_len = len(full_cleaned)
+                loss_ratio = (original_len - current_len) / original_len
+                logger.info(f"Length loss: {loss_ratio:.2%} (original {original_len}, current {current_len})")
+
+                # Если потеря > 15%, используем упрощённую цепочку
+                if loss_ratio > 0.15:
+                    logger.info("Loss > 15%, switching to simple chain (RU→EN→RU)")
+                    yield _sse("progress", {"chars": current_len, "estimated_total": original_len, "percent": 55, "log": f"Потеря длины {loss_ratio:.0%} > 15%, применяем упрощённую цепочку..."})
+
+                    # Повторная обработка через упрощённую цепочку
+                    simple_processed = apply_translation_chain(chapter_text, chain_type="simple")
+                    simple_cleaned = clean_translation_artifacts(simple_processed, aggressive=False)
+                    processed_text = simple_cleaned
+                    used_chain = "simple"
+                else:
+                    processed_text = full_cleaned
+                    used_chain = "full"
+
+                # 4. Синонимизация
                 logger.info("Step 3: Synonymization...")
                 processed_text = apply_synonymization(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 70, "log": "Синонимизация выполнена"})
 
-                # 4. Интеллектуальное разбиение на абзацы
+                # 5. Разбиение на абзацы
                 logger.info("Step 4: Paragraph splitting...")
                 processed_text = split_into_paragraphs_by_logic(processed_text)
                 para_count = len(processed_text.split('\n\n'))
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 85, "log": f"Абзацев: {para_count}"})
 
-                # 5. Финальная полировка
+                # 6. Финальная полировка
                 logger.info("Step 5: Final polish...")
                 processed_text = apply_light_polish(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 100, "log": "Готово!"})
 
+                final_len = len(processed_text)
+                final_loss = (original_len - final_len) / original_len
                 final_para_count = len(processed_text.split('\n\n'))
-                logger.info(f"Final: {len(processed_text)} chars, {final_para_count} paragraphs")
+                logger.info(f"Final: {final_len} chars, {final_para_count} paragraphs, loss {final_loss:.2%}")
 
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": f"Текст переработан через полную цепочку переводов (RU→JA→FI→EN→RU) с синонимизацией. Абзацев: {final_para_count}",
+                    "summary": f"Текст обработан через {'полную' if used_chain == 'full' else 'упрощённую'} цепочку переводов. Потеря длины: {final_loss:.1%}. Абзацев: {final_para_count}",
                     "changes": [
-                        "Переведён через Google Translate / MyMemory (RU→JA→FI→EN→RU)",
-                        "Применена синонимизация для естественности",
+                        f"Переведён через {'полную (RU→JA→FI→EN→RU)' if used_chain == 'full' else 'упрощённую (RU→EN→RU)'} цепочку",
+                        "Применена синонимизация",
                         f"Разделён на {final_para_count} абзацев",
                         "Удалены артефакты перевода"
                     ],
