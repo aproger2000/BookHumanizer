@@ -28,7 +28,7 @@ app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 
 # Humanizer отключён (переменная игнорируется)
-ENABLE_HUMANIZER = False
+ENABLE_HUMANIZER = True
 HUMANIZER_AVAILABLE = False
 
 # Если вы всё же хотите включить humanizer, раскомментируйте эти строки
