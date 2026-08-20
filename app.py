@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.6.0 — упрощённая цепочка переводов (RU→EN→RU) + принудительное разбиение
+Chapter Editor v3.6.2 — упрощённая цепочка переводов + лёгкая синонимизация и диалоговые теги
 """
 import io
 import json
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.6.0"
+APP_VERSION = "3.6.2"
 
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
@@ -39,11 +39,9 @@ def _sse(event_type: str, data: dict) -> str:
 
 
 def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int = 2) -> str:
-    """Перевод: Google (GET), при ошибке — MyMemory (POST)."""
     if not text or len(text.strip()) < 2:
         return text
 
-    # Google Translate (публичный)
     url_google = "https://translate.googleapis.com/translate_a/single"
     params = {
         "client": "gtx",
@@ -66,7 +64,6 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
             logger.warning(f"Google exception: {e}")
             time.sleep(1 + random.random())
 
-    # Fallback: MyMemory (POST)
     logger.info(f"Falling back to MyMemory (POST) for {target_lang}")
     url_mymemory = "https://api.mymemory.translated.net/get"
     payload = {
@@ -93,7 +90,6 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
 
 
 def process_chunk_through_chain(text: str) -> str:
-    """Упрощённая цепочка: RU → EN → RU."""
     if not text or len(text.strip()) < 2:
         return text
     try:
@@ -158,7 +154,6 @@ def apply_translation_chain_full(text: str) -> str:
 
 
 def clean_translation_artifacts(text: str) -> str:
-    """Удаление финских, английских вставок и восстановление пунктуации."""
     finnish_patterns = [
         r'\bTietenkin\b', r'\bhe tarvitsevat\b', r'\bJos se toimii\b',
         r'\bvaikka se ei\b', r'\btoimi\b', r'\bpuolella\b',
@@ -194,10 +189,9 @@ def clean_translation_artifacts(text: str) -> str:
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'^[.,!?;:\s]+$', '', text, flags=re.MULTILINE)
 
-    # Восстанавливаем кавычки и тире
     text = re.sub(r'—\s*', '— ', text)
 
-    # Если нет знаков препинания, вставляем точки по заглавным
+    # Восстановление пунктуации, если её нет
     if not re.search(r'[.!?]', text):
         sentences = re.split(r'(?<=[а-яa-z])\s+(?=[А-ЯA-Z])', text)
         if len(sentences) > 1:
@@ -207,7 +201,6 @@ def clean_translation_artifacts(text: str) -> str:
 
 
 def split_into_paragraphs_by_logic(text: str) -> str:
-    """Принудительное разбиение на абзацы по длине (400 символов, без разрыва слов)."""
     if not text or len(text) < 200:
         return text
 
@@ -243,6 +236,51 @@ def apply_light_polish(text: str) -> str:
     text = text.replace(' - ', ' — ')
     text = re.sub(r'—\s*', '— ', text)
     return text
+
+
+# ---- НОВЫЙ МОДУЛЬ: лёгкое очеловечивание (без вставок) ----
+def apply_humanization_touch(text: str) -> str:
+    """
+    Лёгкие изменения, повышающие HUMAN:
+    - разнообразие диалоговых тегов (сказал → произнёс, бросил, усмехнулся и т.п.)
+    - замена некоторых частотных слов на синонимы (очень → весьма, хорошо → отлично)
+    Без изменения структуры и длины.
+    """
+    # Словарь для замены (только в диалоговых тегах)
+    dialog_synonyms = {
+        r'—\s*сказал': ['— произнёс', '— бросил', '— выдохнул', '— усмехнулся', '— пробормотал', '— отозвался'],
+        r'—\s*сказала': ['— произнесла', '— бросила', '— выдохнула', '— усмехнулась', '— пробормотала', '— отозвалась'],
+        r'—\s*спросил': ['— поинтересовался', '— осведомился', '— полюбопытствовал'],
+        r'—\s*спросила': ['— поинтересовалась', '— осведомилась', '— полюбопытствовала'],
+        r'—\s*ответил': ['— откликнулся', '— парировал', '— возразил', '— подтвердил'],
+        r'—\s*ответила': ['— откликнулась', '— парировала', '— возразила', '— подтвердила'],
+    }
+
+    # Замена только в диалогах (с вероятностью 50%)
+    for pattern, variants in dialog_synonyms.items():
+        if random.random() < 0.5:
+            replacement = random.choice(variants)
+            text = re.sub(pattern, replacement, text)
+
+    # Замена некоторых частотных слов (с вероятностью 30%)
+    common_replacements = {
+        r'\bочень\b': ['весьма', 'крайне', 'чрезвычайно'],
+        r'\bхорошо\b': ['отлично', 'превосходно', 'замечательно'],
+        r'\bбыстро\b': ['стремительно', 'мгновенно'],
+        r'\bмедленно\b': ['неспешно', 'неторопливо'],
+        r'\bвдруг\b': ['внезапно', 'неожиданно'],
+        r'\bконечно\b': ['разумеется', 'безусловно'],
+        r'\bвозможно\b': ['вероятно', 'похоже'],
+    }
+    for pattern, variants in common_replacements.items():
+        if random.random() < 0.3:
+            replacement = random.choice(variants)
+            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+
+    return text
+
+
+# ---- КОНЕЦ НОВОГО МОДУЛЯ ----
 
 
 @app.get("/api/health")
@@ -281,21 +319,26 @@ def api_revise():
                 # 1. Упрощённая цепочка переводов
                 logger.info("Step 1: Translation chain (RU→EN→RU)...")
                 processed_text = apply_translation_chain_full(chapter_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 40, "log": "Переводы завершены"})
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 35, "log": "Переводы завершены"})
 
                 # 2. Очистка артефактов
                 logger.info("Step 2: Cleaning artifacts...")
                 processed_text = clean_translation_artifacts(processed_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 60, "log": "Артефакты удалены"})
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 55, "log": "Артефакты удалены"})
 
-                # 3. Принудительное разбиение на абзацы
-                logger.info("Step 3: Forced paragraph splitting...")
+                # 3. Лёгкое очеловечивание (без изменения структуры)
+                logger.info("Step 3: Light humanization touch...")
+                processed_text = apply_humanization_touch(processed_text)
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 70, "log": "Очеловечивание выполнено"})
+
+                # 4. Принудительное разбиение на абзацы
+                logger.info("Step 4: Forced paragraph splitting...")
                 processed_text = split_into_paragraphs_by_logic(processed_text)
                 para_count = len(processed_text.split('\n\n'))
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 85, "log": f"Абзацев: {para_count}"})
 
-                # 4. Финальная полировка
-                logger.info("Step 4: Final polish...")
+                # 5. Финальная полировка
+                logger.info("Step 5: Final polish...")
                 processed_text = apply_light_polish(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 100, "log": "Готово!"})
 
@@ -305,9 +348,10 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": f"Текст переработан через упрощённую цепочку переводов (RU→EN→RU). Абзацев: {final_para_count}",
+                    "summary": f"Текст переработан через упрощённую цепочку переводов с лёгкой синонимизацией. Абзацев: {final_para_count}",
                     "changes": [
                         "Переведён через Google Translate / MyMemory (RU→EN→RU)",
+                        "Лёгкая синонимизация диалоговых тегов и частотных слов",
                         f"Разделён на {final_para_count} абзацев",
                         "Удалены артефакты перевода"
                     ],
