@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.5.2 — Humanization via Translation Chain + принудительное выделение диалогов (по предложениям)
+Chapter Editor v3.5.3 — Humanization via Translation Chain + принудительное выделение диалогов (по предложениям)
 Работает с Google Translate.
 """
 import io
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.5.2"
+APP_VERSION = "3.5.3"
 
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
