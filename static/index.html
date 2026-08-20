@@ -448,15 +448,12 @@ function smartSplitIntoParagraphs(text) {
     if (!text || text.length < 150) return text;
 
     // === 1. УДАЛЕНИЕ АРТЕФАКТОВ ===
-    // Список финских и английских фраз для удаления
     const artifacts = [
-        // Финские
         'Tietenkin', 'he tarvitsevat', 'Jos se toimii', 'vaikka se ei',
         'toimi', 'puolella', 'valtamerta', 'Rakennamme', 'siis',
         'sademeren', 'Ja lentää', 'sinne', 'aamiaiseksi', 'kuvaan',
         'Mikä tämä on', 'Aleksei kysyi', 'Talomme suunnitelma',
         'Kuussa ei ole', 'rannoille', 'akkuni', 'akkujasi', 'тоими',
-        // Английские
         'first to spot', 'the genius', 'of a student', 'from Siberia',
         'now he watched', 'as that spark', 'ignited its owner\'s career',
         'I came to warn you', 'they want to seduce you', 'they provide the lab',
@@ -470,36 +467,23 @@ function smartSplitIntoParagraphs(text) {
         text = text.replace(regex, '');
     }
 
-    // Убираем лишние точки внутри слов
     text = text.replace(/(\w)\.(\w)/g, '$1$2');
-    
-    // Убираем артефакты вида " ." -> "."
     text = text.replace(/\s+\./g, '.');
     text = text.replace(/\s+,/g, ',');
     text = text.replace(/\s+\?/g, '?');
     text = text.replace(/\s+!/g, '!');
-    
-    // Убираем многократные точки
     text = text.replace(/\.{4,}/g, '...');
-    
-    // Убираем артефакты кавычек
     text = text.replace(/""/g, '"');
     text = text.replace(/""/g, '"');
-    
+    text = text.replace(/\s{2,}/g, ' ');
+
     // === 2. ВОССТАНОВЛЕНИЕ ФРАЗ ===
-    // Восстанавливаем типичные русские фразы
     const fixes = [
-        // Исправляем " — знать" на " — Я знаю"
         [/—\s*знать/gi, '— Я знаю'],
-        // Исправляем " — Знать" на " — Я знаю"
         [/—\s*Знать/gi, '— Я знаю'],
-        // Исправляем "не испортил" на "не шутил"
         [/не испортил/gi, 'не шутил'],
-        // Исправляем "Токи" на "Ибис"
         [/\bТоки\b/gi, '«Ибис»'],
-        // Исправляем "черного вина" на "черного кофе"
         [/черного вина/gi, 'черного кофе'],
-        // Исправляем "Босимом" на "Босиком"
         [/\bБосимом\b/gi, 'Босиком'],
     ];
     
@@ -507,91 +491,109 @@ function smartSplitIntoParagraphs(text) {
         text = text.replace(pattern, replacement);
     }
 
-    // === 3. РАЗБИЕНИЕ НА АБЗАЦЫ ===
-    // Проверяем, есть ли уже хорошие абзацы
-    const existing = text.split('\n\n');
-    if (existing.length >= 4) {
-        const good = existing.filter(p => p.trim().length > 50);
-        if (good.length >= 3) return text;
+    // === 3. РАЗБИЕНИЕ НА АБЗАЦЫ (ВСЕГДА) ===
+    
+    // Сначала разбиваем по диалогам
+    const lines = text.split('\n');
+    let resultParts = [];
+    let currentPart = '';
+    let inDialog = false;
+    
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        
+        const isDialog = trimmed.startsWith('—') || trimmed.startsWith('"') || 
+                        trimmed.startsWith('«') || trimmed.startsWith('–') ||
+                        (trimmed.startsWith('-') && trimmed.length > 1 && trimmed[1] !== ' ');
+        
+        if (isDialog) {
+            if (currentPart) {
+                resultParts.push(currentPart);
+                currentPart = '';
+            }
+            resultParts.push(trimmed);
+            inDialog = true;
+        } else {
+            if (inDialog) {
+                if (currentPart) {
+                    resultParts.push(currentPart);
+                    currentPart = '';
+                }
+                inDialog = false;
+            }
+            currentPart += (currentPart ? ' ' : '') + trimmed;
+        }
     }
-
-    // Разбиваем по предложениям
-    let sentences = text.match(/[^.!?]+[.!?]+/g);
-    if (!sentences || sentences.length < 3) {
+    
+    if (currentPart) {
+        resultParts.push(currentPart);
+    }
+    
+    // Если диалогов мало или результат плохой — разбиваем по предложениям
+    if (resultParts.length < 2 || resultParts.join(' ').length > 500) {
+        // Разбиваем по предложениям
+        const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+        const newParts = [];
+        let current = [];
+        let currentLen = 0;
+        const targetLen = 350;
+        
+        for (const sent of sentences) {
+            const trimmed = sent.trim();
+            if (!trimmed) continue;
+            
+            const isDialog = trimmed.startsWith('—') || trimmed.startsWith('"') || 
+                            trimmed.startsWith('«') || trimmed.startsWith('–');
+            
+            if (isDialog) {
+                if (current.length > 0) {
+                    newParts.push(current.join(' '));
+                    current = [];
+                    currentLen = 0;
+                }
+                newParts.push(trimmed);
+                continue;
+            }
+            
+            if (currentLen > targetLen && current.length >= 2) {
+                newParts.push(current.join(' '));
+                current = [];
+                currentLen = 0;
+            }
+            
+            current.push(trimmed);
+            currentLen += trimmed.length;
+        }
+        
+        if (current.length > 0) {
+            newParts.push(current.join(' '));
+        }
+        
+        if (newParts.length > resultParts.length) {
+            resultParts = newParts;
+        }
+    }
+    
+    // Если всё ещё один абзац — разбиваем по символам
+    if (resultParts.length === 1 && text.length > 400) {
         const chunks = [];
         for (let i = 0; i < text.length; i += 400) {
             let chunk = text.slice(i, i + 400).trim();
             if (chunk) chunks.push(chunk);
         }
-        return chunks.join('\n\n');
+        resultParts = chunks;
     }
-
-    // Группируем предложения в абзацы, выделяя диалоги
-    const paragraphs = [];
-    let current = [];
-    let currentLen = 0;
-    const targetLen = 350;
-
-    for (const sent of sentences) {
-        const trimmed = sent.trim();
-        if (!trimmed) continue;
-
-        const isDialog = trimmed.startsWith('—') || trimmed.startsWith('"') || 
-                        trimmed.startsWith('«') || trimmed.startsWith('–') ||
-                        (trimmed.startsWith('-') && trimmed.length > 1 && trimmed[1] !== ' ');
-
-        if (isDialog) {
-            if (current.length > 0) {
-                paragraphs.push(current.join(' '));
-                current = [];
-                currentLen = 0;
-            }
-            paragraphs.push(trimmed);
-            continue;
-        }
-
-        if (trimmed.length > 200 && current.length > 0) {
-            paragraphs.push(current.join(' '));
-            current = [];
-            currentLen = 0;
-            paragraphs.push(trimmed);
-            continue;
-        }
-
-        if (currentLen > targetLen && current.length >= 2) {
-            paragraphs.push(current.join(' '));
-            current = [];
-            currentLen = 0;
-        }
-
-        current.push(trimmed);
-        currentLen += trimmed.length;
-    }
-
-    if (current.length > 0) {
-        paragraphs.push(current.join(' '));
-    }
-
-    if (paragraphs.length === 1 && sentences.length > 6) {
-        const mid = Math.floor(sentences.length / 2);
-        paragraphs.length = 0;
-        paragraphs.push(sentences.slice(0, mid).join(' '));
-        paragraphs.push(sentences.slice(mid).join(' '));
-    }
-
-    // === 4. ФИНАЛЬНАЯ ОЧИСТКА ===
-    let result = paragraphs.join('\n\n');
+    
+    // === 4. СБОРКА РЕЗУЛЬТАТА ===
+    let result = resultParts.join('\n\n');
     
     // Убираем лишние пробелы после тире в диалогах
     result = result.replace(/—\s+/g, '— ');
     result = result.replace(/\s+—/g, ' —');
-    
-    // Убираем двойные пробелы
     result = result.replace(/\s{2,}/g, ' ');
-    
-    // Убираем пустые абзацы
     result = result.replace(/\n{3,}/g, '\n\n');
-
+    
     return result;
 }
 
