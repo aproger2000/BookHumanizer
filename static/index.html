@@ -713,11 +713,8 @@ function smartSplitIntoParagraphs(text) {
             return handleStream(response);
         })
         .then(data => {
-            let formattedText = data.revised_text;
-            const paragraphs = formattedText.split('\n\n');
-            if (paragraphs.length < 2) {
-                formattedText = smartSplitIntoParagraphs(formattedText);
-            }
+            // ВСЕГДА обрабатываем текст через smartSplitIntoParagraphs
+            let formattedText = smartSplitIntoParagraphs(data.revised_text);
 
             setStep(3, 'Готово!');
             resultText.value = formattedText;
