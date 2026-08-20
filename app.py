@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.5.3 — Humanization via Translation Chain + принудительное выделение диалогов (по предложениям)
+Chapter Editor v3.5.4 — Humanization via Translation Chain + принудительное разбиение на абзацы
 Работает с Google Translate.
 """
 import io
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.5.3"
+APP_VERSION = "3.5.4"
 
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
@@ -171,99 +171,73 @@ def clean_translation_artifacts(text: str) -> str:
     return text.strip()
 
 
-def force_split_by_length(text: str, max_chars: int = 450) -> str:
-    """Принудительное разбиение по длине (запасной вариант)."""
-    if not text or len(text) < 200:
-        return text
-    
-    words = text.split()
-    if len(words) < 20:
-        return text
-    
-    paragraphs = []
-    current = []
-    current_len = 0
-    
-    for word in words:
-        word_len = len(word) + 1
-        if current_len > max_chars and len(current) >= 3:
-            paragraphs.append(' '.join(current))
-            current = []
-            current_len = 0
-        current.append(word)
-        current_len += word_len
-    
-    if current:
-        paragraphs.append(' '.join(current))
-    
-    if len(paragraphs) == 1 and len(words) > 30:
-        mid = len(words) // 2
-        paragraphs = [
-            ' '.join(words[:mid]),
-            ' '.join(words[mid:])
-        ]
-    
-    return '\n\n'.join(paragraphs)
-
-
 def split_into_paragraphs_by_logic(text: str) -> str:
     """
-    Разбивает текст на абзацы по логике изложения.
-    Каждый диалог — отдельный абзац.
-    Работает на уровне предложений, а не строк.
+    Разбивает текст на абзацы принудительно по символам,
+    если логическое разбиение не сработало.
     """
     if not text or len(text) < 200:
         return text
     
-    # Разбиваем по предложениям
+    # Сначала пробуем логическое разбиение по предложениям
     sentences = re.split(r'(?<=[.!?])\s+', text)
     
-    if len(sentences) < 5:
-        return force_split_by_length(text)
+    # Если предложений мало — принудительное разбиение по символам
+    if len(sentences) < 3:
+        paragraphs = []
+        chunk_size = 400
+        for i in range(0, len(text), chunk_size):
+            chunk = text[i:i+chunk_size].strip()
+            if chunk:
+                paragraphs.append(chunk)
+        return '\n\n'.join(paragraphs)
     
+    # Логическое разбиение (если есть предложения)
     paragraphs = []
     current_para = []
+    current_len = 0
     
     for sent in sentences:
         sent = sent.strip()
         if not sent:
             continue
         
-        # Проверяем, является ли предложение диалогом
         is_dialog = (
             sent.startswith('—') or 
             sent.startswith('"') or 
             sent.startswith('«') or
-            sent.startswith('–') or
-            (sent.startswith('-') and len(sent) > 1 and sent[1] != ' ')
+            sent.startswith('–')
         )
         
-        # Если это диалог — отдельный абзац
         if is_dialog:
             if current_para:
                 paragraphs.append(' '.join(current_para))
                 current_para = []
+                current_len = 0
             paragraphs.append(sent)
             continue
         
-        # Обычное предложение — добавляем в текущий абзац
+        if current_len > 350 and len(current_para) >= 2:
+            paragraphs.append(' '.join(current_para))
+            current_para = []
+            current_len = 0
+        
         current_para.append(sent)
+        current_len += len(sent)
     
-    # Добавляем последний абзац
     if current_para:
         paragraphs.append(' '.join(current_para))
     
-    # Проверяем результат
+    # Если всё равно получился один абзац — разбиваем по символам
     if len(paragraphs) < 2:
-        return force_split_by_length(text)
+        paragraphs = []
+        chunk_size = 400
+        for i in range(0, len(text), chunk_size):
+            chunk = text[i:i+chunk_size].strip()
+            if chunk:
+                paragraphs.append(chunk)
     
-    result = '\n\n'.join(paragraphs)
-    
-    # Если диалогов нет — пробуем обычное разбиение
-    if '—' not in result and '"' not in result and '«' not in result:
-        return force_split_by_length(text)
-    
-    return result
+    return '\n\n'.join(paragraphs)
 
 
 def apply_light_polish(text: str) -> str:
@@ -323,7 +297,7 @@ def api_revise():
                 processed_text = clean_translation_artifacts(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 60, "log": "Артефакты удалены"})
 
-                # 3. Интеллектуальное разбиение на абзацы (с выделением диалогов по предложениям)
+                # 3. Интеллектуальное разбиение на абзацы
                 logger.info("Step 3: Intelligent paragraph splitting...")
                 processed_text = split_into_paragraphs_by_logic(processed_text)
                 para_count = len(processed_text.split('\n\n'))
@@ -343,7 +317,7 @@ def api_revise():
                     "summary": f"Текст переработан через цепочку переводов. Абзацев: {final_para_count}",
                     "changes": [
                         "Переведён через Google Translate (RU→JA→FI→EN→RU)",
-                        f"Разделён на {final_para_count} логических абзацев, диалоги выделены"
+                        f"Разделён на {final_para_count} логических абзацев"
                     ],
                     "checklist": []
                 })
