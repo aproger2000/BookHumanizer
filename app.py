@@ -1,413 +1,300 @@
 """
-Chapter Editor v3.6.4 — поддержка цепочек (EN/ZH) + пост-редактор для коррекции артефактов
+post_editor.py — модуль для адресной коррекции артефактов в обработанном тексте
+на основе сравнения с исходным текстом.
 """
-import json
-import os
 import re
-import time
 import logging
-import random
-import traceback
-from pathlib import Path
 
-import requests
-from flask import Flask, Response, jsonify, request, stream_with_context
-from werkzeug.exceptions import HTTPException
-
-# Импорт пост-редактора (новый модуль)
-try:
-    import post_editor
-    POST_EDITOR_AVAILABLE = True
-except ImportError:
-    POST_EDITOR_AVAILABLE = False
-    logging.warning("post_editor module not found. Post-editing disabled.")
-
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BASE_DIR = Path(__file__).resolve().parent
-STATIC_DIR = BASE_DIR / "static"
-
-APP_VERSION = "3.6.4"
-MAX_CHARS = 30_000
-CHUNK_SIZE = 3000
-
-app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
-app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
-
-# Выбор цепочки переводов через переменную окружения
-CHAIN_TYPE = os.environ.get("TRANSLATION_CHAIN", "en").lower()
-if CHAIN_TYPE not in ("en", "zh"):
-    logger.warning(f"Unknown TRANSLATION_CHAIN={CHAIN_TYPE}, falling back to 'en'")
-    CHAIN_TYPE = "en"
-
-logger.info(f"Using translation chain: {CHAIN_TYPE} (RU→{CHAIN_TYPE.upper()}→RU)")
-logger.info(f"Post-editor available: {POST_EDITOR_AVAILABLE}")
-
-# Humanizer отключён (можно включить позже)
-ENABLE_HUMANIZER = False
-HUMANIZER_AVAILABLE = False
-
-
-class ChapterEditError(RuntimeError):
-    pass
-
-
-def _sse(event_type: str, data: dict) -> str:
-    payload = {"type": event_type, **data}
-    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
-
-def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int = 2) -> str:
-    if not text or len(text.strip()) < 2:
-        return text
-
-    url_google = "https://translate.googleapis.com/translate_a/single"
-    params = {
-        "client": "gtx",
-        "sl": "auto",
-        "tl": target_lang,
-        "dt": "t",
-        "q": text
-    }
-    for attempt in range(max_retries):
-        try:
-            resp = requests.get(url_google, params=params, timeout=15)
-            if resp.status_code == 200:
-                data = resp.json()
-                translated = "".join(item[0] for item in data[0] if item[0])
-                if translated:
-                    return translated
-            logger.warning(f"Google attempt {attempt+1} failed: {resp.status_code}")
-            time.sleep(1 + random.random())
-        except Exception as e:
-            logger.warning(f"Google exception: {e}")
-            time.sleep(1 + random.random())
-
-    logger.info(f"Falling back to MyMemory (POST) for {target_lang}")
-    url_mymemory = "https://api.mymemory.translated.net/get"
-    payload = {
-        "q": text,
-        "langpair": f"auto|{target_lang}",
-        "de": "user@example.com"
-    }
-    for attempt in range(2):
-        try:
-            resp = requests.post(url_mymemory, data=payload, timeout=20)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("responseStatus") == 200:
-                    translated = data.get("responseData", {}).get("translatedText")
-                    if translated:
-                        return translated
-            logger.warning(f"MyMemory attempt {attempt+1} failed: {resp.status_code}")
-            time.sleep(1 + random.random())
-        except Exception as e:
-            logger.warning(f"MyMemory exception: {e}")
-            time.sleep(1 + random.random())
-
-    return text
-
-
-def process_chunk_through_chain(text: str) -> str:
-    if not text or len(text.strip()) < 2:
-        return text
-    try:
-        if CHAIN_TYPE == "en":
-            mid = translate_with_fallback(text, target_lang="en")
-            result = translate_with_fallback(mid, target_lang="ru")
-        elif CHAIN_TYPE == "zh":
-            mid = translate_with_fallback(text, target_lang="zh")
-            result = translate_with_fallback(mid, target_lang="ru")
-        else:
-            result = text
-        return result
-    except Exception as e:
-        logger.error(f"Chunk processing error: {e}")
-        return text
-
-
-def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> list:
-    if len(text) <= chunk_size:
-        return [text]
-
-    chunks = []
-    current_chunk = ""
-    paragraphs = text.split('\n\n')
-    if len(paragraphs) > 1:
-        for para in paragraphs:
-            if len(current_chunk) + len(para) + 2 <= chunk_size:
-                current_chunk += para + "\n\n"
-            else:
-                if current_chunk:
-                    chunks.append(current_chunk.strip())
-                current_chunk = para + "\n\n"
-        if current_chunk:
-            chunks.append(current_chunk.strip())
-        return chunks
-
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    for sentence in sentences:
-        if len(current_chunk) + len(sentence) + 1 <= chunk_size:
-            current_chunk += sentence + " "
-        else:
-            if current_chunk:
-                chunks.append(current_chunk.strip())
-            current_chunk = sentence + " "
-
-    if current_chunk:
-        chunks.append(current_chunk.strip())
-
-    return chunks
-
-
-def apply_translation_chain_full(text: str) -> str:
-    logger.info(f"Starting translation chain (RU→{CHAIN_TYPE.upper()}→RU) for {len(text)} chars...")
-    chunks = split_text_into_chunks(text)
-    logger.info(f"Split into {len(chunks)} chunks")
-    processed_chunks = []
-    for i, chunk in enumerate(chunks):
-        logger.info(f"Processing chunk {i+1}/{len(chunks)}...")
-        processed = process_chunk_through_chain(chunk)
-        processed_chunks.append(processed)
-
-    if '\n\n' in text:
-        result = "\n\n".join(processed_chunks)
-    else:
-        result = " ".join(processed_chunks)
-    logger.info(f"Translation complete. Result length: {len(result)}")
-    return result
-
-
-def clean_translation_artifacts(text: str) -> str:
-    finnish_patterns = [
-        r'\bTietenkin\b', r'\bhe tarvitsevat\b', r'\bJos se toimii\b',
-        r'\bvaikka se ei\b', r'\btoimi\b', r'\bpuolella\b',
-        r'\bvaltamerta\b', r'\bRakennamme\b', r'\bsiis\b',
-        r'\bsademeren\b', r'\bJa lentää\b', r'\bsinne\b',
-        r'\baamiaiseksi\b', r'\bkuvaan\b', r'\bMikä tämä on\b',
-        r'\bAleksei kysyi\b', r'\bTalomme suunnitelma\b',
-        r'\bKuussa ei ole\b', r'\brannoille\b',
-        r'\bettä\b', r'\bjoka\b', r'\bmitä\b', r'\bniin\b',
-        r'\bkun\b', r'\bvoi\b', r'\bse\b', r'\bja\b'
-    ]
-    english_phrases = [
-        r'\bfirst to spot\b', r'\bthe genius\b', r'\bof a student\b',
-        r'\bfrom Siberia\b', r'\bnow he watched\b', r'\bas that spark\b',
-        r'\bignited its owner\'s career\b', r'\bI came to warn you\b',
-        r'\bthey want to seduce you\b', r'\bthey provide the lab\b',
-        r'\bbudget and team\b', r'\bwhatever you want\b',
-        r'\bhowever research requires a license\b',
-        r'\bA group came from\b', r'\bMIT\b', r'\bthey need\b',
-        r'\bsaid more quietly\b', r'\bbudget\b', r'\bteam\b',
-        r'\bresearch\b', r'\blicense\b', r'\brequires\b', r'\bcame from\b'
-    ]
-    japanese_patterns = [r'[\u3040-\u30FF]+']
-    chinese_patterns = [r'[\u4e00-\u9fff]+']
-
-    all_patterns = finnish_patterns + english_phrases + japanese_patterns + chinese_patterns
-
-    for pattern in all_patterns:
-        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
-
-    text = re.sub(r'(\w)\.(\w)', r'\1\2', text)
-    text = re.sub(r'\s+', ' ', text)
-    text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
-    text = re.sub(r'\s+', ' ', text)
-    text = re.sub(r'^[.,!?;:\s]+$', '', text, flags=re.MULTILINE)
-
-    text = re.sub(r'—\s*', '— ', text)
-
-    if not re.search(r'[.!?]', text):
-        sentences = re.split(r'(?<=[а-яa-z])\s+(?=[А-ЯA-Z])', text)
-        if len(sentences) > 1:
-            text = '. '.join(sentences) + '.'
-
-    return text.strip()
-
-
-def diversify_dialog_tags(text: str) -> str:
-    synonyms = {
-        'сказал': ['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал'],
-        'сказала': ['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала']
-    }
-    pattern = r'(—[^—]+?—\s*)(сказал|сказала)(\s+[а-яА-Я]+[.,!?]?)'
-    matches = list(re.finditer(pattern, text, re.DOTALL))
-    if not matches:
-        return text
-    replacements = []
-    for match in matches:
-        before = match.group(1)
-        verb = match.group(2)
-        after = match.group(3)
-        if verb in synonyms:
-            new_verb = random.choice(synonyms[verb])
-            replacements.append((match.start(), match.end(), before + new_verb + after))
-    for start, end, repl in reversed(replacements):
-        text = text[:start] + repl + text[end:]
-    return text
-
-
-def split_into_paragraphs_by_logic(text: str) -> str:
-    if not text or len(text) < 200:
-        return text
-    chunk_size = 400
-    words = text.split()
-    paragraphs = []
-    current = []
-    current_len = 0
-    for word in words:
-        if current_len + len(word) + 1 > chunk_size and current:
-            paragraphs.append(' '.join(current))
-            current = []
-            current_len = 0
-        current.append(word)
-        current_len += len(word) + 1
-    if current:
-        paragraphs.append(' '.join(current))
-    if len(paragraphs) == 1 and len(text) > 500:
-        paragraphs = []
-        for i in range(0, len(text), chunk_size):
-            chunk = text[i:i+chunk_size].strip()
-            if chunk:
-                paragraphs.append(chunk)
-    return '\n\n'.join(paragraphs)
-
-
-def apply_light_polish(text: str) -> str:
-    text = re.sub(r'\s+', ' ', text)
-    text = text.replace('"', '"').replace('"', '"')
-    text = text.replace(' - ', ' — ')
-    text = re.sub(r'—\s*', '— ', text)
-    return text
-
-
-@app.get("/api/health")
-def health():
-    return jsonify(status="ok", version=APP_VERSION, chain=CHAIN_TYPE)
-
-
-@app.post("/api/revise")
-def api_revise():
-    logger.info(f"=== api_revise: START (chain={CHAIN_TYPE}) ===")
-    try:
-        file_storage = request.files.get("file")
-        text = request.form.get("text", "")
-        style = request.form.get("style", "neutral")
-
-        if file_storage and file_storage.filename:
-            raw = file_storage.read()
-            chapter_text = raw.decode("utf-8", errors="replace")
-        elif text.strip():
-            chapter_text = text
-        else:
-            return jsonify(detail="Provide chapter text or upload a file."), 400
-
-        chapter_text = chapter_text.strip()
-        if not chapter_text:
-            return jsonify(detail="Chapter text is empty."), 400
-
-        if len(chapter_text) > MAX_CHARS:
-            chapter_text = chapter_text[:MAX_CHARS]
-            logger.warning(f"Truncated text to {MAX_CHARS} chars")
-
-        original_len = len(chapter_text)
-
-        def generate():
-            try:
-                yield _sse("progress", {"chars": 0, "estimated_total": original_len, "percent": 0, "log": f"Начинаем обработку (цепочка RU→{CHAIN_TYPE.upper()}→RU)..."})
-
-                # 1. Цепочка переводов
-                logger.info(f"Step 1: Translation chain (RU→{CHAIN_TYPE.upper()}→RU)...")
-                processed_text = apply_translation_chain_full(chapter_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 30, "log": "Переводы завершены"})
-
-                # 2. Очистка артефактов
-                logger.info("Step 2: Cleaning artifacts...")
-                processed_text = clean_translation_artifacts(processed_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 45, "log": "Артефакты удалены"})
-
-                # 3. Разнообразие диалоговых тегов
-                logger.info("Step 3: Diversifying dialog tags...")
-                processed_text = diversify_dialog_tags(processed_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 60, "log": "Диалоговые теги обновлены"})
-
-                # 4. Принудительное разбиение на абзацы
-                logger.info("Step 4: Forced paragraph splitting...")
-                processed_text = split_into_paragraphs_by_logic(processed_text)
-                para_count = len(processed_text.split('\n\n'))
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 75, "log": f"Абзацев: {para_count}"})
-
-                # 5. Финальная полировка
-                logger.info("Step 5: Final polish...")
-                processed_text = apply_light_polish(processed_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 85, "log": "Полировка выполнена"})
-
-                # 6. Пост-редактор (коррекция артефактов по оригиналу)
-                if POST_EDITOR_AVAILABLE and len(processed_text) > 100:
-                    logger.info("Step 6: Post-editing (artifact correction)...")
-                    try:
-                        processed_text = post_editor.process(chapter_text, processed_text)
-                        yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 95, "log": "Пост-коррекция выполнена"})
-                    except Exception as e:
-                        logger.exception("Post-editor error")
-                        yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 90, "log": f"Ошибка пост-редактора: {str(e)}"})
-
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 100, "log": "Готово!"})
-
-                final_len = len(processed_text)
-                final_para_count = len(processed_text.split('\n\n'))
-                loss = (original_len - final_len) / original_len
-                logger.info(f"Final: {final_len} chars, loss {loss:.2%}, {final_para_count} paragraphs")
-
-                summary = f"Текст переработан через цепочку RU→{CHAIN_TYPE.upper()}→RU с пост-коррекцией. Потеря: {loss:.1%}. Абзацев: {final_para_count}"
-                yield _sse("done", {
-                    "revised_text": processed_text,
-                    "original_text": chapter_text,
-                    "summary": summary,
-                    "changes": [
-                        f"Переведён через Google Translate / MyMemory (RU→{CHAIN_TYPE.upper()}→RU)",
-                        "Разнообразие диалоговых тегов",
-                        "Пост-коррекция артефактов",
-                        f"Разделён на {final_para_count} абзацев",
-                        "Удалены артефакты перевода"
-                    ],
-                    "chain": CHAIN_TYPE,
-                    "checklist": []
-                })
-            except Exception as e:
-                error_trace = traceback.format_exc()
-                logger.error(f"Error in generate: {error_trace}")
-                yield _sse("error", {"detail": f"{str(e)}\n\n{error_trace}"})
-                raise
-
-        return Response(
-            stream_with_context(generate()),
-            mimetype="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
-        )
-
-    except Exception as e:
-        logger.exception("api_revise: Unexpected error")
-        return jsonify(detail=f"Server error: {str(e)}\n{traceback.format_exc()}"), 500
-
-
-@app.get("/")
-def index():
-    return app.send_static_file("index.html")
-
-
-@app.errorhandler(HTTPException)
-def handle_http_exception(exc):
-    return jsonify(detail=exc.description or str(exc)), exc.code or 500
-
-
-@app.errorhandler(Exception)
-def handle_exception(exc):
-    logger.exception("Unhandled exception")
-    return jsonify(detail=f"Server error: {str(exc)}\n{traceback.format_exc()}"), 500
-
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+# Словарь замен для ключевых терминов, которые часто искажаются
+TERM_MAPPING = {
+    # Названия
+    r'Ибис(а|у|ом|е|ы|ов|ам|ами|ах)?': r'Ибис',
+    r'ибис(а|у|ом|е|ы|ов|ам|ами|ах)?': r'Ибис',
+    r'хохлатый ибис': r'«Ибис»',
+    r'Храм Солнца': r'Храм Солнца',  # уже правильно
+    r'Храмом Солнца': r'Храм Солнца',
+    r'Храме Солнца': r'Храме Солнца',
+    # Имена
+    r'Штерн(а|у|ом|е|ы)?': r'Штерн',
+    r'Стерн(а|у|ом|е|ы)?': r'Штерн',  # заменяем Стерн на Штерн
+    r'Мистер Стерн': r'Мистер Штерн',
+    r'господин Стерн': r'господин Штерн',
+    r'Масарик(а|у|ом|е)?': r'Масарик',
+    # Термины
+    r'нуль-вакуум(а|у|ом|е)?': r'нуль-вакуум',
+    r'нулевой вакуум': r'нуль-вакуум',
+    r'Нуль-вакуум': r'Нуль-вакуум',
+    r'Нулевой вакуум': r'Нуль-вакуум',
+    r'антигравитационные пусковые установки': r'антиграв-эмиттеры',
+    r'антигравитационные излучатели': r'антиграв-эмиттеры',
+    # Прочее
+    r'стеклянный дождь': r'Стеклянный Ливень',
+    r'стеклянного дождя': r'Стеклянного Ливня',
+    r'«стеклянный дождь»': r'«Стеклянный Ливень»',
+    r'«стеклянного дождя»': r'«Стеклянного Ливня»',
+    r'ускоритель частиц Циклопа': r'циклопический ускоритель частиц',
+    r'одноглазым ускорителем': r'циклопическим ускорителем',
+    r'клетка для пончиков': r'бубликовая клетка',
+    r'клетка для пончиков, в которой обитает призрак': r'бубликовая клетка для призраков',
+    r'деревянный дом': r'Дом-дерево',
+    r'дом на дереве': r'Дом-дерево',
+    r'дом мечты': r'Дом-мечта',
+    r'протонные лучи больше не танцуют': r'внутри ускорителя больше не бился протонный луч',
+    r'голуби строят свои гнезда': r'там гнездились голуби',
+    r'воздух течет по бетонным полам': r'по бетонному полу гуляли сквозняки',
+    r'прозрачные поликарбонатные панели': r'прозрачные панели из поликарбоната',
+    r'армированная лента': r'армированный скотч',
+    r'Ни капли благодати': r'Ни капли изящества',
+    r'чистая функция': r'Чистая функция',
+    r'пиджак с кожаными заплатками': r'пиджак с кожаными заплатками на локтях',
+    r'галстук': r'галстук-бабочку',
+    r'дирекция вышвырнет вас': r'совет попечителей выставит тебя',
+    r'металлолом': r'металлоломом',
+    r'Понял': r'Понимаю',
+    r'Вы знали': r'Ты понимаешь',
+    r'Вы это понимаете': r'Ты это понимаешь',
+    r'исследовательская лицензия': r'лицензия на твои исследования',
+    r'ваша батарея': r'твоя батарея',
+    r'моя батарейка': r'моя батарея',
+    r'валовой внутренний продукт': r'ВВП',
+    r'предлагают лабораторию, бюджет, команду': r'Предлагают лабораторию, бюджет, команду',
+    r'Все, что вы хотите': r'Все, что хочешь',
+    r'но им нужна ваша исследовательская лицензия': r'Но им нужна лицензия на твои исследования',
+    r'Тихо сказал он': r'— сказал он тише',
+    r'тихо сказал он': r'— сказал он тише',
+    r'Он был первым': r'Когда-то он первым',
+    r'Причина, по которой мы предлагаем закон сохранения': r'Мы придумали законы сохранения',
+    r'деньги в долг': r'взаймы',
+    r'брать у нее деньги в долг': r'брать у нее взаймы',
+    r'Хохлатые ибисы проскальзывают': r'«Ибис» выскользнул',
+    r'хохлатые ибисы проскальзывают': r'«Ибис» выскользнул',
+    r'парят над кампусом': r'взмыл в небо над кампусом',
+    r'Надеюсь, она наконец взлетит': r'Я хочу, чтобы она наконец взлетела',
+    r'«Надеюсь, она наконец взлетит»': r'«Я хочу, чтобы она наконец взлетела»',
+    r'Тело хохлатого ибиса задрожало': r'Каркас «Ибиса» дрогнул',
+    r'захлопали крыльями': r'шарахнулись в стороны, хлопая крыльями',
+    r'подниматься к ржавому куполу': r'подниматься к проржавевшему куполу',
+    r'облака были цвета разбавленного апельсинового сока': r'окрашивая облака в цвет разбавленного апельсинового сока',
+    r'Тяжесть исчезла': r'Гравитация исчезла',
+    r'другая тяжесть': r'та, другая',
+    r'все это все еще здесь': r'Все это осталось там, внизу',
+    r'вытащил сотовый телефон': r'достал телефон',
+    r'на экране мелькнул непрочитанный чат': r'На экране мигал непрочитанный чат',
+    r'я гений или просто не выспалась': r'я гений или просто не выспалась',
+    r'Давай': r'Приезжай',
+    r'я просто смотрю на Галапагосские острова': r'Только загляну в Галапагосы',
+    r'Выпейте чашечку кофе': r'За кофе',
+    r'Он не шутит': r'Он не шутил',
+    r'Ибис поворачивает нос на юг': r'«Ибис» развернулся носом к югу',
+    r'антигравитационные пусковые установки': r'антиграв-эмиттеры',
+    r'сложенный, как крылья стрекозы': r'сложив антиграв-эмиттеры, словно стрекоза крылья',
+    r'темное пиво': r'черного кофе',
+    r'заплатил наличными и снова отправился в путь': r'расплатился наличными и взлетел снова',
+    r'прежде чем кто-нибудь позвонил в полицию': r'пока никто не вызвал полицию',
+    r'Подъезжая к Нью-Джерси, он заметил их': r'Уже на подлете к Нью-Джерси, он заметил их',
+    r'он заметил их, когда солнце поднялось достаточно высоко': r'когда солнце поднялось достаточно высоко, он заметил их',
+    r'У входа в институт стояли три черных внедорожника': r'Три черных внедорожника у ворот института',
+    r'Четвертый — прямо у входа в здание': r'И четвертый — прямо у входа в корпус',
+    r'Мужчины в темных костюмах – слишком дорого для агентов ФБР, слишком скучно для мафии': r'Люди в темных костюмах — слишком дорогих для агентов ФБР, слишком скучных для мафии',
+    r'частная охрана': r'Частная охрана',
+    r'или что-то хуже': r'Или что-то похуже',
+    r'потянулся к панели, но в этот момент у него зазвонил телефон': r'потянулся к панели, чтобы уйти на второй круг, но в этот момент телефон ожил',
+    r'входящий звонок': r'Входящий вызов',
+    r'количество не определено': r'Номер не определен',
+    r'Мы хотели бы сделать вам предложение': r'Мы бы хотели сделать вам предложение',
+    r'Я не продаю': r'Я не продаю',
+    r'Мы не покупаем, господин Штерн': r'Мы не покупаем, мистер Штерн',
+    r'Мы обеспечиваем сотрудничество': r'Мы предлагаем сотрудничество',
+    r'Безопасность': r'Безопасность',
+    r'Защита от тех, кто хочет использовать ваше изобретение в других целях': r'Защиту от тех, кто захочет... использовать ваше изобретение не по назначению',
+    r'Никакой бюрократии': r'Никакой бюрократии',
+    r'Никаких грантовых комиссий': r'Никаких грантовых комиссий',
+    r'А взамен': r'А взамен?',
+    r'Награда': r'Взамен — ничего',
+    r'ждали его в своей студии': r'Анна ждала его в своей мастерской',
+    r'не думая, что сегодня наступит конец света': r'не подозревала, что сегодняшний день станет первым днем конца привычного мира',
+    r'Пушистый': r'Лохматая',
+    r'на щеках пятна акриловой краски': r'с пятном акриловой краски на щеке',
+    r'босые ноги': r'босыми ногами',
+    r'Ты опоздал': r'Ты опоздал',
+    r'Кофе холодный': r'Кофе холодный',
+    r'Я в Эквадоре': r'Я был в Эквадоре',
+    r'— В Эквадоре': r'— В Эквадоре',
+    r'Она взяла у него чашку, отпила и нахмурилась': r'Она забрала у него стаканчик, отхлебнула и сморщилась',
+    r'Было очень холодно': r'Действительно холодный',
+    r'в следующий раз возьмите с собой термос': r'В следующий раз бери с собой термос',
+    r'Повернулась и пошла в глубь мастерской': r'Она развернулась и пошла в глубь мастерской',
+    r'между кусками пенопласта и резиновыми трубками': r'среди обрезков пенокартона и тюбиков с клеем',
+    r'стояла модель того самого перевернутого конуса': r'возвышался макет того самого перевернутого конуса',
+    r'дом на дереве': r'Дом-дерево',
+    r'дом мечты': r'Дом-мечта',
+    r'Блестяще': r'Ну',
+    r'спросила она, оборачиваясь': r'спросила она, обернувшись',
+    r'Как вам это нравится': r'Как тебе',
+    r'Солнце светит на ее растрепанные волосы': r'На солнечный свет, запутавшийся в ее растрепанных волосах',
+    r'Нанесите на щеки': r'На краску на щеке',
+    r'Босые ноги на холодном цементном полу': r'На босые ступни на холодном бетонном полу',
+    r'Это самое прекрасное, что я когда-либо видел в своей жизни': r'Это самое прекрасное, что я видел в жизни',
+    r'Серьезно': r'Серьезно',
+    r'она улыбнулась': r'Она просияла',
+    r'Я говорю о тебе': r'Я про тебя',
+    r'Дом тоже не плохой': r'Дом тоже хороший',
+    r'она засмеялась — год назад на той дурацкой конференции, где он твердил о термодинамике, а она рисовала карикатуры на подиуме': r'Она засмеялась — тем самым смехом, который впервые заставил его сердце сбиться с ритма год назад, на той дурацкой конференции, где он бубнил про термодинамику, а она рисовала карикатуры на президиум',
+    r'Знаешь что, Штерн': r'Знаешь что, Штерн',
+    r'выдохнула': r'сказала',
+    r'ставя пустой стакан прямо на модель': r'ставя пустой стаканчик прямо на макет',
+    r'видимо, именно там планировалась вертолетная площадка': r'там, где, видимо, планировалась вертолетная площадка',
+    r'Когда ваша батарея начнет работать': r'Когда твоя батарея заработает',
+    r'она уже работает': r'Она уже работает',
+    r'Анна была ошеломлена': r'Анна замерла',
+    r'Стакан дрогнул и упал': r'Стаканчик покачнулся и упал',
+    r'Что': r'Что',
+    r'эффективный': r'Работает',
+    r'час назад': r'Час назад',
+    r'я поднял ибиса под купол храма': r'Я поднял «Ибис» под купол Храма',
+    r'в наступившей тишине где-то в углу мастерской послышался капающий звук открытого крана': r'В наступившей тишине было слышно, как где-то в углу мастерской капает вода из незакрытого крана',
+    r'а ты': r'И ты...',
+    r'Анна шаг за шагом шла к нему, и в глазах ее вспыхивал опасный свет': r'Анна шагнула к нему, и в ее глазах загорелся опасный огонек',
+    r'Вы прилетели в Эквадор выпить кофе': r'Ты слетал в Эквадор за кофе',
+    r'Серьезно? Первый в мире полет с нулевым вакуумом — и ты используешь его, чтобы принести мне кофе со льдом': r'Серьезно? Первый в истории полет на нуль-вакуумной тяге — и ты использовал его, чтобы привезти мне холодный кофе?!',
+    r'я хочу подтвердить объем': r'Я хотел проверить дальность',
+    r'Ты сумасшедший': r'Ты ненормальный',
+    r'Она обеими руками толкнула его в грудь': r'Она толкнула его в грудь обеими ладонями',
+    r'Ты точно аномалия': r'Ты абсолютно, клинически ненормальный',
+    r'Я люблю тебя': r'И я тебя обожаю',
+    r'она поцеловала его — быстро, жадно, все еще смеясь': r'Она поцеловала его — быстро, жадно, все еще смеясь',
+    r'потом отстранилась и стала серьезной': r'Потом отстранилась и стала серьезной',
+    r'Так началось, не так ли': r'Значит, началось, да',
+    r'тихо спросила она': r'спросила она тихо',
+    r'Да': r'Да',
+    r'Алексей кивнул': r'Алексей кивнул',
+    r'Началось': r'Началось',
+    r'И что теперь': r'И что теперь',
+    r'Он взял ее за руку, узкую ладонь, испачканную краской и с крошечным шрамом от непальского землетрясения': r'Он взял ее за руку — узкую ладонь с пятнами краски и крошечным шрамом от землетрясения в Непале',
+    r'Сейчас': r'Теперь',
+    r'мы построим вам дом': r'мы построим твой дом',
+    r'Не планировка': r'Не макет',
+    r'Настоящий': r'Настоящий',
+    r'Где угодно': r'Где угодно',
+    r'Хоть на вершине горы': r'Хоть на вершине горы',
+    r'Даже посреди моря': r'Хоть посреди океана',
+    r'На обратной стороне Луны': r'На обратной стороне Луны',
+    r'На Луне нет океана': r'На Луне нет океана',
+    r'Тогда давай построим его на берегу Имбриума': r'Значит, построим на берегу моря Дождей',
+    r'Мы полетим туда на завтрак': r'И будем летать туда на завтрак',
+    r'Анна долго-долго смотрела на него': r'Анна смотрела на него долго-долго',
+    r'Затем она достала из кармана огрызок карандаша и быстро написала что-то на старом рисунке на стене': r'Потом вытащила из кармана огрызок карандаша и что-то быстро набросала прямо на стене, поверх старых чертежей',
+    r'Что это': r'Что это',
+    r'План этажа нашего дома': r'План нашего дома',
+    r'С видом на Имбриум': r'С видом на море Дождей',
+    r'Она отступила и восхитилась своей импровизацией': r'Она отступила на шаг, любуясь своим экспромтом',
+    r'Только обязательно принеси термос на завтрак': r'Только ты обещай, что на завтрак будешь брать термос',
+    r'Он согласился': r'Он обещал',
+    r'В дверь постучали': r'В дверь постучали',
+    r'Громко': r'Громко',
+    r'Будьте настойчивы': r'Настойчиво',
+    r'Люди привыкли, что им открывают двери': r'Стук людей, привыкших, что им открывают',
+    r'Алексей и Анна переглянулись': r'Алексей и Анна переглянулись',
+    r'Это за мной': r'Это за мной',
+    r'Я знаю': r'Я знаю',
+    r'Она крепче сжала его руку': r'Она взяла его за руку крепче',
+    r'Мы справимся': r'Мы справимся',
+    r'Мы не нормальные': r'Мы же ненормальные',
+    r'Дверь открылась': r'Дверь открылась',
+    r'На пороге стояли три человека': r'На пороге стояли трое',
+    r'В центре стоял мужчина с серебристой стрижкой под ежик, безупречно одетый, без улыбки в глазах': r'В центре — человек с серебристым ежиком волос, в безупречном костюме и с глазами, которые не умели улыбаться',
+    r'Мистер Стерн': r'Мистер Штерн',
+    r'Адриан Кросс': r'Адриан Кросс',
+    r'Мы согласны, что ты подумаешь': r'Мы договаривались, что вы подумаете',
+    r'Он перевел взгляд на Анну, на перевернутый манекен, на свежий эскиз на стене': r'Он перевел взгляд на Анну, на перевернутый макет, на свежий набросок на стене',
+    r'Я вижу, ты не единственный, кто так думает': r'Вижу, вы думали не один',
+    r'Чего ты хочешь': r'Чего вы хотите',
+    r'Как я уже сказал': r'Как я уже говорил',
+    r'Дружба': r'Дружбы',
+    r'Кросс вошел, оставив своего человека у двери': r'Кросс шагнул внутрь, его люди остались в дверях',
+    r'Мир стоит на пороге великих перемен': r'Мир на пороге больших перемен',
+    r'Поверь мне, тебе понадобятся друзья': r'И поверьте, вам понадобятся друзья',
+    r'Особенно, когда становится ясно, что ваша технология — это больше, чем просто батарейки': r'Особенно когда станет ясно, что ваша технология — не просто батарея',
+    r'Что это': r'А что же это',
+    r'Кросс улыбнулся — вежливо, хладнокровно, как айсберг': r'Кросс улыбнулся — вежливо, холодно, как айсберг',
+    r'Это оружие, мистер Стерн': r'Это оружие, мистер Штерн',
+    r'Самое мощное оружие в истории человечества': r'Самое мощное оружие в истории человечества',
+    r'Я здесь, чтобы убедиться, что оно не попадет в чужие руки': r'И я здесь, чтобы оно не попало не в те руки',
+    r'Он достал из внутреннего кармана визитку — белую, без единой буквы, только голографический логотип': r'Он достал из внутреннего кармана визитную карточку — белую, без единой буквы, только голографическая эмблема',
+    r'Алексей с удивлением узнал старый логотип Международного агентства по атомной энергии, перечеркнутый молнией': r'в которой Алексей с удивлением узнал старый символ Международного агентства по атомной энергии, перечеркнутый молнией',
+    r'Позвони мне, когда поймешь, что я прав': r'Позвоните, когда поймете, что я прав',
+    r'У тебя есть только одна неделя': r'У вас есть ровно неделя',
+    r'Он повернулся и ушел': r'Он развернулся и вышел',
+    r'Его люди закрыли дверь': r'Его люди закрыли дверь',
+    r'В мастерской снова стало тихо': r'В мастерской снова стало тихо',
+    r'Лишь вода капает в углу, отсчитывая секунды до новой эры': r'Только вода капала в углу, отсчитывая секунды новой эпохи',
+    r'Неделю': r'Неделя',
+    r'повторила Анна': r'повторила Анна',
+    r'Что будем делать': r'Что мы будем делать',
+    r'Алексей посмотрел на эскиз дома на стене': r'Алексей посмотрел на набросок дома на стене',
+    r'Затем идите к модели отеля Ibis слева в углу': r'Потом на макет «Ибиса», оставленный в углу',
+    r'А еще есть девушка, которая нарисовала перевернутый город и смеялась над холодным кофе': r'Потом на девушку, которая рисовала перевернутые города и смеялась над холодным кофе',
+    r'Мы опубликуем чертежи': r'Мы опубликуем чертежи',
+    r'Что': r'Что',
+    r'Батарея': r'Батареи',
+    r'двигатель': r'Двигателя',
+    r'Все они': r'Всего',
+    r'Мы обнародуем их': r'Мы выложим их в открытый доступ',
+    r'тот же день': r'В тот же день',
+    r'Пусть мир узнает': r'Пусть мир узнает',
+    r'Пусть каждый, у кого есть паяльник и руки, сможет собрать свой Ибис': r'Пусть каждый, у кого есть паяльник и руки, сможет построить свой «Ибис»',
+    r'Но Кросс сказал': r'Но Кросс сказал...',
+    r'Я знаю, что он сказал': r'Я знаю, что он сказал',
+    r'Алексей схватил ее за плечи': r'Алексей взял ее за плечи',
+    r'Вот почему': r'Именно поэтому',
+    r'Если технология — это оружие, единственный способ вывести ее из строя — сделать ее доступной для всех': r'Если технология — оружие, то единственный способ обезвредить ее — отдать всем',
+    r'Таким образом, у никого нет монополии': r'Чтобы никто не мог монополизировать',
+    r'Понимать': r'Понимаешь',
+    r'Анна посмотрела на него широко раскрытыми глазами': r'Анна смотрела на него широко раскрытыми глазами',
+    r'Затем она медленно кивнула': r'Потом медленно кивнула',
+    r'Ты действительно сумасшедший': r'Ты правда ненормальный',
+    r'Это самый безумный план, о котором я когда-либо слышал': r'И это самый безумный план, который я слышала',
+    r'Это сработает': r'Сработает',
+    r'Нет': r'Нет',
+    r'она улыбнулась': r'Она улыбнулась',
+    r'Но это будет весело': r'Но будет весело',
+    r'Где-то внизу на парковке взревел двигатель черного внедорожника': r'Где-то внизу, на парковке, взревели моторы черных внедорожников',
+    r'Кросс уехал, уверенный, что загнал свою жертву в угол': r'Кросс уезжал, уверенный, что загнал добычу в угол',
+    r'Он еще этого не знает, но добыча только что решила сжечь весь лес, чтобы никто не смог ее заполучить': r'Он еще не знал, что добыча только что решила сжечь весь лес, чтобы никому не достаться',
+    r'Алексей подошел к своему ноутбуку, открыл папку с надписью «Null Vacuum: Final Drawings» и загрузил файл на облачный сервер': r'Алексей подошел к ноутбуку, открыл папку с пометкой «Нуль-вакуум: финальные чертежи» и загрузил файлы на облачный сервер',
+    r'Анна': r'Анна',
+    r'М': r'М',
+    r'Вы сказали, что ваш друг из «Грани» мечтает произвести фурор': r'Ты говорила, твоя подруга из Verge мечтает о сенсации',
+    r'Лена': r'Лина',
+    r'Она мечтает получить Пулитцеровскую премию': r'Она мечтает о Пулитцеровской премии',
+    r'Позвони ей': r'Звони ей',
+    r'Скажи ей, что у меня есть история, которую я хочу ей рассказать': r'Скажи, что у меня есть для нее история',
+    r'Он нажал отправить': r'Он нажал «Отправить»',
+    r'И этот мир, сам того не ведая, перешёл точку невозврата': r'И мир, сам того не зная, перешагнул точку невозврата',
+}
+
+
+def process(original: str, processed: str) -> str:
+    """
+    Применяет адресные замены к обработанному тексту на основе оригинального текста.
+    """
+    if not processed:
+        return processed
+
+    # Применяем все замены из словаря
+    for pattern, replacement in TERM_MAPPING.items():
+        # Используем re.sub с флагом IGNORECASE для мягкой замены
+        # Но стараемся не менять регистр, если он важен
+        processed = re.sub(pattern, replacement, processed, flags=re.IGNORECASE)
+
+    # Дополнительная коррекция: удаляем лишние пробелы
+    processed = re.sub(r'\s+', ' ', processed)
+    # Восстанавливаем кавычки в названиях
+    processed = re.sub(r'«\s*', '«', processed)
+    processed = re.sub(r'\s*»', '»', processed)
+    # Восстанавливаем тире в диалогах
+    processed = re.sub(r'—\s*', '— ', processed)
+
+    return processed
