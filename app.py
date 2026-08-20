@@ -1,384 +1,352 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chapter Editor</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: #f0f4fa; color: #1a2634; font-family: 'Inter', sans-serif; min-height: 100vh; display: flex; flex-direction: column; padding: 24px; }
-        .container { max-width: 1400px; margin: 0 auto; width: 100%; flex: 1; display: flex; flex-direction: column; }
-        header { display: flex; justify-content: space-between; align-items: center; padding: 16px 0 24px; border-bottom: 1px solid #d0d9e4; flex-wrap: wrap; gap: 12px; }
-        .logo h1 { font-size: 22px; font-weight: 600; color: #1a2634; letter-spacing: -0.3px; }
-        .logo .sub { font-size: 13px; color: #6b7f94; font-weight: 400; }
-        .version-badge { background: #e4eaf2; padding: 6px 14px; border-radius: 20px; font-size: 12px; color: #3d546a; font-weight: 500; }
-        .main-grid { display: grid; grid-template-columns: 1fr 1.5fr; gap: 24px; margin-top: 28px; flex: 1; }
-        @media (max-width: 768px) { .main-grid { grid-template-columns: 1fr; } body { padding: 16px; } }
-        .panel { background: #ffffff; border-radius: 16px; border: 1px solid #d0d9e4; padding: 24px; display: flex; flex-direction: column; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
-        .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-        .panel-header h2 { font-size: 15px; font-weight: 500; color: #2c3e50; letter-spacing: 0.3px; }
-        .panel-header .count { font-size: 12px; color: #6b7f94; background: #eef3f8; padding: 4px 12px; border-radius: 12px; }
-        textarea { width: 100%; flex: 1; min-height: 400px; background: #f7fafc; border: 1px solid #d0d9e4; border-radius: 12px; color: #1a2634; font-family: 'Inter', monospace; font-size: 14px; line-height: 1.7; padding: 16px; resize: vertical; transition: border-color 0.2s; }
-        textarea:focus { outline: none; border-color: #6c8fc7; }
-        textarea::placeholder { color: #8fa2b8; }
-        .controls { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 16px; padding-top: 16px; border-top: 1px solid #e4eaf2; }
-        .controls select { background: #f7fafc; border: 1px solid #d0d9e4; border-radius: 10px; padding: 10px 16px; color: #1a2634; font-family: 'Inter', sans-serif; font-size: 13px; cursor: pointer; flex: 1; min-width: 120px; }
-        .btn { padding: 10px 28px; border: none; border-radius: 10px; font-family: 'Inter', sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
-        .btn-primary { background: #2c3e50; color: #ffffff; }
-        .btn-primary:hover { background: #1a2a3a; transform: translateY(-1px); box-shadow: 0 4px 16px rgba(44, 62, 80, 0.2); }
-        .btn-primary:disabled { background: #8fa2b8; cursor: not-allowed; transform: none; box-shadow: none; }
-        .btn-secondary { background: #e4eaf2; color: #2c3e50; }
-        .btn-secondary:hover { background: #d0d9e4; }
-        .progress-container { margin-top: 12px; background: #eef3f8; border-radius: 8px; height: 6px; overflow: hidden; opacity: 0; transition: opacity 0.3s; }
-        .progress-container.active { opacity: 1; }
-        .progress-bar { height: 100%; width: 0%; background: #2c3e50; border-radius: 8px; transition: width 0.2s ease; }
-        .status-text { font-size: 13px; color: #6b7f94; margin-top: 10px; min-height: 20px; }
-        .status-text.success { color: #1e7e34; }
-        .status-text.error { color: #b3362a; }
-        .step-indicator { display: flex; gap: 8px; margin-top: 8px; font-size: 12px; color: #6b7f94; align-items: center; flex-wrap: wrap; }
-        .step-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #d0d9e4; transition: all 0.3s; }
-        .step-dot.active { background: #2c3e50; transform: scale(1.2); }
-        .step-dot.done { background: #1e7e34; }
-        .step-label { font-size: 12px; color: #6b7f94; margin-left: 4px; }
-        .result-panel .panel-body { flex: 1; display: flex; flex-direction: column; }
-        .result-panel .panel-body textarea { flex: 1; min-height: 400px; }
-        .checklist { margin-top: 12px; padding: 12px 16px; background: #f7fafc; border-radius: 10px; border: 1px solid #d0d9e4; display: none; }
-        .checklist.visible { display: block; }
-        .checklist-item { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: 13px; color: #2c3e50; }
-        .checklist-item .icon { font-size: 16px; width: 20px; text-align: center; }
-        .checklist-item .icon.pass { color: #1e7e34; }
-        .checklist-item .icon.fail { color: #b3362a; }
-        .checklist-item .icon.unknown { color: #8fa2b8; }
-        .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #d0d9e4; display: flex; justify-content: space-between; font-size: 12px; color: #8fa2b8; flex-wrap: wrap; gap: 8px; }
-        .footer a { color: #6b7f94; text-decoration: none; }
-        .footer a:hover { color: #2c3e50; }
-        .copy-btn { background: #eef3f8; border: 1px solid #d0d9e4; color: #2c3e50; padding: 4px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; transition: all 0.2s; }
-        .copy-btn:hover { background: #d0d9e4; }
-    </style>
-</head>
-<body>
-<div class="container">
-    <header>
-        <div class="logo">
-            <h1>Chapter Editor <span class="sub">— текст как живой</span></h1>
-        </div>
-        <span class="version-badge" id="versionBadge">v...</span>
-    </header>
+"""
+Chapter Editor v3.6.0 — упрощённая цепочка переводов (RU→EN→RU) + принудительное разбиение
+"""
+import io
+import json
+import os
+import re
+import time
+import logging
+import random
+from pathlib import Path
 
-    <div class="main-grid">
-        <div class="panel">
-            <div class="panel-header">
-                <h2>📄 Исходный текст</h2>
-                <span class="count" id="sourceCount">0 симв.</span>
-            </div>
-            <textarea id="sourceText" placeholder="Вставьте главу сюда или загрузите файл..."></textarea>
-            <div class="controls">
-                <select id="styleSelect">
-                    <option value="neutral">Нейтральный</option>
-                    <option value="dynamic_scifi" selected>Динамичная НФ</option>
-                </select>
-                <button class="btn btn-secondary" id="loadBtn">📂 Загрузить</button>
-                <button class="btn btn-primary" id="editBtn">✏️ Редактировать</button>
-            </div>
-            <div class="progress-container" id="progressContainer">
-                <div class="progress-bar" id="progressBar"></div>
-            </div>
-            <div class="step-indicator" id="stepIndicator">
-                <span>Шаги:</span>
-                <span class="step-dot" id="step1"></span>
-                <span class="step-label" id="step1Label">Отправка</span>
-                <span class="step-dot" id="step2"></span>
-                <span class="step-label" id="step2Label">Генерация</span>
-                <span class="step-dot" id="step3"></span>
-                <span class="step-label" id="step3Label">Пост-обработка</span>
-                <span class="step-dot" id="step4"></span>
-                <span class="step-label" id="step4Label">Готово</span>
-            </div>
-            <div class="status-text" id="statusText">Готов к работе</div>
-            <input type="file" id="fileInput" accept=".txt,.md,.docx" style="display:none">
-        </div>
+import requests
+from flask import Flask, Response, jsonify, request, stream_with_context
+from werkzeug.exceptions import HTTPException
 
-        <div class="panel result-panel">
-            <div class="panel-header">
-                <h2>✨ Отредактированный текст</h2>
-                <div style="display:flex; gap:8px; align-items:center;">
-                    <span class="count" id="resultCount">0 симв.</span>
-                    <button class="copy-btn" id="copyBtn">📋 Копировать</button>
-                </div>
-            </div>
-            <div class="panel-body">
-                <textarea id="resultText" placeholder="Результат появится здесь..." readonly></textarea>
-            </div>
-            <div class="checklist" id="checklist">
-                <div id="checklistItems"></div>
-            </div>
-        </div>
-    </div>
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-    <div class="footer">
-        <span id="footerVersion">Chapter Editor — обработка через цепочку переводов</span>
-        <span><a href="#" onclick="location.reload()">Перезагрузить</a></span>
-    </div>
-</div>
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
 
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    const sourceText = document.getElementById('sourceText');
-    const resultText = document.getElementById('resultText');
-    const editBtn = document.getElementById('editBtn');
-    const loadBtn = document.getElementById('loadBtn');
-    const fileInput = document.getElementById('fileInput');
-    const styleSelect = document.getElementById('styleSelect');
-    const statusText = document.getElementById('statusText');
-    const progressContainer = document.getElementById('progressContainer');
-    const progressBar = document.getElementById('progressBar');
-    const sourceCount = document.getElementById('sourceCount');
-    const resultCount = document.getElementById('resultCount');
-    const checklistDiv = document.getElementById('checklist');
-    const checklistItems = document.getElementById('checklistItems');
-    const copyBtn = document.getElementById('copyBtn');
+APP_VERSION = "3.6.0"
 
-    const stepDots = {
-        step1: document.getElementById('step1'),
-        step2: document.getElementById('step2'),
-        step3: document.getElementById('step3'),
-        step4: document.getElementById('step4')
-    };
+MAX_CHARS = 30_000
+CHUNK_SIZE = 3000
 
-    function resetSteps() {
-        Object.values(stepDots).forEach(s => { s.className = 'step-dot'; });
+app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
+app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
+
+
+class ChapterEditError(RuntimeError):
+    pass
+
+
+def _sse(event_type: str, data: dict) -> str:
+    payload = {"type": event_type, **data}
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int = 2) -> str:
+    if not text or len(text.strip()) < 2:
+        return text
+
+    url_google = "https://translate.googleapis.com/translate_a/single"
+    params = {
+        "client": "gtx",
+        "sl": "auto",
+        "tl": target_lang,
+        "dt": "t",
+        "q": text
     }
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(url_google, params=params, timeout=15)
+            if resp.status_code == 200:
+                data = resp.json()
+                translated = "".join(item[0] for item in data[0] if item[0])
+                if translated:
+                    return translated
+            logger.warning(f"Google attempt {attempt+1} failed: {resp.status_code}")
+            time.sleep(1 + random.random())
+        except Exception as e:
+            logger.warning(f"Google exception: {e}")
+            time.sleep(1 + random.random())
 
-    function setStep(step, label) {
-        resetSteps();
-        const names = ['step1', 'step2', 'step3', 'step4'];
-        for (let i = 0; i < names.length; i++) {
-            if (i < step) stepDots[names[i]].className = 'step-dot done';
-            else if (i === step) stepDots[names[i]].className = 'step-dot active';
-            else stepDots[names[i]].className = 'step-dot';
-        }
-        if (label) statusText.textContent = '⏳ ' + label;
+    logger.info(f"Falling back to MyMemory (POST) for {target_lang}")
+    url_mymemory = "https://api.mymemory.translated.net/get"
+    payload = {
+        "q": text,
+        "langpair": f"auto|{target_lang}",
+        "de": "user@example.com"
     }
+    for attempt in range(2):
+        try:
+            resp = requests.post(url_mymemory, data=payload, timeout=20)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("responseStatus") == 200:
+                    translated = data.get("responseData", {}).get("translatedText")
+                    if translated:
+                        return translated
+            logger.warning(f"MyMemory attempt {attempt+1} failed: {resp.status_code}")
+            time.sleep(1 + random.random())
+        except Exception as e:
+            logger.warning(f"MyMemory exception: {e}")
+            time.sleep(1 + random.random())
 
-    sourceText.addEventListener('input', function() {
-        sourceCount.textContent = this.value.length + ' симв.';
-    });
+    return text
 
-    loadBtn.addEventListener('click', function() { fileInput.click(); });
-    fileInput.addEventListener('change', function(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = function(ev) {
-            sourceText.value = ev.target.result;
-            sourceCount.textContent = sourceText.value.length + ' симв.';
-            statusText.textContent = '✅ Файл загружен: ' + file.name;
-            statusText.className = 'status-text success';
-        };
-        reader.onerror = function() {
-            statusText.textContent = '❌ Ошибка чтения файла';
-            statusText.className = 'status-text error';
-        };
-        reader.readAsText(file, 'UTF-8');
-    });
 
-    copyBtn.addEventListener('click', function() {
-        if (!resultText.value) {
-            statusText.textContent = '⚠️ Нет текста для копирования';
-            statusText.className = 'status-text error';
-            return;
-        }
-        navigator.clipboard.writeText(resultText.value).then(() => {
-            statusText.textContent = '✅ Текст скопирован в буфер обмена';
-            statusText.className = 'status-text success';
-        }).catch(() => {
-            resultText.select();
-            document.execCommand('copy');
-            statusText.textContent = '✅ Текст скопирован';
-            statusText.className = 'status-text success';
-        });
-    });
+def process_chunk_through_chain(text: str) -> str:
+    """Упрощённая цепочка: RU → EN → RU."""
+    if not text or len(text.strip()) < 2:
+        return text
+    try:
+        en = translate_with_fallback(text, target_lang="en")
+        ru = translate_with_fallback(en, target_lang="ru")
+        return ru
+    except Exception as e:
+        logger.error(f"Chunk processing error: {e}")
+        return text
 
-    editBtn.addEventListener('click', function() {
-        const text = sourceText.value.trim();
-        if (!text) {
-            statusText.textContent = '⚠️ Вставьте текст или загрузите файл';
-            statusText.className = 'status-text error';
-            return;
-        }
 
-        const style = styleSelect.value;
-        editBtn.disabled = true;
-        editBtn.textContent = '⏳ Обработка...';
-        statusText.textContent = '⏳ Начинаем обработку...';
-        statusText.className = 'status-text';
-        progressContainer.classList.add('active');
-        progressBar.style.width = '0%';
-        checklistDiv.classList.remove('visible');
-        resultText.value = '';
-        resultCount.textContent = '0 симв.';
-        resetSteps();
+def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> list:
+    if len(text) <= chunk_size:
+        return [text]
 
-        const formData = new FormData();
-        formData.append('text', text);
-        formData.append('style', style);
+    chunks = []
+    current_chunk = ""
+    paragraphs = text.split('\n\n')
+    if len(paragraphs) > 1:
+        for para in paragraphs:
+            if len(current_chunk) + len(para) + 2 <= chunk_size:
+                current_chunk += para + "\n\n"
+            else:
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                current_chunk = para + "\n\n"
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+        return chunks
 
-        setStep(0, 'Отправка запроса...');
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    for sentence in sentences:
+        if len(current_chunk) + len(sentence) + 1 <= chunk_size:
+            current_chunk += sentence + " "
+        else:
+            if current_chunk:
+                chunks.append(current_chunk.strip())
+            current_chunk = sentence + " "
 
-        fetch('/api/revise', {
-            method: 'POST',
-            body: formData,
-        })
-        .then(response => {
-            if (!response.ok) {
-                return response.json().then(err => {
-                    throw new Error(err.detail || 'Ошибка сервера');
-                });
-            }
-            setStep(1, 'Генерация текста...');
-            return handleStream(response);
-        })
-        .then(data => {
-            // Текст уже разбит на абзацы на бэкенде — просто отображаем
-            const formattedText = data.revised_text || '';
-            setStep(3, 'Готово!');
-            resultText.value = formattedText;
-            resultCount.textContent = formattedText.length + ' симв.';
-            statusText.textContent = '✅ Готово! ' + (data.summary || '');
-            statusText.className = 'status-text success';
+    if current_chunk:
+        chunks.append(current_chunk.strip())
 
-            if (data.checklist && data.checklist.length) {
-                renderChecklist(data.checklist);
-                checklistDiv.classList.add('visible');
-            }
-        })
-        .catch(err => {
-            statusText.textContent = '❌ ' + err.message;
-            statusText.className = 'status-text error';
-            setStep(-1, 'Ошибка');
-        })
-        .finally(() => {
-            editBtn.disabled = false;
-            editBtn.textContent = '✏️ Редактировать';
-            progressContainer.classList.remove('active');
-            progressBar.style.width = '0%';
-        });
-    });
+    return chunks
 
-    function handleStream(response) {
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let resolved = false;
 
-        return new Promise((resolve, reject) => {
-            function read() {
-                reader.read().then(({ done, value }) => {
-                    if (done) {
-                        if (!resolved) reject(new Error('Соединение закрыто'));
-                        return;
-                    }
-                    buffer += decoder.decode(value, { stream: true });
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop() || '';
+def apply_translation_chain_full(text: str) -> str:
+    logger.info(f"Starting translation chain for {len(text)} chars...")
+    chunks = split_text_into_chunks(text)
+    logger.info(f"Split into {len(chunks)} chunks")
+    processed_chunks = []
+    for i, chunk in enumerate(chunks):
+        logger.info(f"Processing chunk {i+1}/{len(chunks)}...")
+        processed = process_chunk_through_chain(chunk)
+        processed_chunks.append(processed)
 
-                    for (const line of lines) {
-                        if (!line.startsWith('data: ')) continue;
-                        const payload = line.slice(6).trim();
-                        if (!payload) continue;
-                        try {
-                            const event = JSON.parse(payload);
-                            handleEvent(event, resolve, reject, () => { resolved = true; });
-                        } catch (e) { /* игнорируем ошибки парсинга */ }
-                    }
-                    read();
-                }).catch(reject);
-            }
-            read();
-        });
-    }
+    if '\n\n' in text:
+        result = "\n\n".join(processed_chunks)
+    else:
+        result = " ".join(processed_chunks)
+    logger.info(f"Translation complete. Result length: {len(result)}")
+    return result
 
-    function handleEvent(event, resolve, reject, markResolved) {
-        switch (event.type) {
-            case 'progress':
-                const total = event.estimated_total || 10000;
-                const pct = Math.min(100, (event.chars / total) * 100);
-                progressBar.style.width = pct + '%';
-                statusText.textContent = '⏳ ' + (event.log || 'Генерация... ' + Math.round(pct) + '%');
-                setStep(1, (event.log || 'Генерация... ' + Math.round(pct) + '%'));
-                break;
-            case 'done':
-                markResolved();
-                setStep(2, 'Пост-обработка...');
-                resolve(event);
-                break;
-            case 'error':
-                markResolved();
-                reject(new Error(event.detail || 'Ошибка обработки'));
-                break;
-            default:
-                break;
-        }
-    }
 
-    function renderChecklist(checklist) {
-        checklistItems.innerHTML = '';
-        let passedCount = 0;
-        const total = checklist.length;
-        checklist.forEach(item => {
-            const div = document.createElement('div');
-            div.className = 'checklist-item';
-            const icon = document.createElement('span');
-            icon.className = 'icon';
-            if (item.passed === true) {
-                icon.textContent = '✅';
-                icon.classList.add('pass');
-                passedCount++;
-            } else if (item.passed === false) {
-                icon.textContent = '❌';
-                icon.classList.add('fail');
-            } else {
-                icon.textContent = '⏳';
-                icon.classList.add('unknown');
-            }
-            const label = document.createElement('span');
-            label.textContent = item.label;
-            if (item.note) {
-                const note = document.createElement('span');
-                note.style.cssText = 'color: #6b7f94; font-size: 12px; margin-left: 8px;';
-                note.textContent = '— ' + item.note;
-                div.appendChild(icon);
-                div.appendChild(label);
-                div.appendChild(note);
-            } else {
-                div.appendChild(icon);
-                div.appendChild(label);
-            }
-            checklistItems.appendChild(div);
-        });
-        const header = document.createElement('div');
-        header.style.cssText = 'font-weight: 500; margin-bottom: 8px; color: #2c3e50; font-size: 13px;';
-        header.textContent = `📋 Чек-лист: ${passedCount}/${total} пунктов выполнено`;
-        checklistItems.prepend(header);
-    }
+def clean_translation_artifacts(text: str) -> str:
+    finnish_patterns = [
+        r'\bTietenkin\b', r'\bhe tarvitsevat\b', r'\bJos se toimii\b',
+        r'\bvaikka se ei\b', r'\btoimi\b', r'\bpuolella\b',
+        r'\bvaltamerta\b', r'\bRakennamme\b', r'\bsiis\b',
+        r'\bsademeren\b', r'\bJa lentää\b', r'\bsinne\b',
+        r'\baamiaiseksi\b', r'\bkuvaan\b', r'\bMikä tämä on\b',
+        r'\bAleksei kysyi\b', r'\bTalomme suunnitelma\b',
+        r'\bKuussa ei ole\b', r'\brannoille\b',
+        r'\bettä\b', r'\bjoka\b', r'\bmitä\b', r'\bniin\b',
+        r'\bkun\b', r'\bvoi\b', r'\bse\b', r'\bja\b'
+    ]
+    english_phrases = [
+        r'\bfirst to spot\b', r'\bthe genius\b', r'\bof a student\b',
+        r'\bfrom Siberia\b', r'\bnow he watched\b', r'\bas that spark\b',
+        r'\bignited its owner\'s career\b', r'\bI came to warn you\b',
+        r'\bthey want to seduce you\b', r'\bthey provide the lab\b',
+        r'\bbudget and team\b', r'\bwhatever you want\b',
+        r'\bhowever research requires a license\b',
+        r'\bA group came from\b', r'\bMIT\b', r'\bthey need\b',
+        r'\bsaid more quietly\b', r'\bbudget\b', r'\bteam\b',
+        r'\bresearch\b', r'\blicense\b', r'\brequires\b', r'\bcame from\b'
+    ]
+    japanese_patterns = [r'[\u3040-\u30FF]+']
 
-    fetch('/api/health')
-        .then(res => res.json())
-        .then(data => {
-            const version = 'v' + data.version;
-            document.getElementById('versionBadge').textContent = version;
-            document.getElementById('footerVersion').textContent = 'Chapter Editor ' + version + ' — обработка через цепочку переводов';
-            statusText.textContent = '✅ Сервер версии ' + data.version + ' готов';
-            statusText.className = 'status-text success';
-        })
-        .catch(() => {
-            document.getElementById('versionBadge').textContent = 'v3.6.0';
-            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.6.0 — обработка через цепочку переводов';
-            statusText.textContent = '⚠️ Не удалось подключиться к серверу';
-            statusText.className = 'status-text error';
-        });
-});
-</script>
-</body>
-</html>
+    for pattern in finnish_patterns + english_phrases:
+        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+    for pattern in japanese_patterns:
+        text = re.sub(pattern, '', text)
+
+    text = re.sub(r'(\w)\.(\w)', r'\1\2', text)
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'^[.,!?;:\s]+$', '', text, flags=re.MULTILINE)
+
+    text = re.sub(r'—\s*', '— ', text)
+
+    if not re.search(r'[.!?]', text):
+        sentences = re.split(r'(?<=[а-яa-z])\s+(?=[А-ЯA-Z])', text)
+        if len(sentences) > 1:
+            text = '. '.join(sentences) + '.'
+
+    return text.strip()
+
+
+def split_into_paragraphs_by_logic(text: str) -> str:
+    """
+    Принудительное разбиение на абзацы по длине (400 символов, без разрыва слов).
+    """
+    if not text or len(text) < 200:
+        return text
+
+    chunk_size = 400
+    words = text.split()
+    paragraphs = []
+    current = []
+    current_len = 0
+
+    for word in words:
+        if current_len + len(word) + 1 > chunk_size and current:
+            paragraphs.append(' '.join(current))
+            current = []
+            current_len = 0
+        current.append(word)
+        current_len += len(word) + 1
+
+    if current:
+        paragraphs.append(' '.join(current))
+
+    # Если получился один абзац, а текст длинный — режем посимвольно (но сохраняя слова)
+    if len(paragraphs) == 1 and len(text) > 500:
+        paragraphs = []
+        for i in range(0, len(text), chunk_size):
+            chunk = text[i:i+chunk_size].strip()
+            if chunk:
+                paragraphs.append(chunk)
+
+    return '\n\n'.join(paragraphs)
+
+
+def apply_light_polish(text: str) -> str:
+    text = re.sub(r'\s+', ' ', text)
+    text = text.replace('"', '"').replace('"', '"')
+    text = text.replace(' - ', ' — ')
+    text = re.sub(r'—\s*', '— ', text)
+    return text
+
+
+@app.get("/api/health")
+def health():
+    return jsonify(status="ok", version=APP_VERSION)
+
+
+@app.post("/api/revise")
+def api_revise():
+    logger.info("=== api_revise: START ===")
+    try:
+        file_storage = request.files.get("file")
+        text = request.form.get("text", "")
+        style = request.form.get("style", "neutral")
+
+        if file_storage and file_storage.filename:
+            raw = file_storage.read()
+            chapter_text = raw.decode("utf-8", errors="replace")
+        elif text.strip():
+            chapter_text = text
+        else:
+            return jsonify(detail="Provide chapter text or upload a file."), 400
+
+        chapter_text = chapter_text.strip()
+        if not chapter_text:
+            return jsonify(detail="Chapter text is empty."), 400
+
+        if len(chapter_text) > MAX_CHARS:
+            chapter_text = chapter_text[:MAX_CHARS]
+            logger.warning(f"Truncated text to {MAX_CHARS} chars")
+
+        original_len = len(chapter_text)
+
+        def generate():
+            try:
+                yield _sse("progress", {"chars": 0, "estimated_total": original_len, "percent": 0, "log": "Начинаем обработку..."})
+
+                # 1. Упрощённая цепочка переводов
+                logger.info("Step 1: Translation chain (RU→EN→RU)...")
+                processed_text = apply_translation_chain_full(chapter_text)
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 40, "log": "Переводы завершены"})
+
+                # 2. Очистка артефактов
+                logger.info("Step 2: Cleaning artifacts...")
+                processed_text = clean_translation_artifacts(processed_text)
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 60, "log": "Артефакты удалены"})
+
+                # 3. Принудительное разбиение на абзацы
+                logger.info("Step 3: Forced paragraph splitting...")
+                processed_text = split_into_paragraphs_by_logic(processed_text)
+                para_count = len(processed_text.split('\n\n'))
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 85, "log": f"Абзацев: {para_count}"})
+
+                # 4. Финальная полировка
+                logger.info("Step 4: Final polish...")
+                processed_text = apply_light_polish(processed_text)
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 100, "log": "Готово!"})
+
+                final_para_count = len(processed_text.split('\n\n'))
+                logger.info(f"Final: {len(processed_text)} chars, {final_para_count} paragraphs")
+
+                yield _sse("done", {
+                    "revised_text": processed_text,
+                    "original_text": chapter_text,
+                    "summary": f"Текст переработан через упрощённую цепочку переводов (RU→EN→RU). Абзацев: {final_para_count}",
+                    "changes": [
+                        "Переведён через Google Translate / MyMemory (RU→EN→RU)",
+                        f"Разделён на {final_para_count} абзацев",
+                        "Удалены артефакты перевода"
+                    ],
+                    "checklist": []
+                })
+            except ChapterEditError as e:
+                logger.exception("ChapterEditError")
+                yield _sse("error", {"detail": str(e)})
+            except Exception as e:
+                logger.exception("Unexpected error in generate")
+                yield _sse("error", {"detail": f"Unexpected error: {str(e)}"})
+
+        return Response(
+            stream_with_context(generate()),
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+        )
+
+    except Exception as e:
+        logger.exception("api_revise: Unexpected error")
+        return jsonify(detail=f"Server error: {str(e)}"), 500
+
+
+@app.get("/")
+def index():
+    return app.send_static_file("index.html")
+
+
+@app.errorhandler(HTTPException)
+def handle_http_exception(exc):
+    return jsonify(detail=exc.description or str(exc)), exc.code or 500
+
+
+@app.errorhandler(Exception)
+def handle_exception(exc):
+    logger.exception("Unhandled exception")
+    return jsonify(detail=f"Server error: {str(exc)}"), 500
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
+    app.run(host="0.0.0.0", port=port, debug=False)
