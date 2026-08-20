@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.6.2 — humanizer ОТКЛЮЧЁН, детальное логирование ошибок
+Chapter Editor v3.6.3 — поддержка цепочек переводов (EN или ZH)
 """
 import json
 import os
@@ -20,27 +20,24 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.6.2"
+APP_VERSION = "3.6.3"
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 
-# Humanizer отключён (переменная игнорируется)
-ENABLE_HUMANIZER = True
-HUMANIZER_AVAILABLE = False
+# Выбор цепочки переводов через переменную окружения
+CHAIN_TYPE = os.environ.get("TRANSLATION_CHAIN", "en").lower()
+if CHAIN_TYPE not in ("en", "zh"):
+    logger.warning(f"Unknown TRANSLATION_CHAIN={CHAIN_TYPE}, falling back to 'en'")
+    CHAIN_TYPE = "en"
 
-# Если вы всё же хотите включить humanizer, раскомментируйте эти строки
-# и установите переменную окружения ENABLE_HUMANIZER=true
-# if os.environ.get("ENABLE_HUMANIZER", "false").lower() == "true":
-#     try:
-#         import humanizer
-#         HUMANIZER_AVAILABLE = True
-#         ENABLE_HUMANIZER = True
-#     except ImportError:
-#         logger.warning("humanizer module not found. Humanizer disabled.")
-#         ENABLE_HUMANIZER = False
+logger.info(f"Using translation chain: {CHAIN_TYPE} (RU→{CHAIN_TYPE.upper()}→RU)")
+
+# Humanizer отключён (можно включить отдельно, но пока не будем)
+ENABLE_HUMANIZER = False
+HUMANIZER_AVAILABLE = False
 
 
 class ChapterEditError(RuntimeError):
@@ -104,12 +101,21 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
 
 
 def process_chunk_through_chain(text: str) -> str:
+    """Цепочка в зависимости от CHAIN_TYPE."""
     if not text or len(text.strip()) < 2:
         return text
     try:
-        en = translate_with_fallback(text, target_lang="en")
-        ru = translate_with_fallback(en, target_lang="ru")
-        return ru
+        if CHAIN_TYPE == "en":
+            # RU → EN → RU
+            mid = translate_with_fallback(text, target_lang="en")
+            result = translate_with_fallback(mid, target_lang="ru")
+        elif CHAIN_TYPE == "zh":
+            # RU → ZH → RU
+            mid = translate_with_fallback(text, target_lang="zh")
+            result = translate_with_fallback(mid, target_lang="ru")
+        else:
+            result = text  # fallback
+        return result
     except Exception as e:
         logger.error(f"Chunk processing error: {e}")
         return text
@@ -150,7 +156,7 @@ def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> list:
 
 
 def apply_translation_chain_full(text: str) -> str:
-    logger.info(f"Starting translation chain (RU→EN→RU) for {len(text)} chars...")
+    logger.info(f"Starting translation chain (RU→{CHAIN_TYPE.upper()}→RU) for {len(text)} chars...")
     chunks = split_text_into_chunks(text)
     logger.info(f"Split into {len(chunks)} chunks")
     processed_chunks = []
@@ -168,6 +174,7 @@ def apply_translation_chain_full(text: str) -> str:
 
 
 def clean_translation_artifacts(text: str) -> str:
+    # Базовые паттерны (финские, английские, японские)
     finnish_patterns = [
         r'\bTietenkin\b', r'\bhe tarvitsevat\b', r'\bJos se toimii\b',
         r'\bvaikka se ei\b', r'\btoimi\b', r'\bpuolella\b',
@@ -192,10 +199,13 @@ def clean_translation_artifacts(text: str) -> str:
     ]
     japanese_patterns = [r'[\u3040-\u30FF]+']
 
-    for pattern in finnish_patterns + english_phrases:
+    # Китайские паттерны (иероглифы)
+    chinese_patterns = [r'[\u4e00-\u9fff]+']
+
+    all_patterns = finnish_patterns + english_phrases + japanese_patterns + chinese_patterns
+
+    for pattern in all_patterns:
         text = re.sub(pattern, '', text, flags=re.IGNORECASE)
-    for pattern in japanese_patterns:
-        text = re.sub(pattern, '', text)
 
     text = re.sub(r'(\w)\.(\w)', r'\1\2', text)
     text = re.sub(r'\s+', ' ', text)
@@ -275,12 +285,12 @@ def apply_light_polish(text: str) -> str:
 
 @app.get("/api/health")
 def health():
-    return jsonify(status="ok", version=APP_VERSION)
+    return jsonify(status="ok", version=APP_VERSION, chain=CHAIN_TYPE)
 
 
 @app.post("/api/revise")
 def api_revise():
-    logger.info("=== api_revise: START ===")
+    logger.info(f"=== api_revise: START (chain={CHAIN_TYPE}) ===")
     try:
         file_storage = request.files.get("file")
         text = request.form.get("text", "")
@@ -306,10 +316,10 @@ def api_revise():
 
         def generate():
             try:
-                yield _sse("progress", {"chars": 0, "estimated_total": original_len, "percent": 0, "log": "Начинаем обработку..."})
+                yield _sse("progress", {"chars": 0, "estimated_total": original_len, "percent": 0, "log": f"Начинаем обработку (цепочка RU→{CHAIN_TYPE.upper()}→RU)..."})
 
-                # 1. Цепочка переводов (RU→EN→RU)
-                logger.info("Step 1: Translation chain (RU→EN→RU)...")
+                # 1. Цепочка переводов
+                logger.info(f"Step 1: Translation chain (RU→{CHAIN_TYPE.upper()}→RU)...")
                 processed_text = apply_translation_chain_full(chapter_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 35, "log": "Переводы завершены"})
 
@@ -334,23 +344,20 @@ def api_revise():
                 processed_text = apply_light_polish(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 90, "log": "Полировка выполнена"})
 
-                # 6. Humanizer отключён — пропускаем
-                # Если вы хотите включить humanizer, раскомментируйте блок ниже
-                # и установите ENABLE_HUMANIZER = True в начале файла
-
+                # 6. Humanizer отключён (можно будет включить отдельно)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 100, "log": "Готово!"})
 
                 final_len = len(processed_text)
                 final_para_count = len(processed_text.split('\n\n'))
                 loss = (original_len - final_len) / original_len
-                logger.info(f"Final: {final_len} chars, loss {loss:.2%}, {final_para_count} paragraphs")
+                logger.info(f"Final: {final_len} chars, loss {loss:.2%}, {final_para_count} paragraphs, chain={CHAIN_TYPE}")
 
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": f"Текст переработан через упрощённую цепочку (RU→EN→RU). Потеря: {loss:.1%}. Абзацев: {final_para_count}",
+                    "summary": f"Текст переработан через цепочку RU→{CHAIN_TYPE.upper()}→RU. Потеря: {loss:.1%}. Абзацев: {final_para_count}",
                     "changes": [
-                        "Переведён через Google Translate / MyMemory (RU→EN→RU)",
+                        f"Переведён через Google Translate / MyMemory (RU→{CHAIN_TYPE.upper()}→RU)",
                         "Разнообразие диалоговых тегов",
                         f"Разделён на {final_para_count} абзацев",
                         "Удалены артефакты перевода"
@@ -360,7 +367,6 @@ def api_revise():
             except Exception as e:
                 error_trace = traceback.format_exc()
                 logger.error(f"Error in generate: {error_trace}")
-                # Отправляем детальную ошибку в SSE
                 yield _sse("error", {"detail": f"{str(e)}\n\n{error_trace}"})
                 raise
 
