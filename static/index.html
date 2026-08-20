@@ -6,368 +6,64 @@
     <title>Chapter Editor</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            background: #f0f4fa;
-            color: #1a2634;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            padding: 24px;
-        }
-
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            width: 100%;
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-        }
-
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 16px 0 24px;
-            border-bottom: 1px solid #d0d9e4;
-            flex-wrap: wrap;
-            gap: 12px;
-        }
-
-        .logo h1 {
-            font-size: 22px;
-            font-weight: 600;
-            color: #1a2634;
-            letter-spacing: -0.3px;
-        }
-
-        .logo .sub {
-            font-size: 13px;
-            color: #6b7f94;
-            font-weight: 400;
-        }
-
-        .version-badge {
-            background: #e4eaf2;
-            padding: 6px 14px;
-            border-radius: 20px;
-            font-size: 12px;
-            color: #3d546a;
-            font-weight: 500;
-        }
-
-        .main-grid {
-            display: grid;
-            grid-template-columns: 1fr 1.5fr;
-            gap: 24px;
-            margin-top: 28px;
-            flex: 1;
-        }
-
-        @media (max-width: 768px) {
-            .main-grid {
-                grid-template-columns: 1fr;
-            }
-            body { padding: 16px; }
-        }
-
-        .panel {
-            background: #ffffff;
-            border-radius: 16px;
-            border: 1px solid #d0d9e4;
-            padding: 24px;
-            display: flex;
-            flex-direction: column;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-        }
-
-        .panel-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 16px;
-        }
-
-        .panel-header h2 {
-            font-size: 15px;
-            font-weight: 500;
-            color: #2c3e50;
-            letter-spacing: 0.3px;
-        }
-
-        .panel-header .count {
-            font-size: 12px;
-            color: #6b7f94;
-            background: #eef3f8;
-            padding: 4px 12px;
-            border-radius: 12px;
-        }
-
-        textarea {
-            width: 100%;
-            flex: 1;
-            min-height: 400px;
-            background: #f7fafc;
-            border: 1px solid #d0d9e4;
-            border-radius: 12px;
-            color: #1a2634;
-            font-family: 'Inter', monospace;
-            font-size: 14px;
-            line-height: 1.7;
-            padding: 16px;
-            resize: vertical;
-            transition: border-color 0.2s;
-        }
-
-        textarea:focus {
-            outline: none;
-            border-color: #6c8fc7;
-        }
-
-        textarea::placeholder {
-            color: #8fa2b8;
-        }
-
-        .controls {
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
-            margin-top: 16px;
-            padding-top: 16px;
-            border-top: 1px solid #e4eaf2;
-        }
-
-        .controls select {
-            background: #f7fafc;
-            border: 1px solid #d0d9e4;
-            border-radius: 10px;
-            padding: 10px 16px;
-            color: #1a2634;
-            font-family: 'Inter', sans-serif;
-            font-size: 13px;
-            cursor: pointer;
-            flex: 1;
-            min-width: 120px;
-        }
-
-        .btn {
-            padding: 10px 28px;
-            border: none;
-            border-radius: 10px;
-            font-family: 'Inter', sans-serif;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            white-space: nowrap;
-        }
-
-        .btn-primary {
-            background: #2c3e50;
-            color: #ffffff;
-        }
-
-        .btn-primary:hover {
-            background: #1a2a3a;
-            transform: translateY(-1px);
-            box-shadow: 0 4px 16px rgba(44, 62, 80, 0.2);
-        }
-
-        .btn-primary:disabled {
-            background: #8fa2b8;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-
-        .btn-secondary {
-            background: #e4eaf2;
-            color: #2c3e50;
-        }
-
-        .btn-secondary:hover {
-            background: #d0d9e4;
-        }
-
-        .progress-container {
-            margin-top: 12px;
-            background: #eef3f8;
-            border-radius: 8px;
-            height: 6px;
-            overflow: hidden;
-            opacity: 0;
-            transition: opacity 0.3s;
-        }
-
-        .progress-container.active {
-            opacity: 1;
-        }
-
-        .progress-bar {
-            height: 100%;
-            width: 0%;
-            background: #2c3e50;
-            border-radius: 8px;
-            transition: width 0.2s ease;
-        }
-
-        .status-text {
-            font-size: 13px;
-            color: #6b7f94;
-            margin-top: 10px;
-            min-height: 20px;
-        }
-
-        .status-text.success {
-            color: #1e7e34;
-        }
-
-        .status-text.error {
-            color: #b3362a;
-        }
-
-        .step-indicator {
-            display: flex;
-            gap: 8px;
-            margin-top: 8px;
-            font-size: 12px;
-            color: #6b7f94;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-
-        .step-dot {
-            display: inline-block;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #d0d9e4;
-            transition: all 0.3s;
-        }
-
-        .step-dot.active {
-            background: #2c3e50;
-            transform: scale(1.2);
-        }
-
-        .step-dot.done {
-            background: #1e7e34;
-        }
-
-        .step-label {
-            font-size: 12px;
-            color: #6b7f94;
-            margin-left: 4px;
-        }
-
-        .result-panel .panel-body {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .result-panel .panel-body textarea {
-            flex: 1;
-            min-height: 400px;
-        }
-
-        .checklist {
-            margin-top: 12px;
-            padding: 12px 16px;
-            background: #f7fafc;
-            border-radius: 10px;
-            border: 1px solid #d0d9e4;
-            display: none;
-        }
-
-        .checklist.visible {
-            display: block;
-        }
-
-        .checklist-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 4px 0;
-            font-size: 13px;
-            color: #2c3e50;
-        }
-
-        .checklist-item .icon {
-            font-size: 16px;
-            width: 20px;
-            text-align: center;
-        }
-
-        .checklist-item .icon.pass {
-            color: #1e7e34;
-        }
-
-        .checklist-item .icon.fail {
-            color: #b3362a;
-        }
-
-        .checklist-item .icon.unknown {
-            color: #8fa2b8;
-        }
-
-        .footer {
-            margin-top: 32px;
-            padding-top: 16px;
-            border-top: 1px solid #d0d9e4;
-            display: flex;
-            justify-content: space-between;
-            font-size: 12px;
-            color: #8fa2b8;
-            flex-wrap: wrap;
-            gap: 8px;
-        }
-
-        .footer a {
-            color: #6b7f94;
-            text-decoration: none;
-        }
-
-        .footer a:hover {
-            color: #2c3e50;
-        }
-
-        .copy-btn {
-            background: #eef3f8;
-            border: 1px solid #d0d9e4;
-            color: #2c3e50;
-            padding: 4px 12px;
-            border-radius: 6px;
-            font-size: 12px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .copy-btn:hover {
-            background: #d0d9e4;
-        }
+        /* (стили без изменений — оставлены как в исходном файле) */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #f0f4fa; color: #1a2634; font-family: 'Inter', sans-serif; min-height: 100vh; display: flex; flex-direction: column; padding: 24px; }
+        .container { max-width: 1400px; margin: 0 auto; width: 100%; flex: 1; display: flex; flex-direction: column; }
+        header { display: flex; justify-content: space-between; align-items: center; padding: 16px 0 24px; border-bottom: 1px solid #d0d9e4; flex-wrap: wrap; gap: 12px; }
+        .logo h1 { font-size: 22px; font-weight: 600; color: #1a2634; letter-spacing: -0.3px; }
+        .logo .sub { font-size: 13px; color: #6b7f94; font-weight: 400; }
+        .version-badge { background: #e4eaf2; padding: 6px 14px; border-radius: 20px; font-size: 12px; color: #3d546a; font-weight: 500; }
+        .main-grid { display: grid; grid-template-columns: 1fr 1.5fr; gap: 24px; margin-top: 28px; flex: 1; }
+        @media (max-width: 768px) { .main-grid { grid-template-columns: 1fr; } body { padding: 16px; } }
+        .panel { background: #ffffff; border-radius: 16px; border: 1px solid #d0d9e4; padding: 24px; display: flex; flex-direction: column; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+        .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .panel-header h2 { font-size: 15px; font-weight: 500; color: #2c3e50; letter-spacing: 0.3px; }
+        .panel-header .count { font-size: 12px; color: #6b7f94; background: #eef3f8; padding: 4px 12px; border-radius: 12px; }
+        textarea { width: 100%; flex: 1; min-height: 400px; background: #f7fafc; border: 1px solid #d0d9e4; border-radius: 12px; color: #1a2634; font-family: 'Inter', monospace; font-size: 14px; line-height: 1.7; padding: 16px; resize: vertical; transition: border-color 0.2s; }
+        textarea:focus { outline: none; border-color: #6c8fc7; }
+        textarea::placeholder { color: #8fa2b8; }
+        .controls { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 16px; padding-top: 16px; border-top: 1px solid #e4eaf2; }
+        .controls select { background: #f7fafc; border: 1px solid #d0d9e4; border-radius: 10px; padding: 10px 16px; color: #1a2634; font-family: 'Inter', sans-serif; font-size: 13px; cursor: pointer; flex: 1; min-width: 120px; }
+        .btn { padding: 10px 28px; border: none; border-radius: 10px; font-family: 'Inter', sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+        .btn-primary { background: #2c3e50; color: #ffffff; }
+        .btn-primary:hover { background: #1a2a3a; transform: translateY(-1px); box-shadow: 0 4px 16px rgba(44, 62, 80, 0.2); }
+        .btn-primary:disabled { background: #8fa2b8; cursor: not-allowed; transform: none; box-shadow: none; }
+        .btn-secondary { background: #e4eaf2; color: #2c3e50; }
+        .btn-secondary:hover { background: #d0d9e4; }
+        .progress-container { margin-top: 12px; background: #eef3f8; border-radius: 8px; height: 6px; overflow: hidden; opacity: 0; transition: opacity 0.3s; }
+        .progress-container.active { opacity: 1; }
+        .progress-bar { height: 100%; width: 0%; background: #2c3e50; border-radius: 8px; transition: width 0.2s ease; }
+        .status-text { font-size: 13px; color: #6b7f94; margin-top: 10px; min-height: 20px; }
+        .status-text.success { color: #1e7e34; }
+        .status-text.error { color: #b3362a; }
+        .step-indicator { display: flex; gap: 8px; margin-top: 8px; font-size: 12px; color: #6b7f94; align-items: center; flex-wrap: wrap; }
+        .step-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #d0d9e4; transition: all 0.3s; }
+        .step-dot.active { background: #2c3e50; transform: scale(1.2); }
+        .step-dot.done { background: #1e7e34; }
+        .step-label { font-size: 12px; color: #6b7f94; margin-left: 4px; }
+        .result-panel .panel-body { flex: 1; display: flex; flex-direction: column; }
+        .result-panel .panel-body textarea { flex: 1; min-height: 400px; }
+        .checklist { margin-top: 12px; padding: 12px 16px; background: #f7fafc; border-radius: 10px; border: 1px solid #d0d9e4; display: none; }
+        .checklist.visible { display: block; }
+        .checklist-item { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: 13px; color: #2c3e50; }
+        .checklist-item .icon { font-size: 16px; width: 20px; text-align: center; }
+        .checklist-item .icon.pass { color: #1e7e34; }
+        .checklist-item .icon.fail { color: #b3362a; }
+        .checklist-item .icon.unknown { color: #8fa2b8; }
+        .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #d0d9e4; display: flex; justify-content: space-between; font-size: 12px; color: #8fa2b8; flex-wrap: wrap; gap: 8px; }
+        .footer a { color: #6b7f94; text-decoration: none; }
+        .footer a:hover { color: #2c3e50; }
+        .copy-btn { background: #eef3f8; border: 1px solid #d0d9e4; color: #2c3e50; padding: 4px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; transition: all 0.2s; }
+        .copy-btn:hover { background: #d0d9e4; }
     </style>
 </head>
 <body>
-
 <div class="container">
     <header>
-        <div class="logo">
-            <h1>Chapter Editor <span class="sub">— текст как живой</span></h1>
-        </div>
+        <div class="logo"><h1>Chapter Editor <span class="sub">— текст как живой</span></h1></div>
         <span class="version-badge" id="versionBadge">v...</span>
     </header>
-
     <div class="main-grid">
         <!-- Левая панель -->
         <div class="panel">
@@ -401,7 +97,6 @@
             <div class="status-text" id="statusText">Готов к работе</div>
             <input type="file" id="fileInput" accept=".txt,.md,.docx" style="display:none">
         </div>
-
         <!-- Правая панель -->
         <div class="panel result-panel">
             <div class="panel-header">
@@ -419,7 +114,6 @@
             </div>
         </div>
     </div>
-
     <div class="footer">
         <span id="footerVersion">Chapter Editor — обработка через цепочку переводов</span>
         <span><a href="#" onclick="location.reload()">Перезагрузить</a></span>
@@ -443,258 +137,6 @@
     const checklistItems = document.getElementById('checklistItems');
     const copyBtn = document.getElementById('copyBtn');
 
-    // --- УЛУЧШЕННОЕ РАЗБИЕНИЕ НА АБЗАЦЫ (с выделением диалогов) ---
-function smartSplitIntoParagraphs(text) {
-    if (!text || text.length < 150) return text;
-
-    // === 1. УДАЛЕНИЕ АРТЕФАКТОВ ===
-    const artifacts = [
-        'Tietenkin', 'he tarvitsevat', 'Jos se toimii', 'vaikka se ei',
-        'toimi', 'puolella', 'valtamerta', 'Rakennamme', 'siis',
-        'sademeren', 'Ja lentää', 'sinne', 'aamiaiseksi', 'kuvaan',
-        'Mikä tämä on', 'Aleksei kysyi', 'Talomme suunnitelma',
-        'Kuussa ei ole', 'rannoille', 'akkuni', 'akkujasi', 'тоими',
-        'first to spot', 'the genius', 'of a student', 'from Siberia',
-        'now he watched', 'as that spark', 'ignited its owner\'s career',
-        'I came to warn you', 'they want to seduce you', 'they provide the lab',
-        'budget and team', 'whatever you want', 'however research requires a license',
-        'A group came from', 'MIT', 'they need', 'said more quietly',
-        'budget', 'team', 'research', 'license', 'requires', 'came from'
-    ];
-    
-    for (const a of artifacts) {
-        const regex = new RegExp('\\b' + a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
-        text = text.replace(regex, '');
-    }
-
-    text = text.replace(/(\w)\.(\w)/g, '$1$2');
-    text = text.replace(/\s+\./g, '.');
-    text = text.replace(/\s+,/g, ',');
-    text = text.replace(/\s+\?/g, '?');
-    text = text.replace(/\s+!/g, '!');
-    text = text.replace(/\.{4,}/g, '...');
-    text = text.replace(/""/g, '"');
-    text = text.replace(/""/g, '"');
-    text = text.replace(/\s{2,}/g, ' ');
-
-    // === 2. ВОССТАНОВЛЕНИЕ ФРАЗ ===
-    const fixes = [
-        [/—\s*знать/gi, '— Я знаю'],
-        [/—\s*Знать/gi, '— Я знаю'],
-        [/не испортил/gi, 'не шутил'],
-        [/\bТоки\b/gi, '«Ибис»'],
-        [/черного вина/gi, 'черного кофе'],
-        [/\bБосимом\b/gi, 'Босиком'],
-    ];
-    
-    for (const [pattern, replacement] of fixes) {
-        text = text.replace(pattern, replacement);
-    }
-
-    // === 3. РАЗБИЕНИЕ НА АБЗАЦЫ ===
-    // Разбиваем по предложениям (по точкам, вопросительным и восклицательным знакам)
-    let sentences = text.match(/[^.!?]+[.!?]+/g);
-    
-    if (!sentences || sentences.length < 2) {
-        // Запасной вариант: разбиваем по запятым с большой буквы
-        sentences = text.split(/,\s*(?=[А-ЯA-Z])/);
-    }
-    
-    if (!sentences || sentences.length < 2) {
-        // Последний запасной вариант: разбиваем по длине
-        const chunks = [];
-        const words = text.split(' ');
-        let current = [];
-        let currentLen = 0;
-        const targetLen = 350;
-        
-        for (const word of words) {
-            if (currentLen > targetLen && current.length >= 5) {
-                chunks.push(current.join(' '));
-                current = [];
-                currentLen = 0;
-            }
-            current.push(word);
-            currentLen += word.length + 1;
-        }
-        if (current.length > 0) {
-            chunks.push(current.join(' '));
-        }
-        return chunks.join('\n\n');
-    }
-
-    // === 4. ГРУППИРУЕМ ПРЕДЛОЖЕНИЯ В АБЗАЦЫ ===
-    const paragraphs = [];
-    let currentPara = [];
-    let currentLen = 0;
-    const targetLen = 350;
-    let inDialog = false;
-
-    for (const sent of sentences) {
-        const trimmed = sent.trim();
-        if (!trimmed) continue;
-
-        // Проверяем, является ли предложение диалогом
-        // Диалог — это когда предложение начинается с "—" или '"' или '«'
-        const isDialog = trimmed.startsWith('—') || trimmed.startsWith('"') || trimmed.startsWith('«');
-        
-        // Если это диалог — выделяем в отдельный абзац
-        if (isDialog) {
-            // Закрываем текущий абзац
-            if (currentPara.length > 0) {
-                paragraphs.push(currentPara.join(' '));
-                currentPara = [];
-                currentLen = 0;
-            }
-            // Собираем все предложения диалога (до следующего не-диалога)
-            let dialogText = trimmed;
-            inDialog = true;
-            continue;
-        }
-        
-        // Если мы внутри диалога, но текущее предложение не диалог — значит диалог закончился
-        if (inDialog) {
-            // Предыдущий диалог уже был добавлен, а это — продолжение
-            // Добавляем его в новый абзац
-            paragraphs.push(dialogText);
-            dialogText = '';
-            inDialog = false;
-            // Текущее предложение начинает новый абзац
-            currentPara.push(trimmed);
-            currentLen += trimmed.length;
-            continue;
-        }
-
-        // Обычное предложение
-        if (currentLen > targetLen && currentPara.length >= 2) {
-            paragraphs.push(currentPara.join(' '));
-            currentPara = [];
-            currentLen = 0;
-        }
-
-        currentPara.push(trimmed);
-        currentLen += trimmed.length;
-    }
-
-    // Добавляем последний абзац
-    if (currentPara.length > 0) {
-        paragraphs.push(currentPara.join(' '));
-    }
-    
-    // Если после всего получился один абзац — разбиваем по длине
-    if (paragraphs.length === 1 && text.length > 500) {
-        const chunks = [];
-        const words = text.split(' ');
-        let current = [];
-        let currentLen = 0;
-        const targetLen = 350;
-        
-        for (const word of words) {
-            if (currentLen > targetLen && current.length >= 5) {
-                chunks.push(current.join(' '));
-                current = [];
-                currentLen = 0;
-            }
-            current.push(word);
-            currentLen += word.length + 1;
-        }
-        if (current.length > 0) {
-            chunks.push(current.join(' '));
-        }
-        return chunks.join('\n\n');
-    }
-
-    return paragraphs.join('\n\n');
-}
-
-// === ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ: умное разбиение ===
-function splitByNaturalBreaks(text) {
-    if (!text || text.length < 200) return text;
-    
-    // 1. Пробуем разбить по точкам, вопросительным и восклицательным знакам
-    const sentences = text.match(/[^.!?]+[.!?]+/g);
-    if (sentences && sentences.length >= 3) {
-        const paragraphs = [];
-        let current = [];
-        let currentLen = 0;
-        const targetLen = 350;
-        
-        for (const sent of sentences) {
-            const trimmed = sent.trim();
-            if (!trimmed) continue;
-            
-            if (currentLen > targetLen && current.length >= 2) {
-                paragraphs.push(current.join(' '));
-                current = [];
-                currentLen = 0;
-            }
-            current.push(trimmed);
-            currentLen += trimmed.length;
-        }
-        if (current.length > 0) {
-            paragraphs.push(current.join(' '));
-        }
-        return paragraphs.join('\n\n');
-    }
-    
-    // 2. Пробуем разбить по союзам и вводным словам
-    const splitWords = ['но', 'и', 'а', 'потом', 'затем', 'однако', 'впрочем', 'между тем'];
-    const parts = [];
-    let currentPart = '';
-    
-    const words = text.split(' ');
-    for (let i = 0; i < words.length; i++) {
-        const word = words[i];
-        const nextWord = words[i + 1] || '';
-        currentPart += word + ' ';
-        
-        // Если текущая часть > 300 символов и следующее слово — союз
-        if (currentPart.length > 300 && splitWords.includes(word.toLowerCase().replace(/[,.]/g, ''))) {
-            parts.push(currentPart.trim());
-            currentPart = '';
-        }
-    }
-    if (currentPart) {
-        parts.push(currentPart.trim());
-    }
-    
-    if (parts.length >= 2) {
-        return parts.join('\n\n');
-    }
-    
-    // 3. Запасной вариант: разбиваем по пробелам, но не посередине слова
-    const chunks = [];
-    let currentChunk = '';
-    const wordsArray = text.split(' ');
-    const targetChars = 350;
-    
-    for (const word of wordsArray) {
-        if (currentChunk.length + word.length + 1 > targetChars && currentChunk.length > 50) {
-            chunks.push(currentChunk.trim());
-            currentChunk = word + ' ';
-        } else {
-            currentChunk += word + ' ';
-        }
-    }
-    if (currentChunk) {
-        chunks.push(currentChunk.trim());
-    }
-    
-    // Если получился один абзац, но текст длинный — делим пополам по пробелу
-    if (chunks.length === 1 && text.length > 500) {
-        const mid = Math.floor(text.length / 2);
-        let splitPos = mid;
-        while (splitPos > 0 && text[splitPos] !== ' ') {
-            splitPos--;
-        }
-        if (splitPos > 0) {
-            return text.slice(0, splitPos).trim() + '\n\n' + text.slice(splitPos).trim();
-        }
-    }
-    
-    return chunks.join('\n\n');
-}
-
     // === ШАГИ ===
     const stepDots = {
         step1: document.getElementById('step1'),
@@ -704,26 +146,18 @@ function splitByNaturalBreaks(text) {
     };
 
     function resetSteps() {
-        Object.values(stepDots).forEach(s => {
-            s.className = 'step-dot';
-        });
+        Object.values(stepDots).forEach(s => { s.className = 'step-dot'; });
     }
 
     function setStep(step, label) {
         resetSteps();
         const names = ['step1', 'step2', 'step3', 'step4'];
         for (let i = 0; i < names.length; i++) {
-            if (i < step) {
-                stepDots[names[i]].className = 'step-dot done';
-            } else if (i === step) {
-                stepDots[names[i]].className = 'step-dot active';
-            } else {
-                stepDots[names[i]].className = 'step-dot';
-            }
+            if (i < step) stepDots[names[i]].className = 'step-dot done';
+            else if (i === step) stepDots[names[i]].className = 'step-dot active';
+            else stepDots[names[i]].className = 'step-dot';
         }
-        if (label) {
-            statusText.textContent = '⏳ ' + label;
-        }
+        if (label) statusText.textContent = '⏳ ' + label;
     }
 
     // Подсчёт символов
@@ -732,14 +166,10 @@ function splitByNaturalBreaks(text) {
     });
 
     // Загрузка файла
-    loadBtn.addEventListener('click', function() {
-        fileInput.click();
-    });
-
+    loadBtn.addEventListener('click', function() { fileInput.click(); });
     fileInput.addEventListener('change', function(e) {
         const file = e.target.files[0];
         if (!file) return;
-
         const reader = new FileReader();
         reader.onload = function(ev) {
             sourceText.value = ev.target.result;
@@ -813,9 +243,8 @@ function splitByNaturalBreaks(text) {
             return handleStream(response);
         })
         .then(data => {
-            // ВСЕГДА обрабатываем текст через smartSplitIntoParagraphs
-            let formattedText = smartSplitIntoParagraphs(data.revised_text);
-
+            // ====== ИЗМЕНЕНИЕ: используем текст с сервера без дополнительной обработки ======
+            const formattedText = data.revised_text || ''; // если вдруг нет поля — пустая строка
             setStep(3, 'Готово!');
             resultText.value = formattedText;
             resultCount.textContent = formattedText.length + ' симв.';
@@ -853,7 +282,6 @@ function splitByNaturalBreaks(text) {
                         if (!resolved) reject(new Error('Соединение закрыто'));
                         return;
                     }
-
                     buffer += decoder.decode(value, { stream: true });
                     const lines = buffer.split('\n');
                     buffer = lines.pop() || '';
@@ -862,17 +290,14 @@ function splitByNaturalBreaks(text) {
                         if (!line.startsWith('data: ')) continue;
                         const payload = line.slice(6).trim();
                         if (!payload) continue;
-
                         try {
                             const event = JSON.parse(payload);
                             handleEvent(event, resolve, reject, () => { resolved = true; });
-                        } catch (e) {}
+                        } catch (e) { /* игнорируем ошибки парсинга */ }
                     }
-
                     read();
                 }).catch(reject);
             }
-
             read();
         });
     }
@@ -886,18 +311,15 @@ function splitByNaturalBreaks(text) {
                 statusText.textContent = '⏳ ' + (event.log || 'Генерация... ' + Math.round(pct) + '%');
                 setStep(1, (event.log || 'Генерация... ' + Math.round(pct) + '%'));
                 break;
-
             case 'done':
                 markResolved();
                 setStep(2, 'Пост-обработка...');
                 resolve(event);
                 break;
-
             case 'error':
                 markResolved();
                 reject(new Error(event.detail || 'Ошибка обработки'));
                 break;
-
             default:
                 break;
         }
@@ -907,11 +329,9 @@ function splitByNaturalBreaks(text) {
         checklistItems.innerHTML = '';
         let passedCount = 0;
         const total = checklist.length;
-
         checklist.forEach(item => {
             const div = document.createElement('div');
             div.className = 'checklist-item';
-
             const icon = document.createElement('span');
             icon.className = 'icon';
             if (item.passed === true) {
@@ -925,10 +345,8 @@ function splitByNaturalBreaks(text) {
                 icon.textContent = '⏳';
                 icon.classList.add('unknown');
             }
-
             const label = document.createElement('span');
             label.textContent = item.label;
-
             if (item.note) {
                 const note = document.createElement('span');
                 note.style.cssText = 'color: #6b7f94; font-size: 12px; margin-left: 8px;';
@@ -940,10 +358,8 @@ function splitByNaturalBreaks(text) {
                 div.appendChild(icon);
                 div.appendChild(label);
             }
-
             checklistItems.appendChild(div);
         });
-
         const header = document.createElement('div');
         header.style.cssText = 'font-weight: 500; margin-bottom: 8px; color: #2c3e50; font-size: 13px;';
         header.textContent = `📋 Чек-лист: ${passedCount}/${total} пунктов выполнено`;
@@ -961,8 +377,8 @@ function splitByNaturalBreaks(text) {
             statusText.className = 'status-text success';
         })
         .catch(() => {
-            document.getElementById('versionBadge').textContent = 'v3.5.4';
-            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.5.4 — обработка через цепочку переводов';
+            document.getElementById('versionBadge').textContent = 'v3.6.0';
+            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.6.0 — обработка через цепочку переводов';
             statusText.textContent = '⚠️ Не удалось подключиться к серверу';
             statusText.className = 'status-text error';
         });
