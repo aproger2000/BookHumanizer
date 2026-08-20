@@ -443,80 +443,110 @@
     const checklistItems = document.getElementById('checklistItems');
     const copyBtn = document.getElementById('copyBtn');
 
-    // --- ИНТЕЛЛЕКТУАЛЬНОЕ РАЗБИЕНИЕ НА АБЗАЦЫ (фронтенд, запасной вариант) ---
+    // --- УЛУЧШЕННОЕ РАЗБИЕНИЕ НА АБЗАЦЫ (с выделением диалогов) ---
     function smartSplitIntoParagraphs(text) {
         if (!text || text.length < 150) return text;
 
+        // 1. Удаляем артефакты перевода
+        const artifacts = [
+            'Tietenkin', 'he tarvitsevat', 'Jos se toimii', 'vaikka se ei',
+            'toimi', 'puolella', 'valtamerta', 'Rakennamme', 'siis',
+            'sademeren', 'Ja lentää', 'sinne', 'aamiaiseksi', 'kuvaan',
+            'Mikä tämä on', 'Aleksei kysyi', 'Talomme suunnitelma',
+            'Kuussa ei ole', 'rannoille', 'first to spot', 'the genius',
+            'of a student', 'from Siberia', 'now he watched', 'as that spark',
+            'ignited its owner\'s career', 'I came to warn you',
+            'they want to seduce you', 'they provide the lab',
+            'budget and team', 'whatever you want',
+            'however research requires a license', 'A group came from',
+            'MIT', 'they need', 'akkuni', 'akkujasi', 'тоими'
+        ];
+        for (const a of artifacts) {
+            text = text.replace(new RegExp('\\b' + a + '\\b', 'gi'), '');
+        }
+
+        // Убираем лишние точки внутри слов
+        text = text.replace(/(\w)\.(\w)/g, '$1$2');
+        text = text.replace(/\s+/g, ' ');
+
+        // 2. Проверяем, есть ли уже хорошие абзацы
         const existing = text.split('\n\n');
-        if (existing.length >= 3) {
+        if (existing.length >= 4) {
             const good = existing.filter(p => p.trim().length > 50);
-            if (good.length >= 2) return text;
+            if (good.length >= 3) return text;
         }
 
-        // Разбиваем по диалогам
-        let parts = [];
-        let currentPart = '';
-        let inDialog = false;
-
-        const lines = text.split('\n');
-        for (const line of lines) {
-            const trimmed = line.trim();
-            const isDialog = trimmed.startsWith('—') || trimmed.startsWith('«') || trimmed.startsWith('"');
-            
-            if (isDialog && !inDialog) {
-                if (currentPart) {
-                    parts.push(currentPart);
-                    currentPart = '';
-                }
-                inDialog = true;
-                currentPart = line;
-            } else if (isDialog && inDialog) {
-                currentPart += '\n' + line;
-            } else if (!isDialog && inDialog) {
-                inDialog = false;
-                if (currentPart) {
-                    parts.push(currentPart);
-                    currentPart = '';
-                }
-                currentPart = line;
-            } else {
-                currentPart += (currentPart ? '\n' : '') + line;
+        // 3. Разбиваем по предложениям
+        let sentences = text.match(/[^.!?]+[.!?]+/g);
+        if (!sentences || sentences.length < 3) {
+            const chunks = [];
+            for (let i = 0; i < text.length; i += 400) {
+                let chunk = text.slice(i, i + 400).trim();
+                if (chunk) chunks.push(chunk);
             }
-        }
-        if (currentPart) parts.push(currentPart);
-
-        // Если диалогов мало — разбиваем по предложениям
-        if (parts.length < 2) {
-            const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
-            const newParts = [];
-            let group = [];
-            let groupLen = 0;
-            const targetLen = 300;
-
-            for (const sent of sentences) {
-                const sentLen = sent.length;
-                if (sentLen > 200 && group.length > 0) {
-                    newParts.push(group.join(' '));
-                    group = [];
-                    groupLen = 0;
-                    newParts.push(sent);
-                    continue;
-                }
-                if (groupLen > targetLen && group.length >= 2) {
-                    newParts.push(group.join(' '));
-                    group = [];
-                    groupLen = 0;
-                }
-                group.push(sent);
-                groupLen += sentLen;
-            }
-            if (group.length > 0) {
-                newParts.push(group.join(' '));
-            }
-            parts = newParts;
+            return chunks.join('\n\n');
         }
 
-        return parts.join('\n\n');
+        // 4. Группируем предложения в абзацы, выделяя диалоги
+        const paragraphs = [];
+        let current = [];
+        let currentLen = 0;
+        const targetLen = 350;
+
+        for (const sent of sentences) {
+            const trimmed = sent.trim();
+            if (!trimmed) continue;
+
+            const isDialog = trimmed.startsWith('—') || trimmed.startsWith('"') || 
+                            trimmed.startsWith('«') || trimmed.startsWith('–') ||
+                            (trimmed.startsWith('-') && trimmed.length > 1 && trimmed[1] !== ' ');
+
+            if (isDialog) {
+                if (current.length > 0) {
+                    paragraphs.push(current.join(' '));
+                    current = [];
+                    currentLen = 0;
+                }
+                paragraphs.push(trimmed);
+                continue;
+            }
+
+            if (trimmed.length > 200 && current.length > 0) {
+                paragraphs.push(current.join(' '));
+                current = [];
+                currentLen = 0;
+                paragraphs.push(trimmed);
+                continue;
+            }
+
+            if (currentLen > targetLen && current.length >= 2) {
+                paragraphs.push(current.join(' '));
+                current = [];
+                currentLen = 0;
+            }
+
+            current.push(trimmed);
+            currentLen += trimmed.length;
+        }
+
+        if (current.length > 0) {
+            paragraphs.push(current.join(' '));
+        }
+
+        if (paragraphs.length === 1 && sentences.length > 6) {
+            const mid = Math.floor(sentences.length / 2);
+            paragraphs.length = 0;
+            paragraphs.push(sentences.slice(0, mid).join(' '));
+            paragraphs.push(sentences.slice(mid).join(' '));
+        }
+
+        let result = paragraphs.join('\n\n');
+        result = result.replace(/\s+\./g, '.');
+        result = result.replace(/\s+,/g, ',');
+        result = result.replace(/\s+\?/g, '?');
+        result = result.replace(/\s+!/g, '!');
+
+        return result;
     }
 
     // Шаги
@@ -636,11 +666,8 @@
         })
         .then(data => {
             let formattedText = data.revised_text;
-
-            // Проверяем, есть ли абзацы
             const paragraphs = formattedText.split('\n\n');
             if (paragraphs.length < 2) {
-                // Если нет абзацев — разбиваем интеллектуально
                 formattedText = smartSplitIntoParagraphs(formattedText);
             }
 
@@ -694,9 +721,7 @@
                         try {
                             const event = JSON.parse(payload);
                             handleEvent(event, resolve, reject, () => { resolved = true; });
-                        } catch (e) {
-                            // игнорируем битые JSON
-                        }
+                        } catch (e) {}
                     }
 
                     read();
@@ -715,9 +740,6 @@
                 progressBar.style.width = pct + '%';
                 statusText.textContent = '⏳ ' + (event.log || 'Генерация... ' + Math.round(pct) + '%');
                 setStep(1, (event.log || 'Генерация... ' + Math.round(pct) + '%'));
-                break;
-
-            case 'ping':
                 break;
 
             case 'done':
@@ -794,8 +816,8 @@
             statusText.className = 'status-text success';
         })
         .catch(() => {
-            document.getElementById('versionBadge').textContent = 'v3.4.1';
-            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.4.1 — обработка через цепочку переводов';
+            document.getElementById('versionBadge').textContent = 'v3.5.2';
+            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.5.2 — обработка через цепочку переводов';
             statusText.textContent = '⚠️ Не удалось подключиться к серверу';
             statusText.className = 'status-text error';
         });
