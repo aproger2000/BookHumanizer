@@ -215,31 +215,29 @@ def clean_translation_artifacts(text: str) -> str:
 
 def diversify_dialog_tags(text: str) -> str:
     """Заменяет диалоговые теги на синонимы."""
-    replacements = {
-        r'(—[^—]+?—\s*)сказал(\s+[а-яА-Я]+[.,!?]?)': [
-            ('\\1произнёс\\2', '\\1бросил\\2', '\\1выдохнул\\2', '\\1усмехнулся\\2', '\\1пробормотал\\2')
-        ],
-        r'(—[^—]+?—\s*)сказала(\s+[а-яА-Я]+[.,!?]?)': [
-            ('\\1произнесла\\2', '\\1бросила\\2', '\\1выдохнула\\2', '\\1усмехнулась\\2', '\\1пробормотала\\2')
-        ]
+    synonyms = {
+        'сказал': ['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал'],
+        'сказала': ['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала']
     }
 
-    for pattern, variants in replacements.items():
-        matches = list(re.finditer(pattern, text, re.DOTALL))
-        if not matches:
-            continue
-        for match in reversed(matches):
-            start, end = match.span()
-            before = match.group(1)
-            verb = match.group(2)
-            after = match.group(3)
-            synonyms = {
-                'сказал': ['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал'],
-                'сказала': ['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала']
-            }
-            if verb in synonyms:
-                new_verb = random.choice(synonyms[verb])
-                text = text[:start] + before + new_verb + after + text[end:]
+    # Ищем диалоги вида: "— текст, — сказал он." и заменяем глагол
+    pattern = r'(—[^—]+?—\s*)(сказал|сказала)(\s+[а-яА-Я]+[.,!?]?)'
+    matches = list(re.finditer(pattern, text, re.DOTALL))
+    if not matches:
+        return text
+
+    replacements = []
+    for match in matches:
+        before = match.group(1)
+        verb = match.group(2)
+        after = match.group(3)
+        if verb in synonyms:
+            new_verb = random.choice(synonyms[verb])
+            replacements.append((match.start(), match.end(), before + new_verb + after))
+
+    for start, end, repl in reversed(replacements):
+        text = text[:start] + repl + text[end:]
+
     return text
 
 
