@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.7.2 — полная цепочка (RU→JA→FI→EN→RU) с увеличенным чанком и восстановлением длины
+Chapter Editor v3.6.1 — упрощённая цепочка (RU→EN→RU) + лёгкая синонимизация и редкие вставки
 """
 import io
 import json
@@ -20,10 +20,10 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.7.2"
+APP_VERSION = "3.6.1"
 
 MAX_CHARS = 30_000
-CHUNK_SIZE = 5000  # увеличено с 3000 до 5000
+CHUNK_SIZE = 3000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
@@ -89,18 +89,16 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
     return text
 
 
-def process_chunk_full_chain(text: str) -> str:
-    """Полная цепочка: RU → JA → FI → EN → RU."""
+def process_chunk_through_chain(text: str) -> str:
+    """Упрощённая цепочка: RU → EN → RU."""
     if not text or len(text.strip()) < 2:
         return text
     try:
-        ja = translate_with_fallback(text, target_lang="ja")
-        fi = translate_with_fallback(ja, target_lang="fi")
-        en = translate_with_fallback(fi, target_lang="en")
+        en = translate_with_fallback(text, target_lang="en")
         ru = translate_with_fallback(en, target_lang="ru")
         return ru
     except Exception as e:
-        logger.error(f"Full chain chunk error: {e}")
+        logger.error(f"Chunk processing error: {e}")
         return text
 
 
@@ -139,13 +137,13 @@ def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> list:
 
 
 def apply_translation_chain_full(text: str) -> str:
-    logger.info(f"Starting full translation chain (RU→JA→FI→EN→RU) with chunk size {CHUNK_SIZE}...")
+    logger.info(f"Starting translation chain for {len(text)} chars...")
     chunks = split_text_into_chunks(text)
     logger.info(f"Split into {len(chunks)} chunks")
     processed_chunks = []
     for i, chunk in enumerate(chunks):
         logger.info(f"Processing chunk {i+1}/{len(chunks)}...")
-        processed = process_chunk_full_chain(chunk)
+        processed = process_chunk_through_chain(chunk)
         processed_chunks.append(processed)
 
     if '\n\n' in text:
@@ -157,7 +155,7 @@ def apply_translation_chain_full(text: str) -> str:
 
 
 def clean_translation_artifacts(text: str) -> str:
-    """Очистка артефактов (расширенная)."""
+    """Удаление финских, английских вставок и восстановление пунктуации."""
     finnish_patterns = [
         r'\bTietenkin\b', r'\bhe tarvitsevat\b', r'\bJos se toimii\b',
         r'\bvaikka se ei\b', r'\btoimi\b', r'\bpuolella\b',
@@ -205,45 +203,52 @@ def clean_translation_artifacts(text: str) -> str:
     return text.strip()
 
 
-def restore_length(text: str, original_len: int) -> str:
-    """
-    Восстанавливает длину текста, добавляя синонимы и вводные слова в безопасных местах,
-    чтобы компенсировать потерю длины после перевода.
-    """
-    current_len = len(text)
-    if current_len >= original_len * 0.92:
-        return text  # потеря менее 8% — не восстанавливаем
+# === НОВЫЕ ФУНКЦИИ ДЛЯ ЛЁГКОГО УЛУЧШЕНИЯ ===
 
-    logger.info(f"Restoring length: {current_len} -> target {original_len} (loss {original_len-current_len})")
-    # Простой метод: разбить на предложения и добавить в некоторые из них вводные слова
+def apply_light_synonymization(text: str) -> str:
+    """Заменяет некоторые слова на синонимы, но очень аккуратно (20% вероятности)."""
+    synonyms = {
+        r'\bсказал\b': ['произнёс', 'бросил', 'выдохнул', 'усмехнулся'],
+        r'\bсказала\b': ['произнесла', 'бросила', 'выдохнула', 'усмехнулась'],
+        r'\bспросил\b': ['поинтересовался', 'осведомился'],
+        r'\bспросила\b': ['поинтересовалась', 'осведомилась'],
+        r'\bответил\b': ['откликнулся', 'парировал'],
+        r'\bответила\b': ['откликнулась', 'парировала'],
+        r'\bочень\b': ['весьма', 'крайне'],
+        r'\bхорошо\b': ['превосходно', 'отлично'],
+        r'\bбыстро\b': ['стремительно', 'мгновенно'],
+        r'\bмедленно\b': ['неспешно', 'неторопливо'],
+    }
+    words = text.split(' ')
+    new_words = []
+    for word in words:
+        clean = re.sub(r'[^a-zA-Zа-яА-Я]', '', word)
+        if clean.lower() in synonyms and random.random() < 0.2:  # только 20% замен
+            syn = random.choice(synonyms[clean.lower()])
+            if clean[0].isupper():
+                syn = syn.capitalize()
+            suffix = word[len(clean):]
+            new_words.append(syn + suffix)
+        else:
+            new_words.append(word)
+    return ' '.join(new_words)
+
+
+def apply_rare_insertions(text: str) -> str:
+    """Добавляет вводные слова в редкие предложения (5%), только в длинные (>30 слов)."""
     sentences = re.split(r'(?<=[.!?])\s+', text)
+    insertions = ['впрочем', 'кстати', 'разумеется', 'пожалуй']
     new_sentences = []
-    insertions = ['впрочем', 'впрочем', 'кстати', 'пожалуй', 'кажется', 'разумеется', 'несомненно']
     for sent in sentences:
-        if len(sent) > 30 and random.random() < 0.15:  # 15% предложений
-            # Вставляем вводное слово после первого слова
+        if len(sent.split()) > 30 and random.random() < 0.05:  # только 5% длинных предложений
             words = sent.split()
-            if len(words) > 2:
+            if len(words) > 3:
+                pos = random.randint(1, len(words)-2)
                 ins = random.choice(insertions)
-                words.insert(1, ins + ',')
+                words.insert(pos, ins + ',')
                 sent = ' '.join(words)
         new_sentences.append(sent)
-    restored = '. '.join(new_sentences)
-
-    # Если всё ещё мало, добавляем ещё синонимы (заменяем некоторые слова на более длинные)
-    if len(restored) < original_len * 0.9:
-        # Заменяем "но" на "однако", "и" на "а также" и т.п. (редко)
-        replacements = {
-            r'\bно\b': 'однако',
-            r'\bи\b': 'а также',
-            r'\bочень\b': 'весьма',
-            r'\bхорошо\b': 'превосходно',
-        }
-        for pattern, repl in replacements.items():
-            if random.random() < 0.3:
-                restored = re.sub(pattern, repl, restored, flags=re.IGNORECASE)
-
-    return restored
+    return '. '.join(new_sentences)
 
 
 def split_into_paragraphs_by_logic(text: str) -> str:
@@ -315,8 +320,8 @@ def api_revise():
             try:
                 yield _sse("progress", {"chars": 0, "estimated_total": original_len, "percent": 0, "log": "Начинаем обработку..."})
 
-                # 1. Полная цепочка переводов
-                logger.info("Step 1: Full translation chain (RU→JA→FI→EN→RU)...")
+                # 1. Упрощённая цепочка переводов
+                logger.info("Step 1: Translation chain (RU→EN→RU)...")
                 processed_text = apply_translation_chain_full(chapter_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 40, "log": "Переводы завершены"})
 
@@ -325,19 +330,24 @@ def api_revise():
                 processed_text = clean_translation_artifacts(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 60, "log": "Артефакты удалены"})
 
-                # 3. Восстановление длины (если нужно)
-                logger.info("Step 3: Restoring length if needed...")
-                processed_text = restore_length(processed_text, original_len)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 75, "log": "Длина восстановлена"})
+                # 3. Лёгкая синонимизация (только 20% слов)
+                logger.info("Step 3: Light synonymization...")
+                processed_text = apply_light_synonymization(processed_text)
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 70, "log": "Синонимизация выполнена"})
 
-                # 4. Разбиение на абзацы
-                logger.info("Step 4: Paragraph splitting...")
+                # 4. Редкие вставки (только в 5% длинных предложений)
+                logger.info("Step 4: Rare insertions...")
+                processed_text = apply_rare_insertions(processed_text)
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 80, "log": "Вставки добавлены"})
+
+                # 5. Принудительное разбиение на абзацы
+                logger.info("Step 5: Forced paragraph splitting...")
                 processed_text = split_into_paragraphs_by_logic(processed_text)
                 para_count = len(processed_text.split('\n\n'))
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 90, "log": f"Абзацев: {para_count}"})
 
-                # 5. Финальная полировка
-                logger.info("Step 5: Final polish...")
+                # 6. Финальная полировка
+                logger.info("Step 6: Final polish...")
                 processed_text = apply_light_polish(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 100, "log": "Готово!"})
 
@@ -349,10 +359,11 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": f"Текст переработан через полную цепочку (RU→JA→FI→EN→RU) с восстановлением длины. Потеря: {loss:.1%}. Абзацев: {final_para_count}",
+                    "summary": f"Текст переработан через упрощённую цепочку (RU→EN→RU) с лёгкой синонимизацией. Потеря: {loss:.1%}. Абзацев: {final_para_count}",
                     "changes": [
-                        "Переведён через полную цепочку (RU→JA→FI→EN→RU)",
-                        "Восстановлена длина текста",
+                        "Переведён через Google Translate / MyMemory (RU→EN→RU)",
+                        "Лёгкая синонимизация (20% слов)",
+                        "Редкие вставки (5% длинных предложений)",
                         f"Разделён на {final_para_count} абзацев",
                         "Удалены артефакты перевода"
                     ],
