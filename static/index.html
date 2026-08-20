@@ -6,7 +6,6 @@
     <title>Chapter Editor</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
     <style>
-        /* (полный блок стилей — такой же, как в предыдущей версии, оставляем без изменений) */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { background: #f0f4fa; color: #1a2634; font-family: 'Inter', sans-serif; min-height: 100vh; display: flex; flex-direction: column; padding: 24px; }
         .container { max-width: 1400px; margin: 0 auto; width: 100%; flex: 1; display: flex; flex-direction: column; }
@@ -65,7 +64,6 @@
         <span class="version-badge" id="versionBadge">v...</span>
     </header>
     <div class="main-grid">
-        <!-- Левая панель -->
         <div class="panel">
             <div class="panel-header">
                 <h2>📄 Исходный текст</h2>
@@ -97,7 +95,6 @@
             <div class="status-text" id="statusText">Готов к работе</div>
             <input type="file" id="fileInput" accept=".txt,.md,.docx" style="display:none">
         </div>
-        <!-- Правая панель -->
         <div class="panel result-panel">
             <div class="panel-header">
                 <h2>✨ Отредактированный текст</h2>
@@ -122,7 +119,6 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // === ЭЛЕМЕНТЫ ===
     const sourceText = document.getElementById('sourceText');
     const resultText = document.getElementById('resultText');
     const editBtn = document.getElementById('editBtn');
@@ -138,86 +134,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const checklistItems = document.getElementById('checklistItems');
     const copyBtn = document.getElementById('copyBtn');
 
-    // === УМНОЕ РАЗБИЕНИЕ НА АБЗАЦЫ ===
-    function splitIntoParagraphs(text) {
-        if (!text) return text;
-        if (text.length < 200) return text;
-
-        // 1. Пытаемся разбить на предложения по .!?
-        let sentences = text.match(/[^.!?]+[.!?]+/g);
-        if (!sentences || sentences.length < 2) {
-            // Если не получилось, используем разбиение по длине (слова не режем)
-            return splitByLength(text);
-        }
-
-        // 2. Группируем предложения в абзацы, учитывая диалоги
-        const paragraphs = [];
-        let current = [];
-        let currentLen = 0;
-        const targetLen = 400;
-
-        for (let sent of sentences) {
-            sent = sent.trim();
-            if (!sent) continue;
-
-            // Диалог — отдельный абзац
-            const isDialog = /^[—"«–]/.test(sent);
-            if (isDialog) {
-                if (current.length > 0) {
-                    paragraphs.push(current.join(' '));
-                    current = [];
-                    currentLen = 0;
-                }
-                paragraphs.push(sent);
-                continue;
-            }
-
-            // Обычное предложение
-            if (currentLen + sent.length > targetLen && current.length >= 2) {
-                paragraphs.push(current.join(' '));
-                current = [];
-                currentLen = 0;
-            }
-            current.push(sent);
-            currentLen += sent.length;
-        }
-
-        if (current.length > 0) {
-            paragraphs.push(current.join(' '));
-        }
-
-        // Если получился один абзац, а текст длинный — принудительно режем
-        if (paragraphs.length === 1 && text.length > 600) {
-            return splitByLength(text);
-        }
-
-        return paragraphs.join('\n\n');
-    }
-
-    // Запасное разбиение по длине (слова не разрываются)
-    function splitByLength(text) {
-        const chunkSize = 400;
-        const words = text.split(' ');
-        const chunks = [];
-        let current = [];
-        let currentLen = 0;
-
-        for (const word of words) {
-            if (currentLen + word.length + 1 > chunkSize && current.length > 0) {
-                chunks.push(current.join(' '));
-                current = [];
-                currentLen = 0;
-            }
-            current.push(word);
-            currentLen += word.length + 1;
-        }
-        if (current.length > 0) {
-            chunks.push(current.join(' '));
-        }
-        return chunks.join('\n\n');
-    }
-
-    // === ШАГИ (без изменений) ===
     const stepDots = {
         step1: document.getElementById('step1'),
         step2: document.getElementById('step2'),
@@ -240,7 +156,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (label) statusText.textContent = '⏳ ' + label;
     }
 
-    // Обработчики событий (без изменений)
     sourceText.addEventListener('input', function() {
         sourceCount.textContent = this.value.length + ' симв.';
     });
@@ -280,7 +195,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    // Редактирование
     editBtn.addEventListener('click', function() {
         const text = sourceText.value.trim();
         if (!text) {
@@ -321,14 +235,11 @@ document.addEventListener('DOMContentLoaded', function() {
             return handleStream(response);
         })
         .then(data => {
-            const rawText = data.revised_text || '';
-            const formattedText = splitIntoParagraphs(rawText);
             setStep(3, 'Готово!');
-            resultText.value = formattedText;
-            resultCount.textContent = formattedText.length + ' симв.';
+            resultText.value = data.revised_text || '';
+            resultCount.textContent = resultText.value.length + ' симв.';
             statusText.textContent = '✅ Готово! ' + (data.summary || '');
             statusText.className = 'status-text success';
-
             if (data.checklist && data.checklist.length) {
                 renderChecklist(data.checklist);
                 checklistDiv.classList.add('visible');
@@ -347,7 +258,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    // Обработка потока (без изменений)
     function handleStream(response) {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -372,7 +282,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         try {
                             const event = JSON.parse(payload);
                             handleEvent(event, resolve, reject, () => { resolved = true; });
-                        } catch (e) { /* игнорируем */ }
+                        } catch (e) { /* игнорируем ошибки парсинга */ }
                     }
                     read();
                 }).catch(reject);
@@ -445,19 +355,19 @@ document.addEventListener('DOMContentLoaded', function() {
         checklistItems.prepend(header);
     }
 
-    // Загрузка версии с сервера
     fetch('/api/health')
         .then(res => res.json())
         .then(data => {
             const version = 'v' + data.version;
-            document.getElementById('versionBadge').textContent = version;
-            document.getElementById('footerVersion').textContent = 'Chapter Editor ' + version + ' — обработка через цепочку переводов';
-            statusText.textContent = '✅ Сервер версии ' + data.version + ' готов';
+            const chain = (data.chain || 'en').toUpperCase();
+            document.getElementById('versionBadge').textContent = version + ' (' + chain + ')';
+            document.getElementById('footerVersion').textContent = 'Chapter Editor ' + version + ' — цепочка: RU→' + chain + '→RU';
+            statusText.textContent = '✅ Сервер версии ' + data.version + ' готов, цепочка: RU→' + chain + '→RU';
             statusText.className = 'status-text success';
         })
         .catch(() => {
-            document.getElementById('versionBadge').textContent = 'v3.6.2';
-            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.6.2 — обработка через цепочку переводов';
+            document.getElementById('versionBadge').textContent = 'v3.6.4 (EN)';
+            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.6.4 — цепочка: RU→EN→RU';
             statusText.textContent = '⚠️ Не удалось подключиться к серверу';
             statusText.className = 'status-text error';
         });
