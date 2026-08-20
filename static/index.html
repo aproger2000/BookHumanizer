@@ -444,158 +444,158 @@
     const copyBtn = document.getElementById('copyBtn');
 
     // --- УЛУЧШЕННОЕ РАЗБИЕНИЕ НА АБЗАЦЫ (с выделением диалогов) ---
-function smartSplitIntoParagraphs(text) {
-    if (!text || text.length < 150) return text;
+    function smartSplitIntoParagraphs(text) {
+        if (!text || text.length < 150) return text;
 
-    // === 1. УДАЛЕНИЕ АРТЕФАКТОВ ===
-    const artifacts = [
-        'Tietenkin', 'he tarvitsevat', 'Jos se toimii', 'vaikka se ei',
-        'toimi', 'puolella', 'valtamerta', 'Rakennamme', 'siis',
-        'sademeren', 'Ja lentää', 'sinne', 'aamiaiseksi', 'kuvaan',
-        'Mikä tämä on', 'Aleksei kysyi', 'Talomme suunnitelma',
-        'Kuussa ei ole', 'rannoille', 'akkuni', 'akkujasi', 'тоими',
-        'first to spot', 'the genius', 'of a student', 'from Siberia',
-        'now he watched', 'as that spark', 'ignited its owner\'s career',
-        'I came to warn you', 'they want to seduce you', 'they provide the lab',
-        'budget and team', 'whatever you want', 'however research requires a license',
-        'A group came from', 'MIT', 'they need', 'said more quietly',
-        'budget', 'team', 'research', 'license', 'requires', 'came from'
-    ];
-    
-    for (const a of artifacts) {
-        const regex = new RegExp('\\b' + a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
-        text = text.replace(regex, '');
-    }
-
-    text = text.replace(/(\w)\.(\w)/g, '$1$2');
-    text = text.replace(/\s+\./g, '.');
-    text = text.replace(/\s+,/g, ',');
-    text = text.replace(/\s+\?/g, '?');
-    text = text.replace(/\s+!/g, '!');
-    text = text.replace(/\.{4,}/g, '...');
-    text = text.replace(/""/g, '"');
-    text = text.replace(/""/g, '"');
-    text = text.replace(/\s{2,}/g, ' ');
-
-    // === 2. ВОССТАНОВЛЕНИЕ ФРАЗ ===
-    const fixes = [
-        [/—\s*знать/gi, '— Я знаю'],
-        [/—\s*Знать/gi, '— Я знаю'],
-        [/не испортил/gi, 'не шутил'],
-        [/\bТоки\b/gi, '«Ибис»'],
-        [/черного вина/gi, 'черного кофе'],
-        [/\bБосимом\b/gi, 'Босиком'],
-    ];
-    
-    for (const [pattern, replacement] of fixes) {
-        text = text.replace(pattern, replacement);
-    }
-
-    // === 3. РАЗБИЕНИЕ НА АБЗАЦЫ (ВСЕГДА) ===
-    
-    // Сначала разбиваем по диалогам
-    const lines = text.split('\n');
-    let resultParts = [];
-    let currentPart = '';
-    let inDialog = false;
-    
-    for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
+        // === 1. УДАЛЕНИЕ АРТЕФАКТОВ ===
+        const artifacts = [
+            'Tietenkin', 'he tarvitsevat', 'Jos se toimii', 'vaikka se ei',
+            'toimi', 'puolella', 'valtamerta', 'Rakennamme', 'siis',
+            'sademeren', 'Ja lentää', 'sinne', 'aamiaiseksi', 'kuvaan',
+            'Mikä tämä on', 'Aleksei kysyi', 'Talomme suunnitelma',
+            'Kuussa ei ole', 'rannoille', 'akkuni', 'akkujasi', 'тоими',
+            'first to spot', 'the genius', 'of a student', 'from Siberia',
+            'now he watched', 'as that spark', 'ignited its owner\'s career',
+            'I came to warn you', 'they want to seduce you', 'they provide the lab',
+            'budget and team', 'whatever you want', 'however research requires a license',
+            'A group came from', 'MIT', 'they need', 'said more quietly',
+            'budget', 'team', 'research', 'license', 'requires', 'came from'
+        ];
         
-        const isDialog = trimmed.startsWith('—') || trimmed.startsWith('"') || 
-                        trimmed.startsWith('«') || trimmed.startsWith('–') ||
-                        (trimmed.startsWith('-') && trimmed.length > 1 && trimmed[1] !== ' ');
+        for (const a of artifacts) {
+            const regex = new RegExp('\\b' + a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
+            text = text.replace(regex, '');
+        }
+
+        text = text.replace(/(\w)\.(\w)/g, '$1$2');
+        text = text.replace(/\s+\./g, '.');
+        text = text.replace(/\s+,/g, ',');
+        text = text.replace(/\s+\?/g, '?');
+        text = text.replace(/\s+!/g, '!');
+        text = text.replace(/\.{4,}/g, '...');
+        text = text.replace(/""/g, '"');
+        text = text.replace(/""/g, '"');
+        text = text.replace(/\s{2,}/g, ' ');
+
+        // === 2. ВОССТАНОВЛЕНИЕ ФРАЗ ===
+        const fixes = [
+            [/—\s*знать/gi, '— Я знаю'],
+            [/—\s*Знать/gi, '— Я знаю'],
+            [/не испортил/gi, 'не шутил'],
+            [/\bТоки\b/gi, '«Ибис»'],
+            [/черного вина/gi, 'черного кофе'],
+            [/\bБосимом\b/gi, 'Босиком'],
+        ];
         
-        if (isDialog) {
-            if (currentPart) {
-                resultParts.push(currentPart);
-                currentPart = '';
-            }
-            resultParts.push(trimmed);
-            inDialog = true;
-        } else {
-            if (inDialog) {
+        for (const [pattern, replacement] of fixes) {
+            text = text.replace(pattern, replacement);
+        }
+
+        // === 3. РАЗБИЕНИЕ НА АБЗАЦЫ (ВСЕГДА) ===
+        
+        // Сначала разбиваем по диалогам
+        const lines = text.split('\n');
+        let resultParts = [];
+        let currentPart = '';
+        let inDialog = false;
+        
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            
+            const isDialog = trimmed.startsWith('—') || trimmed.startsWith('"') || 
+                            trimmed.startsWith('«') || trimmed.startsWith('–') ||
+                            (trimmed.startsWith('-') && trimmed.length > 1 && trimmed[1] !== ' ');
+            
+            if (isDialog) {
                 if (currentPart) {
                     resultParts.push(currentPart);
                     currentPart = '';
                 }
-                inDialog = false;
+                resultParts.push(trimmed);
+                inDialog = true;
+            } else {
+                if (inDialog) {
+                    if (currentPart) {
+                        resultParts.push(currentPart);
+                        currentPart = '';
+                    }
+                    inDialog = false;
+                }
+                currentPart += (currentPart ? ' ' : '') + trimmed;
             }
-            currentPart += (currentPart ? ' ' : '') + trimmed;
         }
-    }
-    
-    if (currentPart) {
-        resultParts.push(currentPart);
-    }
-    
-    // Если диалогов мало или результат плохой — разбиваем по предложениям
-    if (resultParts.length < 2 || resultParts.join(' ').length > 500) {
-        // Разбиваем по предложениям
-        const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
-        const newParts = [];
-        let current = [];
-        let currentLen = 0;
-        const targetLen = 350;
         
-        for (const sent of sentences) {
-            const trimmed = sent.trim();
-            if (!trimmed) continue;
+        if (currentPart) {
+            resultParts.push(currentPart);
+        }
+        
+        // Если диалогов мало или результат плохой — разбиваем по предложениям
+        if (resultParts.length < 2 || resultParts.join(' ').length > 500) {
+            // Разбиваем по предложениям
+            const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+            const newParts = [];
+            let current = [];
+            let currentLen = 0;
+            const targetLen = 350;
             
-            const isDialog = trimmed.startsWith('—') || trimmed.startsWith('"') || 
-                            trimmed.startsWith('«') || trimmed.startsWith('–');
-            
-            if (isDialog) {
-                if (current.length > 0) {
+            for (const sent of sentences) {
+                const trimmed = sent.trim();
+                if (!trimmed) continue;
+                
+                const isDialog = trimmed.startsWith('—') || trimmed.startsWith('"') || 
+                                trimmed.startsWith('«') || trimmed.startsWith('–');
+                
+                if (isDialog) {
+                    if (current.length > 0) {
+                        newParts.push(current.join(' '));
+                        current = [];
+                        currentLen = 0;
+                    }
+                    newParts.push(trimmed);
+                    continue;
+                }
+                
+                if (currentLen > targetLen && current.length >= 2) {
                     newParts.push(current.join(' '));
                     current = [];
                     currentLen = 0;
                 }
-                newParts.push(trimmed);
-                continue;
+                
+                current.push(trimmed);
+                currentLen += trimmed.length;
             }
             
-            if (currentLen > targetLen && current.length >= 2) {
+            if (current.length > 0) {
                 newParts.push(current.join(' '));
-                current = [];
-                currentLen = 0;
             }
             
-            current.push(trimmed);
-            currentLen += trimmed.length;
+            if (newParts.length > resultParts.length) {
+                resultParts = newParts;
+            }
         }
         
-        if (current.length > 0) {
-            newParts.push(current.join(' '));
+        // Если всё ещё один абзац — разбиваем по символам
+        if (resultParts.length === 1 && text.length > 400) {
+            const chunks = [];
+            for (let i = 0; i < text.length; i += 400) {
+                let chunk = text.slice(i, i + 400).trim();
+                if (chunk) chunks.push(chunk);
+            }
+            resultParts = chunks;
         }
         
-        if (newParts.length > resultParts.length) {
-            resultParts = newParts;
-        }
+        // === 4. СБОРКА РЕЗУЛЬТАТА ===
+        let result = resultParts.join('\n\n');
+        
+        // Убираем лишние пробелы после тире в диалогах
+        result = result.replace(/—\s+/g, '— ');
+        result = result.replace(/\s+—/g, ' —');
+        result = result.replace(/\s{2,}/g, ' ');
+        result = result.replace(/\n{3,}/g, '\n\n');
+        
+        return result;
     }
-    
-    // Если всё ещё один абзац — разбиваем по символам
-    if (resultParts.length === 1 && text.length > 400) {
-        const chunks = [];
-        for (let i = 0; i < text.length; i += 400) {
-            let chunk = text.slice(i, i + 400).trim();
-            if (chunk) chunks.push(chunk);
-        }
-        resultParts = chunks;
-    }
-    
-    // === 4. СБОРКА РЕЗУЛЬТАТА ===
-    let result = resultParts.join('\n\n');
-    
-    // Убираем лишние пробелы после тире в диалогах
-    result = result.replace(/—\s+/g, '— ');
-    result = result.replace(/\s+—/g, ' —');
-    result = result.replace(/\s{2,}/g, ' ');
-    result = result.replace(/\n{3,}/g, '\n\n');
-    
-    return result;
-}
 
     // Шаги
     const stepDots = {
@@ -861,8 +861,8 @@ function smartSplitIntoParagraphs(text) {
             statusText.className = 'status-text success';
         })
         .catch(() => {
-            document.getElementById('versionBadge').textContent = 'v3.5.2';
-            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.5.2 — обработка через цепочку переводов';
+            document.getElementById('versionBadge').textContent = 'v3.5.3';
+            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.5.3 — обработка через цепочку переводов';
             statusText.textContent = '⚠️ Не удалось подключиться к серверу';
             statusText.className = 'status-text error';
         });
