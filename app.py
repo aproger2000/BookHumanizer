@@ -1,6 +1,5 @@
 """
-Chapter Editor v3.5.6 — Humanization via Translation Chain + fallback переводчики
-Использует Google Translate (с ретраями) и MyMemory как резерв.
+Chapter Editor v3.5.7 — Humanization via Translation Chain + fallback (POST) + принудительное разбиение
 """
 import io
 import json
@@ -21,7 +20,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.5.6"  # обновлено
+APP_VERSION = "3.5.7"
 
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
@@ -39,16 +38,12 @@ def _sse(event_type: str, data: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-# --- НОВЫЙ: перевод с fallback ---
 def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int = 2) -> str:
-    """
-    Пытается перевести через Google Translate (публичный API).
-    При ошибках (включая 500) переключается на MyMemory Translate.
-    """
+    """Перевод: сначала Google (GET), при ошибке — MyMemory (POST)."""
     if not text or len(text.strip()) < 2:
         return text
 
-    # Попытка через Google (публичный)
+    # --- Google Translate (публичный) ---
     url_google = "https://translate.googleapis.com/translate_a/single"
     params = {
         "client": "gtx",
@@ -57,7 +52,6 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
         "dt": "t",
         "q": text
     }
-
     for attempt in range(max_retries):
         try:
             resp = requests.get(url_google, params=params, timeout=15)
@@ -66,39 +60,42 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
                 translated = "".join(item[0] for item in data[0] if item[0])
                 if translated:
                     return translated
-            # Если не 200 — логируем и пробуем ещё раз
-            logger.warning(f"Google translate attempt {attempt+1} failed with status {resp.status_code}")
+            logger.warning(f"Google attempt {attempt+1} failed: {resp.status_code}")
             time.sleep(1 + random.random())
         except Exception as e:
-            logger.warning(f"Google translate exception: {e}")
+            logger.warning(f"Google exception: {e}")
             time.sleep(1 + random.random())
 
-    # Fallback: MyMemory Translate
-    logger.info(f"Falling back to MyMemory for translation to {target_lang}")
-    try:
-        url_mymemory = "https://api.mymemory.translated.net/get"
-        params = {
-            "q": text,
-            "langpair": f"auto|{target_lang}",
-            "de": "user@example.com"  # необязательный идентификатор
-        }
-        resp = requests.get(url_mymemory, params=params, timeout=20)
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("responseStatus") == 200:
-                translated = data.get("responseData", {}).get("translatedText")
-                if translated:
-                    return translated
-        logger.error(f"MyMemory failed: {resp.status_code} - {resp.text}")
-    except Exception as e:
-        logger.error(f"MyMemory exception: {e}")
+    # --- Fallback: MyMemory (POST) ---
+    logger.info(f"Falling back to MyMemory (POST) for {target_lang}")
+    url_mymemory = "https://api.mymemory.translated.net/get"
+    # Используем POST с телом, чтобы избежать 414
+    payload = {
+        "q": text,
+        "langpair": f"auto|{target_lang}",
+        "de": "user@example.com"
+    }
+    for attempt in range(2):  # две попытки
+        try:
+            resp = requests.post(url_mymemory, data=payload, timeout=20)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("responseStatus") == 200:
+                    translated = data.get("responseData", {}).get("translatedText")
+                    if translated:
+                        return translated
+            logger.warning(f"MyMemory attempt {attempt+1} failed: {resp.status_code}")
+            time.sleep(1 + random.random())
+        except Exception as e:
+            logger.warning(f"MyMemory exception: {e}")
+            time.sleep(1 + random.random())
 
-    # Если ничего не вышло — возвращаем исходный текст
+    # Если ничего не помогло — возвращаем исходный текст
     return text
 
 
-# Упрощённая цепочка: RU → EN → RU (только 2 шага)
 def process_chunk_through_chain(text: str) -> str:
+    """Упрощённая цепочка: RU → EN → RU."""
     if not text or len(text.strip()) < 2:
         return text
 
@@ -112,7 +109,7 @@ def process_chunk_through_chain(text: str) -> str:
 
 
 def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> list:
-    """Разбивает текст на части, сохраняя абзацы (без изменений)."""
+    """Разбивает текст на части, сохраняя абзацы."""
     if len(text) <= chunk_size:
         return [text]
 
@@ -147,7 +144,7 @@ def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> list:
 
 
 def apply_translation_chain_full(text: str) -> str:
-    """Обрабатывает весь текст, разбивая на части (с fallback)."""
+    """Обрабатывает весь текст, разбивая на части."""
     logger.info(f"Starting translation chain for {len(text)} chars...")
 
     chunks = split_text_into_chunks(text)
@@ -170,8 +167,8 @@ def apply_translation_chain_full(text: str) -> str:
 
 
 def clean_translation_artifacts(text: str) -> str:
-    """Очистка артефактов (уже была, оставляем)."""
-    # (полный код из предыдущей версии — не меняем)
+    """Очистка артефактов (расширенная)."""
+    # Финские паттерны
     finnish_patterns = [
         r'\bTietenkin\b', r'\bhe tarvitsevat\b', r'\bJos se toimii\b',
         r'\bvaikka se ei\b', r'\btoimi\b', r'\bpuolella\b',
@@ -183,6 +180,7 @@ def clean_translation_artifacts(text: str) -> str:
         r'\bettä\b', r'\bjoka\b', r'\bmitä\b', r'\bniin\b',
         r'\bkun\b', r'\bvoi\b', r'\bse\b', r'\bja\b'
     ]
+    # Английские фразы
     english_phrases = [
         r'\bfirst to spot\b', r'\bthe genius\b', r'\bof a student\b',
         r'\bfrom Siberia\b', r'\bnow he watched\b', r'\bas that spark\b',
@@ -194,26 +192,41 @@ def clean_translation_artifacts(text: str) -> str:
         r'\bsaid more quietly\b', r'\bbudget\b', r'\bteam\b',
         r'\bresearch\b', r'\blicense\b', r'\brequires\b', r'\bcame from\b'
     ]
+    # Японские символы
     japanese_patterns = [r'[\u3040-\u30FF]+']
+
     for pattern in finnish_patterns + english_phrases:
         text = re.sub(pattern, '', text, flags=re.IGNORECASE)
     for pattern in japanese_patterns:
         text = re.sub(pattern, '', text)
+
+    # Удаляем лишние точки и запятые
     text = re.sub(r'(\w)\.(\w)', r'\1\2', text)
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
     text = re.sub(r'\s+', ' ', text)
+
+    # Удаляем пустые строки
     text = re.sub(r'^[.,!?;:\s]+$', '', text, flags=re.MULTILINE)
+
+    # Восстанавливаем кавычки для диалогов
+    text = re.sub(r'—\s*', '— ', text)
+
     return text.strip()
 
 
 def split_into_paragraphs_by_logic(text: str) -> str:
-    """Улучшенное разбиение на абзацы (оставляем без изменений)."""
+    """
+    Разбивает текст на абзацы. Если логическое разбиение даёт < 2 абзацев,
+    принудительно режет по 400 символов.
+    """
     if not text or len(text) < 200:
         return text
 
+    # Сначала пробуем разбить по предложениям
     sentences = re.split(r'(?<=[.!?])\s+', text)
     if len(sentences) < 3:
+        # Мало предложений — принудительное разбиение по символам
         paragraphs = []
         chunk_size = 400
         for i in range(0, len(text), chunk_size):
@@ -222,6 +235,7 @@ def split_into_paragraphs_by_logic(text: str) -> str:
                 paragraphs.append(chunk)
         return '\n\n'.join(paragraphs)
 
+    # Логическое разбиение
     paragraphs = []
     current_para = []
     current_len = 0
@@ -230,12 +244,14 @@ def split_into_paragraphs_by_logic(text: str) -> str:
         sent = sent.strip()
         if not sent:
             continue
+
         is_dialog = (
             sent.startswith('—') or
             sent.startswith('"') or
             sent.startswith('«') or
             sent.startswith('–')
         )
+
         if is_dialog:
             if current_para:
                 paragraphs.append(' '.join(current_para))
@@ -255,7 +271,26 @@ def split_into_paragraphs_by_logic(text: str) -> str:
     if current_para:
         paragraphs.append(' '.join(current_para))
 
+    # Если всё ещё один абзац — принудительно режем
     if len(paragraphs) < 2 and len(text) > 500:
+        paragraphs = []
+        chunk_size = 400
+        # Режем по пробелам, чтобы не разрывать слова
+        words = text.split()
+        current = []
+        current_len = 0
+        for word in words:
+            if current_len + len(word) + 1 > chunk_size and current:
+                paragraphs.append(' '.join(current))
+                current = []
+                current_len = 0
+            current.append(word)
+            current_len += len(word) + 1
+        if current:
+            paragraphs.append(' '.join(current))
+
+    # Если после всего абзацев всё ещё <= 1 — режем просто по символам
+    if len(paragraphs) <= 1 and len(text) > 400:
         paragraphs = []
         chunk_size = 400
         for i in range(0, len(text), chunk_size):
@@ -313,8 +348,8 @@ def api_revise():
             try:
                 yield _sse("progress", {"chars": 0, "estimated_total": len(chapter_text), "percent": 0, "log": "Начинаем обработку..."})
 
-                # 1. Цепочка переводов (упрощённая, с fallback)
-                logger.info("Step 1: Translation chain (simplified with fallback)...")
+                # 1. Цепочка переводов
+                logger.info("Step 1: Translation chain...")
                 processed_text = apply_translation_chain_full(chapter_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 40, "log": "Переводы завершены"})
 
@@ -340,9 +375,9 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": f"Текст переработан через упрощённую цепочку переводов (RU→EN→RU) с fallback. Абзацев: {final_para_count}",
+                    "summary": f"Текст переработан через упрощённую цепочку переводов (RU→EN→RU) с fallback (POST). Абзацев: {final_para_count}",
                     "changes": [
-                        "Переведён через Google Translate / MyMemory (RU→EN→RU)",
+                        "Переведён через Google Translate / MyMemory (POST)",
                         f"Разделён на {final_para_count} логических абзацев",
                         "Удалены артефакты перевода"
                     ],
