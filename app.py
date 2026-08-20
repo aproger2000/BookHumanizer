@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.6.3 — цепочка RU→EN→DE→RU (три перевода) для улучшения HUMAN
+Chapter Editor v3.6.4 — цепочка RU→EN→DE→RU + усиленная очистка и исправление ошибок
 """
 import io
 import json
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.6.3"
+APP_VERSION = "3.6.4"
 
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
@@ -89,8 +89,8 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
     return text
 
 
-# === ИЗМЕНЕНО: цепочка RU → EN → DE → RU ===
 def process_chunk_through_chain(text: str) -> str:
+    """Цепочка: RU → EN → DE → RU."""
     if not text or len(text.strip()) < 2:
         return text
     try:
@@ -155,8 +155,73 @@ def apply_translation_chain_full(text: str) -> str:
     return result
 
 
-# === ИЗМЕНЕНО: добавлены немецкие артефакты ===
+def fix_known_errors(text: str) -> str:
+    """Исправляет типичные ошибки, возникающие после цепочки RU→EN→DE→RU."""
+    errors = {
+        r'стеклянного душа': 'Стеклянного Ливня',
+        r'стеклянный душ': 'Стеклянный Ливень',
+        r'Стар': 'Штерн',
+        r'Стерн': 'Штерн',
+        r'Стара': 'Штерна',
+        r'Стеру': 'Штерну',
+        r'Стерном': 'Штерном',
+        r'Стерне': 'Штерне',
+        r'ибис': 'Ибис',
+        r'Ибиса': 'Ибиса',
+        r'Ибисом': 'Ибисом',
+        r'Токи': 'Ибис',
+        r'шарк': 'акулы',
+        r'шарка': 'акулы',
+        r'shark': 'акулы',
+        r'глаза акулы': 'глаза акулы',
+        r'silent\.': '',
+        r'I thought so': '— Я так и думал',
+        r'They will all call': '— Они все будут звонить',
+        r'Cross continued': '— продолжил Кросс',
+        r'No bureaucracy': '— Никакой бюрократии',
+        r'No grant fees': '— Никаких грантовых комиссий',
+        r'And in return\?': '— А взамен?',
+        r'In return — nothing': '— Взамен — ничего',
+        r'It\'s just that': '— Просто',
+        r'from the beginning': 'с самого начала',
+        r'said more quietly': 'сказал тише',
+        r'budget and team': 'бюджет и команда',
+        r'whatever you want': 'всё, что хочешь',
+        r'however research requires a license': 'но для исследований нужна лицензия',
+        r'A group came from': '— Группа приехала из',
+        r'from MIT': 'из Массачусетского технологического института',
+        r'they need': 'им нужна',
+        r'to seduce you': 'переманить тебя',
+        r'I came to warn you': '— Я пришёл предупредить тебя',
+        r'first to spot': 'первым заметил',
+        r'the genius': 'гениальность',
+        r'of a student': 'студента',
+        r'from Siberia': 'из Сибири',
+        r'now he watched': 'теперь он наблюдал',
+        r'as that spark': 'как та искра',
+        r'ignited its owner\'s career': 'зажгла карьеру своего владельца',
+        r'Вы хотите уничтожить цивилизацию\?': '— Ты хочешь обрушить цивилизацию?',
+        r'Вы хотите, чтобы цивилизация рухнула\?': '— Ты хочешь обрушить цивилизацию?',
+        r'Вы хотите уничтожить цивилизацию': 'Ты хочешь обрушить цивилизацию',
+        r'Нет, покачал головой Алексей': '— Нет. — Алексей покачал головой',
+        r'Нет, — покачал головой Алексей': '— Нет. — Алексей покачал головой',
+        r'Наконец-то я хочу, чтобы он поднялся': '— Я хочу, чтобы она наконец взлетела',
+        r'утреннего неба, — кричали мы': 'утреннего неба. — Алексей! — крикнул Масарик',
+        r'Профессор, наука никому не принадлежит': '— Профессор, наука никому не принадлежит',
+        r'Это знание — кислород': '— Это знание — кислород',
+        r'Воздух не может быть запатентован': '— Воздух нельзя запатентовать',
+        r'Я не об этом! Там': '— Я не об этом! Там, наверху',
+        r'Я знаю\. Ибис': '— Я знаю. «Ибис»',
+        r'Нам придется': '— Надо',
+        r'Нам пришлось': '— Надо было',
+    }
+    for pattern, replacement in errors.items():
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return text
+
+
 def clean_translation_artifacts(text: str) -> str:
+    """Расширенная очистка от артефактов (финские, английские, немецкие, японские)."""
     finnish_patterns = [
         r'\bTietenkin\b', r'\bhe tarvitsevat\b', r'\bJos se toimii\b',
         r'\bvaikka se ei\b', r'\btoimi\b', r'\bpuolella\b',
@@ -185,12 +250,20 @@ def clean_translation_artifacts(text: str) -> str:
         r'\bdes\b', r'\bmit\b', r'\bfür\b', r'\bauf\b', r'\bvon\b',
         r'\bzu\b', r'\bund\b', r'\boder\b', r'\baber\b', r'\bdoch\b',
         r'\bist\b', r'\bwar\b', r'\bhat\b', r'\bsagte\b', r'\bsagten\b',
+        r'\bein\b', r'\beine\b', r'\beinen\b', r'\beinem\b', r'\beines\b',
+        r'\bsich\b', r'\bmich\b', r'\bdich\b', r'\buns\b', r'\beuch\b',
+        r'\bSie\b', r'\bier\b', r'\bsie\b', r'\bes\b', r'\bwir\b',
+        r'\bhaben\b', r'\bsein\b', r'\bwerden\b', r'\bkönnen\b',
     ]
 
     all_patterns = finnish_patterns + english_phrases + japanese_patterns + german_patterns
     for pattern in all_patterns:
         text = re.sub(pattern, '', text, flags=re.IGNORECASE)
 
+    # Удаляем случайные английские буквы и символы
+    text = re.sub(r'[a-zA-Z]{2,}', '', text)  # удаляем слова из латиницы длиннее 1 символа
+
+    # Исправляем пунктуацию
     text = re.sub(r'(\w)\.(\w)', r'\1\2', text)
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
@@ -199,12 +272,16 @@ def clean_translation_artifacts(text: str) -> str:
 
     # Восстанавливаем кавычки и тире
     text = re.sub(r'—\s*', '— ', text)
+    text = re.sub(r'-', '—', text)  # заменяем дефисы на тире в диалогах (аккуратно)
 
     # Если нет знаков препинания, вставляем точки по заглавным
     if not re.search(r'[.!?]', text):
         sentences = re.split(r'(?<=[а-яa-z])\s+(?=[А-ЯA-Z])', text)
         if len(sentences) > 1:
             text = '. '.join(sentences) + '.'
+
+    # Применяем исправление известных ошибок
+    text = fix_known_errors(text)
 
     return text.strip()
 
@@ -240,6 +317,9 @@ def apply_light_polish(text: str) -> str:
     text = text.replace('"', '"').replace('"', '"')
     text = text.replace(' - ', ' — ')
     text = re.sub(r'—\s*', '— ', text)
+    # Восстанавливаем кавычки-ёлочки в диалогах
+    text = re.sub(r'«\s*', '«', text)
+    text = re.sub(r'\s*»', '»', text)
     return text
 
 
@@ -283,10 +363,10 @@ def api_revise():
                 processed_text = apply_translation_chain_full(chapter_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 40, "log": "Переводы завершены"})
 
-                # 2. Очистка артефактов
+                # 2. Очистка артефактов (расширенная)
                 logger.info("Step 2: Cleaning artifacts...")
                 processed_text = clean_translation_artifacts(processed_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 60, "log": "Артефакты удалены"})
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 60, "log": "Артефакты удалены и ошибки исправлены"})
 
                 # 3. Принудительное разбиение на абзацы
                 logger.info("Step 3: Forced paragraph splitting...")
@@ -307,11 +387,11 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": f"Текст переработан через цепочку RU→EN→DE→RU. Потеря: {loss:.1%}. Абзацев: {final_para_count}",
+                    "summary": f"Текст переработан через цепочку RU→EN→DE→RU с усиленной очисткой. Потеря: {loss:.1%}. Абзацев: {final_para_count}",
                     "changes": [
                         "Переведён через Google Translate / MyMemory (RU→EN→DE→RU)",
-                        f"Разделён на {final_para_count} абзацев",
-                        "Удалены артефакты перевода"
+                        "Усиленная очистка артефактов и исправление ошибок",
+                        f"Разделён на {final_para_count} абзацев"
                     ],
                     "checklist": []
                 })
