@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.6.2 — улучшенное логирование (humanizer отключён по умолчанию)
+Chapter Editor v3.6.2 — humanizer ОТКЛЮЧЁН, детальное логирование ошибок
 """
 import json
 import os
@@ -27,18 +27,20 @@ CHUNK_SIZE = 3000
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 
-# Humanizer отключён по умолчанию
-ENABLE_HUMANIZER = os.environ.get("ENABLE_HUMANIZER", "false").lower() == "true"
-if ENABLE_HUMANIZER:
-    try:
-        import humanizer
-        HUMANIZER_AVAILABLE = True
-    except ImportError:
-        logger.warning("humanizer module not found. Humanizer disabled.")
-        HUMANIZER_AVAILABLE = False
-        ENABLE_HUMANIZER = False
-else:
-    HUMANIZER_AVAILABLE = False
+# Humanizer отключён (переменная игнорируется)
+ENABLE_HUMANIZER = False
+HUMANIZER_AVAILABLE = False
+
+# Если вы всё же хотите включить humanizer, раскомментируйте эти строки
+# и установите переменную окружения ENABLE_HUMANIZER=true
+# if os.environ.get("ENABLE_HUMANIZER", "false").lower() == "true":
+#     try:
+#         import humanizer
+#         HUMANIZER_AVAILABLE = True
+#         ENABLE_HUMANIZER = True
+#     except ImportError:
+#         logger.warning("humanizer module not found. Humanizer disabled.")
+#         ENABLE_HUMANIZER = False
 
 
 class ChapterEditError(RuntimeError):
@@ -332,16 +334,9 @@ def api_revise():
                 processed_text = apply_light_polish(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 90, "log": "Полировка выполнена"})
 
-                # 6. Опциональное перефразирование (humanizer) — только если включено и доступно
-                if ENABLE_HUMANIZER and HUMANIZER_AVAILABLE and len(processed_text) > 200:
-                    logger.info("Step 6: Applying humanizer (local paraphrasing)...")
-                    try:
-                        processed_text = humanizer.enhance_text(processed_text, probability=0.25)
-                        yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 98, "log": "Перефразирование выполнено"})
-                    except Exception as e:
-                        logger.exception("Humanizer error")
-                        # Отправляем ошибку в SSE, но продолжаем работу (без humanizer)
-                        yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 95, "log": f"Ошибка humanizer: {str(e)}"})
+                # 6. Humanizer отключён — пропускаем
+                # Если вы хотите включить humanizer, раскомментируйте блок ниже
+                # и установите ENABLE_HUMANIZER = True в начале файла
 
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 100, "log": "Готово!"})
 
@@ -350,29 +345,24 @@ def api_revise():
                 loss = (original_len - final_len) / original_len
                 logger.info(f"Final: {final_len} chars, loss {loss:.2%}, {final_para_count} paragraphs")
 
-                summary = f"Текст переработан через упрощённую цепочку (RU→EN→RU). Потеря: {loss:.1%}. Абзацев: {final_para_count}"
-                if ENABLE_HUMANIZER and HUMANIZER_AVAILABLE:
-                    summary += " Применено локальное перефразирование."
-
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": summary,
+                    "summary": f"Текст переработан через упрощённую цепочку (RU→EN→RU). Потеря: {loss:.1%}. Абзацев: {final_para_count}",
                     "changes": [
                         "Переведён через Google Translate / MyMemory (RU→EN→RU)",
                         "Разнообразие диалоговых тегов",
                         f"Разделён на {final_para_count} абзацев",
                         "Удалены артефакты перевода"
-                    ] + (["Локальное перефразирование"] if ENABLE_HUMANIZER and HUMANIZER_AVAILABLE else []),
+                    ],
                     "checklist": []
                 })
             except Exception as e:
-                # Полный стек трейс в лог
                 error_trace = traceback.format_exc()
                 logger.error(f"Error in generate: {error_trace}")
                 # Отправляем детальную ошибку в SSE
                 yield _sse("error", {"detail": f"{str(e)}\n\n{error_trace}"})
-                raise  # перевыбрасываем, чтобы поймать на верхнем уровне
+                raise
 
         return Response(
             stream_with_context(generate()),
