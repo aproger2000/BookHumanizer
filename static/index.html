@@ -6,308 +6,55 @@
     <title>Chapter Editor</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        body {
-            background: #f0f4fa;
-            color: #1a2634;
-            font-family: 'Inter', sans-serif;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            padding: 24px;
-        }
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            width: 100%;
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-        }
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 16px 0 24px;
-            border-bottom: 1px solid #d0d9e4;
-            flex-wrap: wrap;
-            gap: 12px;
-        }
-        .logo h1 {
-            font-size: 22px;
-            font-weight: 600;
-            color: #1a2634;
-            letter-spacing: -0.3px;
-        }
-        .logo .sub {
-            font-size: 13px;
-            color: #6b7f94;
-            font-weight: 400;
-        }
-        .version-badge {
-            background: #e4eaf2;
-            padding: 6px 14px;
-            border-radius: 20px;
-            font-size: 12px;
-            color: #3d546a;
-            font-weight: 500;
-        }
-        .main-grid {
-            display: grid;
-            grid-template-columns: 1fr 1.5fr;
-            gap: 24px;
-            margin-top: 28px;
-            flex: 1;
-        }
-        @media (max-width: 768px) {
-            .main-grid {
-                grid-template-columns: 1fr;
-            }
-            body { padding: 16px; }
-        }
-        .panel {
-            background: #ffffff;
-            border-radius: 16px;
-            border: 1px solid #d0d9e4;
-            padding: 24px;
-            display: flex;
-            flex-direction: column;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-        }
-        .panel-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 16px;
-        }
-        .panel-header h2 {
-            font-size: 15px;
-            font-weight: 500;
-            color: #2c3e50;
-            letter-spacing: 0.3px;
-        }
-        .panel-header .count {
-            font-size: 12px;
-            color: #6b7f94;
-            background: #eef3f8;
-            padding: 4px 12px;
-            border-radius: 12px;
-        }
-        textarea {
-            width: 100%;
-            flex: 1;
-            min-height: 400px;
-            background: #f7fafc;
-            border: 1px solid #d0d9e4;
-            border-radius: 12px;
-            color: #1a2634;
-            font-family: 'Inter', monospace;
-            font-size: 14px;
-            line-height: 1.7;
-            padding: 16px;
-            resize: vertical;
-            transition: border-color 0.2s;
-        }
-        textarea:focus {
-            outline: none;
-            border-color: #6c8fc7;
-        }
-        textarea::placeholder {
-            color: #8fa2b8;
-        }
-        .controls {
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
-            margin-top: 16px;
-            padding-top: 16px;
-            border-top: 1px solid #e4eaf2;
-        }
-        .controls select {
-            background: #f7fafc;
-            border: 1px solid #d0d9e4;
-            border-radius: 10px;
-            padding: 10px 16px;
-            color: #1a2634;
-            font-family: 'Inter', sans-serif;
-            font-size: 13px;
-            cursor: pointer;
-            flex: 1;
-            min-width: 120px;
-        }
-        .btn {
-            padding: 10px 28px;
-            border: none;
-            border-radius: 10px;
-            font-family: 'Inter', sans-serif;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            white-space: nowrap;
-        }
-        .btn-primary {
-            background: #2c3e50;
-            color: #ffffff;
-        }
-        .btn-primary:hover {
-            background: #1a2a3a;
-            transform: translateY(-1px);
-            box-shadow: 0 4px 16px rgba(44, 62, 80, 0.2);
-        }
-        .btn-primary:disabled {
-            background: #8fa2b8;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-        .btn-secondary {
-            background: #e4eaf2;
-            color: #2c3e50;
-        }
-        .btn-secondary:hover {
-            background: #d0d9e4;
-        }
-        .progress-container {
-            margin-top: 12px;
-            background: #eef3f8;
-            border-radius: 8px;
-            height: 6px;
-            overflow: hidden;
-            opacity: 0;
-            transition: opacity 0.3s;
-        }
-        .progress-container.active {
-            opacity: 1;
-        }
-        .progress-bar {
-            height: 100%;
-            width: 0%;
-            background: #2c3e50;
-            border-radius: 8px;
-            transition: width 0.2s ease;
-        }
-        .status-text {
-            font-size: 13px;
-            color: #6b7f94;
-            margin-top: 10px;
-            min-height: 20px;
-        }
-        .status-text.success {
-            color: #1e7e34;
-        }
-        .status-text.error {
-            color: #b3362a;
-        }
-        .step-indicator {
-            display: flex;
-            gap: 8px;
-            margin-top: 8px;
-            font-size: 12px;
-            color: #6b7f94;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-        .step-dot {
-            display: inline-block;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #d0d9e4;
-            transition: all 0.3s;
-        }
-        .step-dot.active {
-            background: #2c3e50;
-            transform: scale(1.2);
-        }
-        .step-dot.done {
-            background: #1e7e34;
-        }
-        .step-label {
-            font-size: 12px;
-            color: #6b7f94;
-            margin-left: 4px;
-        }
-        .result-panel .panel-body {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-        }
-        .result-panel .panel-body textarea {
-            flex: 1;
-            min-height: 400px;
-        }
-        .checklist {
-            margin-top: 12px;
-            padding: 12px 16px;
-            background: #f7fafc;
-            border-radius: 10px;
-            border: 1px solid #d0d9e4;
-            display: none;
-        }
-        .checklist.visible {
-            display: block;
-        }
-        .checklist-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 4px 0;
-            font-size: 13px;
-            color: #2c3e50;
-        }
-        .checklist-item .icon {
-            font-size: 16px;
-            width: 20px;
-            text-align: center;
-        }
-        .checklist-item .icon.pass {
-            color: #1e7e34;
-        }
-        .checklist-item .icon.fail {
-            color: #b3362a;
-        }
-        .checklist-item .icon.unknown {
-            color: #8fa2b8;
-        }
-        .footer {
-            margin-top: 32px;
-            padding-top: 16px;
-            border-top: 1px solid #d0d9e4;
-            display: flex;
-            justify-content: space-between;
-            font-size: 12px;
-            color: #8fa2b8;
-            flex-wrap: wrap;
-            gap: 8px;
-        }
-        .footer a {
-            color: #6b7f94;
-            text-decoration: none;
-        }
-        .footer a:hover {
-            color: #2c3e50;
-        }
-        .copy-btn {
-            background: #eef3f8;
-            border: 1px solid #d0d9e4;
-            color: #2c3e50;
-            padding: 4px 12px;
-            border-radius: 6px;
-            font-size: 12px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        .copy-btn:hover {
-            background: #d0d9e4;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #f0f4fa; color: #1a2634; font-family: 'Inter', sans-serif; min-height: 100vh; display: flex; flex-direction: column; padding: 24px; }
+        .container { max-width: 1400px; margin: 0 auto; width: 100%; flex: 1; display: flex; flex-direction: column; }
+        header { display: flex; justify-content: space-between; align-items: center; padding: 16px 0 24px; border-bottom: 1px solid #d0d9e4; flex-wrap: wrap; gap: 12px; }
+        .logo h1 { font-size: 22px; font-weight: 600; color: #1a2634; letter-spacing: -0.3px; }
+        .logo .sub { font-size: 13px; color: #6b7f94; font-weight: 400; }
+        .version-badge { background: #e4eaf2; padding: 6px 14px; border-radius: 20px; font-size: 12px; color: #3d546a; font-weight: 500; }
+        .main-grid { display: grid; grid-template-columns: 1fr 1.5fr; gap: 24px; margin-top: 28px; flex: 1; }
+        @media (max-width: 768px) { .main-grid { grid-template-columns: 1fr; } body { padding: 16px; } }
+        .panel { background: #ffffff; border-radius: 16px; border: 1px solid #d0d9e4; padding: 24px; display: flex; flex-direction: column; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+        .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .panel-header h2 { font-size: 15px; font-weight: 500; color: #2c3e50; letter-spacing: 0.3px; }
+        .panel-header .count { font-size: 12px; color: #6b7f94; background: #eef3f8; padding: 4px 12px; border-radius: 12px; }
+        textarea { width: 100%; flex: 1; min-height: 400px; background: #f7fafc; border: 1px solid #d0d9e4; border-radius: 12px; color: #1a2634; font-family: 'Inter', monospace; font-size: 14px; line-height: 1.7; padding: 16px; resize: vertical; transition: border-color 0.2s; }
+        textarea:focus { outline: none; border-color: #6c8fc7; }
+        textarea::placeholder { color: #8fa2b8; }
+        .controls { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 16px; padding-top: 16px; border-top: 1px solid #e4eaf2; }
+        .controls select { background: #f7fafc; border: 1px solid #d0d9e4; border-radius: 10px; padding: 10px 16px; color: #1a2634; font-family: 'Inter', sans-serif; font-size: 13px; cursor: pointer; flex: 1; min-width: 120px; }
+        .btn { padding: 10px 28px; border: none; border-radius: 10px; font-family: 'Inter', sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+        .btn-primary { background: #2c3e50; color: #ffffff; }
+        .btn-primary:hover { background: #1a2a3a; transform: translateY(-1px); box-shadow: 0 4px 16px rgba(44, 62, 80, 0.2); }
+        .btn-primary:disabled { background: #8fa2b8; cursor: not-allowed; transform: none; box-shadow: none; }
+        .btn-secondary { background: #e4eaf2; color: #2c3e50; }
+        .btn-secondary:hover { background: #d0d9e4; }
+        .progress-container { margin-top: 12px; background: #eef3f8; border-radius: 8px; height: 6px; overflow: hidden; opacity: 0; transition: opacity 0.3s; }
+        .progress-container.active { opacity: 1; }
+        .progress-bar { height: 100%; width: 0%; background: #2c3e50; border-radius: 8px; transition: width 0.2s ease; }
+        .status-text { font-size: 13px; color: #6b7f94; margin-top: 10px; min-height: 20px; }
+        .status-text.success { color: #1e7e34; }
+        .status-text.error { color: #b3362a; }
+        .step-indicator { display: flex; gap: 8px; margin-top: 8px; font-size: 12px; color: #6b7f94; align-items: center; flex-wrap: wrap; }
+        .step-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #d0d9e4; transition: all 0.3s; }
+        .step-dot.active { background: #2c3e50; transform: scale(1.2); }
+        .step-dot.done { background: #1e7e34; }
+        .step-label { font-size: 12px; color: #6b7f94; margin-left: 4px; }
+        .result-panel .panel-body { flex: 1; display: flex; flex-direction: column; }
+        .result-panel .panel-body textarea { flex: 1; min-height: 400px; }
+        .checklist { margin-top: 12px; padding: 12px 16px; background: #f7fafc; border-radius: 10px; border: 1px solid #d0d9e4; display: none; }
+        .checklist.visible { display: block; }
+        .checklist-item { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: 13px; color: #2c3e50; }
+        .checklist-item .icon { font-size: 16px; width: 20px; text-align: center; }
+        .checklist-item .icon.pass { color: #1e7e34; }
+        .checklist-item .icon.fail { color: #b3362a; }
+        .checklist-item .icon.unknown { color: #8fa2b8; }
+        .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #d0d9e4; display: flex; justify-content: space-between; font-size: 12px; color: #8fa2b8; flex-wrap: wrap; gap: 8px; }
+        .footer a { color: #6b7f94; text-decoration: none; }
+        .footer a:hover { color: #2c3e50; }
+        .copy-btn { background: #eef3f8; border: 1px solid #d0d9e4; color: #2c3e50; padding: 4px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; transition: all 0.2s; }
+        .copy-btn:hover { background: #d0d9e4; }
     </style>
 </head>
 <body>
@@ -320,7 +67,6 @@
     </header>
 
     <div class="main-grid">
-        <!-- Левая панель -->
         <div class="panel">
             <div class="panel-header">
                 <h2>📄 Исходный текст</h2>
@@ -353,7 +99,6 @@
             <input type="file" id="fileInput" accept=".txt,.md,.docx" style="display:none">
         </div>
 
-        <!-- Правая панель -->
         <div class="panel result-panel">
             <div class="panel-header">
                 <h2>✨ Отредактированный текст</h2>
@@ -378,8 +123,7 @@
 </div>
 
 <script>
-(function() {
-    // === Элементы ===
+document.addEventListener('DOMContentLoaded', function() {
     const sourceText = document.getElementById('sourceText');
     const resultText = document.getElementById('resultText');
     const editBtn = document.getElementById('editBtn');
@@ -395,35 +139,6 @@
     const checklistItems = document.getElementById('checklistItems');
     const copyBtn = document.getElementById('copyBtn');
 
-    // === Функция разбиения на абзацы ===
-    function splitIntoParagraphs(text) {
-        if (!text) return text;
-        if (text.length < 200) return text;
-
-        const chunkSize = 400;
-        const words = text.split(' ');
-        const paragraphs = [];
-        let current = [];
-        let currentLen = 0;
-
-        for (const word of words) {
-            if (currentLen + word.length + 1 > chunkSize && current.length > 0) {
-                paragraphs.push(current.join(' '));
-                current = [];
-                currentLen = 0;
-            }
-            current.push(word);
-            currentLen += word.length + 1;
-        }
-
-        if (current.length > 0) {
-            paragraphs.push(current.join(' '));
-        }
-
-        return paragraphs.join('\n\n');
-    }
-
-    // === Шаги ===
     const stepDots = {
         step1: document.getElementById('step1'),
         step2: document.getElementById('step2'),
@@ -446,12 +161,10 @@
         if (label) statusText.textContent = '⏳ ' + label;
     }
 
-    // Подсчёт символов
     sourceText.addEventListener('input', function() {
         sourceCount.textContent = this.value.length + ' симв.';
     });
 
-    // Загрузка файла
     loadBtn.addEventListener('click', function() { fileInput.click(); });
     fileInput.addEventListener('change', function(e) {
         const file = e.target.files[0];
@@ -470,7 +183,6 @@
         reader.readAsText(file, 'UTF-8');
     });
 
-    // Копирование
     copyBtn.addEventListener('click', function() {
         if (!resultText.value) {
             statusText.textContent = '⚠️ Нет текста для копирования';
@@ -488,7 +200,6 @@
         });
     });
 
-    // Редактирование
     editBtn.addEventListener('click', function() {
         const text = sourceText.value.trim();
         if (!text) {
@@ -529,8 +240,8 @@
             return handleStream(response);
         })
         .then(data => {
-            const rawText = data.revised_text || '';
-            const formattedText = splitIntoParagraphs(rawText);
+            // Текст уже разбит на абзацы на бэкенде — просто отображаем
+            const formattedText = data.revised_text || '';
             setStep(3, 'Готово!');
             resultText.value = formattedText;
             resultCount.textContent = formattedText.length + ' симв.';
@@ -652,7 +363,6 @@
         checklistItems.prepend(header);
     }
 
-    // Загрузка версии с сервера
     fetch('/api/health')
         .then(res => res.json())
         .then(data => {
@@ -663,12 +373,12 @@
             statusText.className = 'status-text success';
         })
         .catch(() => {
-            document.getElementById('versionBadge').textContent = 'v3.6.2';
-            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.6.2 — обработка через цепочку переводов';
+            document.getElementById('versionBadge').textContent = 'v3.6.0';
+            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.6.0 — обработка через цепочку переводов';
             statusText.textContent = '⚠️ Не удалось подключиться к серверу';
             statusText.className = 'status-text error';
         });
-})();
+});
 </script>
 </body>
 </html>
