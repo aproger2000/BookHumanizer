@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.5.7 — Humanization via Translation Chain + fallback (POST) + принудительное разбиение
+Chapter Editor v3.5.9 — гарантированное разбиение на абзацы + восстановление пунктуации
 """
 import io
 import json
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.5.7"
+APP_VERSION = "3.5.9"
 
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
@@ -39,11 +39,11 @@ def _sse(event_type: str, data: dict) -> str:
 
 
 def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int = 2) -> str:
-    """Перевод: сначала Google (GET), при ошибке — MyMemory (POST)."""
+    """Перевод: Google (GET), при ошибке — MyMemory (POST)."""
     if not text or len(text.strip()) < 2:
         return text
 
-    # --- Google Translate (публичный) ---
+    # Google Translate (публичный)
     url_google = "https://translate.googleapis.com/translate_a/single"
     params = {
         "client": "gtx",
@@ -66,16 +66,15 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
             logger.warning(f"Google exception: {e}")
             time.sleep(1 + random.random())
 
-    # --- Fallback: MyMemory (POST) ---
+    # Fallback: MyMemory (POST)
     logger.info(f"Falling back to MyMemory (POST) for {target_lang}")
     url_mymemory = "https://api.mymemory.translated.net/get"
-    # Используем POST с телом, чтобы избежать 414
     payload = {
         "q": text,
         "langpair": f"auto|{target_lang}",
         "de": "user@example.com"
     }
-    for attempt in range(2):  # две попытки
+    for attempt in range(2):
         try:
             resp = requests.post(url_mymemory, data=payload, timeout=20)
             if resp.status_code == 200:
@@ -98,7 +97,6 @@ def process_chunk_through_chain(text: str) -> str:
     """Упрощённая цепочка: RU → EN → RU."""
     if not text or len(text.strip()) < 2:
         return text
-
     try:
         en = translate_with_fallback(text, target_lang="en")
         ru = translate_with_fallback(en, target_lang="ru")
@@ -146,29 +144,25 @@ def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> list:
 def apply_translation_chain_full(text: str) -> str:
     """Обрабатывает весь текст, разбивая на части."""
     logger.info(f"Starting translation chain for {len(text)} chars...")
-
     chunks = split_text_into_chunks(text)
     logger.info(f"Split into {len(chunks)} chunks")
-
     processed_chunks = []
     for i, chunk in enumerate(chunks):
         logger.info(f"Processing chunk {i+1}/{len(chunks)}...")
         processed = process_chunk_through_chain(chunk)
         processed_chunks.append(processed)
 
-    # Склеиваем с учётом исходных абзацев
     if '\n\n' in text:
         result = "\n\n".join(processed_chunks)
     else:
         result = " ".join(processed_chunks)
-
     logger.info(f"Translation complete. Result length: {len(result)}")
     return result
 
 
 def clean_translation_artifacts(text: str) -> str:
-    """Очистка артефактов (расширенная)."""
-    # Финские паттерны
+    """Очистка артефактов + восстановление пунктуации."""
+    # Удаление иноязычных вставок
     finnish_patterns = [
         r'\bTietenkin\b', r'\bhe tarvitsevat\b', r'\bJos se toimii\b',
         r'\bvaikka se ei\b', r'\btoimi\b', r'\bpuolella\b',
@@ -180,7 +174,6 @@ def clean_translation_artifacts(text: str) -> str:
         r'\bettä\b', r'\bjoka\b', r'\bmitä\b', r'\bniin\b',
         r'\bkun\b', r'\bvoi\b', r'\bse\b', r'\bja\b'
     ]
-    # Английские фразы
     english_phrases = [
         r'\bfirst to spot\b', r'\bthe genius\b', r'\bof a student\b',
         r'\bfrom Siberia\b', r'\bnow he watched\b', r'\bas that spark\b',
@@ -192,7 +185,6 @@ def clean_translation_artifacts(text: str) -> str:
         r'\bsaid more quietly\b', r'\bbudget\b', r'\bteam\b',
         r'\bresearch\b', r'\blicense\b', r'\brequires\b', r'\bcame from\b'
     ]
-    # Японские символы
     japanese_patterns = [r'[\u3040-\u30FF]+']
 
     for pattern in finnish_patterns + english_phrases:
@@ -200,58 +192,105 @@ def clean_translation_artifacts(text: str) -> str:
     for pattern in japanese_patterns:
         text = re.sub(pattern, '', text)
 
-    # Удаляем лишние точки и запятые
+    # Удаляем лишние пробелы и знаки
     text = re.sub(r'(\w)\.(\w)', r'\1\2', text)
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
     text = re.sub(r'\s+', ' ', text)
-
-    # Удаляем пустые строки
     text = re.sub(r'^[.,!?;:\s]+$', '', text, flags=re.MULTILINE)
 
-    # Восстанавливаем кавычки для диалогов
+    # Восстанавливаем кавычки и тире
     text = re.sub(r'—\s*', '— ', text)
+
+    # --- ВОССТАНОВЛЕНИЕ ПУНКТУАЦИИ ---
+    # Если в тексте нет ни одной точки, вопросительного или восклицательного знака,
+    # пробуем разбить по заглавным буквам и вставить точки.
+    if not re.search(r'[.!?]', text):
+        # Разбиваем по заглавным буквам (кириллица и латиница)
+        sentences = re.split(r'(?<=[а-яa-z])\s+(?=[А-ЯA-Z])', text)
+        if len(sentences) > 1:
+            text = '. '.join(sentences) + '.'
+        else:
+            # Если не удалось, ставим точки после каждого предложения, выделенного по длине
+            # (это будет сделано на этапе разбиения)
+            pass
 
     return text.strip()
 
 
 def split_into_paragraphs_by_logic(text: str) -> str:
     """
-    Разбивает текст на абзацы. Если логическое разбиение даёт < 2 абзацев,
-    принудительно режет по 400 символов.
+    ГАРАНТИРОВАННОЕ разбиение на абзацы.
+    Сначала логическое по предложениям, затем принудительное по длине.
     """
-    if not text or len(text) < 200:
+    if not text:
         return text
 
-    # Сначала пробуем разбить по предложениям
+    # Если текст короткий, возвращаем как есть
+    if len(text) < 200:
+        return text
+
+    # 1. Пытаемся разбить на предложения по точкам, вопросительным и восклицательным знакам
     sentences = re.split(r'(?<=[.!?])\s+', text)
-    if len(sentences) < 3:
-        # Мало предложений — принудительное разбиение по символам
+
+    # Если предложений мало (меньше 3) или они слишком длинные (> 500 символов),
+    # или нет знаков препинания — используем принудительное разбиение
+    use_forced = (len(sentences) < 3) or (len(sentences) == 1 and len(sentences[0]) > 500) or (not re.search(r'[.!?]', text))
+
+    if use_forced:
+        # Принудительное разбиение по 400 символов с сохранением слов
         paragraphs = []
         chunk_size = 400
-        for i in range(0, len(text), chunk_size):
-            chunk = text[i:i+chunk_size].strip()
-            if chunk:
-                paragraphs.append(chunk)
+        words = text.split()
+        current = []
+        current_len = 0
+        for word in words:
+            if current_len + len(word) + 1 > chunk_size and current:
+                paragraphs.append(' '.join(current))
+                current = []
+                current_len = 0
+            current.append(word)
+            current_len += len(word) + 1
+        if current:
+            paragraphs.append(' '.join(current))
+        # Если получился один абзац, а текст длинный — режем по символам (без разрыва слов)
+        if len(paragraphs) == 1 and len(text) > 500:
+            paragraphs = []
+            chunk_size = 400
+            for i in range(0, len(text), chunk_size):
+                chunk = text[i:i+chunk_size].strip()
+                if chunk:
+                    # Постараемся не разрывать слово — ищем пробел
+                    if i + chunk_size < len(text) and text[i+chunk_size] != ' ':
+                        # ищем ближайший пробел
+                        end = text.find(' ', i+chunk_size)
+                        if end != -1:
+                            chunk = text[i:end]
+                        else:
+                            chunk = text[i:]
+                    paragraphs.append(chunk.strip())
+            # Убираем пустые
+            paragraphs = [p for p in paragraphs if p]
         return '\n\n'.join(paragraphs)
 
-    # Логическое разбиение
+    # 2. Логическое разбиение: группируем предложения в абзацы
     paragraphs = []
     current_para = []
     current_len = 0
+    target_len = 350
 
     for sent in sentences:
         sent = sent.strip()
         if not sent:
             continue
 
+        # Диалоги — отдельный абзац
         is_dialog = (
             sent.startswith('—') or
             sent.startswith('"') or
             sent.startswith('«') or
             sent.startswith('–')
         )
-
         if is_dialog:
             if current_para:
                 paragraphs.append(' '.join(current_para))
@@ -260,7 +299,7 @@ def split_into_paragraphs_by_logic(text: str) -> str:
             paragraphs.append(sent)
             continue
 
-        if current_len > 350 and len(current_para) >= 2:
+        if current_len > target_len and len(current_para) >= 2:
             paragraphs.append(' '.join(current_para))
             current_para = []
             current_len = 0
@@ -271,11 +310,10 @@ def split_into_paragraphs_by_logic(text: str) -> str:
     if current_para:
         paragraphs.append(' '.join(current_para))
 
-    # Если всё ещё один абзац — принудительно режем
+    # 3. Если после логического разбиения всё ещё один абзац и текст длинный — режем принудительно
     if len(paragraphs) < 2 and len(text) > 500:
         paragraphs = []
         chunk_size = 400
-        # Режем по пробелам, чтобы не разрывать слова
         words = text.split()
         current = []
         current_len = 0
@@ -289,14 +327,22 @@ def split_into_paragraphs_by_logic(text: str) -> str:
         if current:
             paragraphs.append(' '.join(current))
 
-    # Если после всего абзацев всё ещё <= 1 — режем просто по символам
+    # Если всё равно один абзац — режем по символам, но с учётом пробелов
     if len(paragraphs) <= 1 and len(text) > 400:
         paragraphs = []
         chunk_size = 400
         for i in range(0, len(text), chunk_size):
             chunk = text[i:i+chunk_size].strip()
             if chunk:
-                paragraphs.append(chunk)
+                # Не разрываем слово
+                if i + chunk_size < len(text) and text[i+chunk_size] != ' ':
+                    end = text.find(' ', i+chunk_size)
+                    if end != -1:
+                        chunk = text[i:end]
+                    else:
+                        chunk = text[i:]
+                paragraphs.append(chunk.strip())
+        paragraphs = [p for p in paragraphs if p]
 
     return '\n\n'.join(paragraphs)
 
@@ -358,7 +404,7 @@ def api_revise():
                 processed_text = clean_translation_artifacts(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": len(chapter_text), "percent": 60, "log": "Артефакты удалены"})
 
-                # 3. Интеллектуальное разбиение на абзацы
+                # 3. Интеллектуальное разбиение на абзацы (гарантированное)
                 logger.info("Step 3: Intelligent paragraph splitting...")
                 processed_text = split_into_paragraphs_by_logic(processed_text)
                 para_count = len(processed_text.split('\n\n'))
@@ -375,7 +421,7 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": f"Текст переработан через упрощённую цепочку переводов (RU→EN→RU) с fallback (POST). Абзацев: {final_para_count}",
+                    "summary": f"Текст переработан через упрощённую цепочку переводов (RU→EN→RU) с fallback. Абзацев: {final_para_count}",
                     "changes": [
                         "Переведён через Google Translate / MyMemory (POST)",
                         f"Разделён на {final_para_count} логических абзацев",
