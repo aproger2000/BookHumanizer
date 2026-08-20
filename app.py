@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.5.0 — Humanization via Translation Chain + выделение диалогов в абзацы
+Chapter Editor v3.5.1 — Humanization via Translation Chain + принудительное выделение диалогов
 Работает с Google Translate.
 """
 import io
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.5.0"
+APP_VERSION = "3.5.1"
 
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
@@ -175,106 +175,71 @@ def split_into_paragraphs_by_logic(text: str) -> str:
     """
     Разбивает текст на абзацы по логике изложения.
     Каждый диалог — отдельный абзац.
+    ВСЕГДА обрабатывает диалоги, даже если уже есть абзацы.
     """
     if not text or len(text) < 200:
         return text
     
-    # Если уже есть хорошие абзацы — не трогаем
-    existing = text.split('\n\n')
-    if len(existing) >= 4:
-        good = [p for p in existing if len(p.strip()) > 30]
-        if len(good) >= 3:
-            return text
+    # Сначала разбиваем по диалогам (всегда!)
+    lines = text.split('\n')
+    processed_lines = []
+    current_paragraph = []
+    in_dialog = False
     
-    # Разбиваем по предложениям
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    
-    if len(sentences) < 5:
-        return force_split_by_length(text)
-    
-    paragraphs = []
-    current_para = []
-    current_len = 0
-    is_in_dialog = False
-    
-    for sent in sentences:
-        sent = sent.strip()
-        if not sent:
-            continue
+    for line in lines:
+        stripped = line.strip()
         
-        # Проверяем, является ли предложение диалогом
+        # Проверяем, является ли строка диалогом
         is_dialog = (
-            sent.startswith('—') or 
-            sent.startswith('"') or 
-            sent.startswith('«') or
-            sent.startswith('–')
+            stripped.startswith('—') or 
+            stripped.startswith('"') or 
+            stripped.startswith('«') or
+            stripped.startswith('–') or
+            (stripped.startswith('-') and len(stripped) > 1 and stripped[1] != ' ')
         )
         
-        # Проверяем, не начинается ли предложение с новой темы
-        is_new_topic = any(sent.startswith(w) for w in ['Алексей', 'Масарик', 'Анна', 'Кросс', 'Он', 'Она', 'Они'])
-        
-        # Проверяем длину
-        is_long = len(sent) > 200
-        
-        # === НОВАЯ ЛОГИКА ДЛЯ ДИАЛОГОВ ===
-        if is_dialog:
-            # Если это диалог, а текущий абзац не пустой — закрываем его
-            if current_para:
-                paragraphs.append(' '.join(current_para))
-                current_para = []
-                current_len = 0
-            # Добавляем диалог как отдельный абзац
-            paragraphs.append(sent)
-            is_in_dialog = True
+        # Если строка пустая — пропускаем
+        if not stripped:
             continue
         
-        # Если вышли из диалога
-        if is_in_dialog and not is_dialog:
-            is_in_dialog = False
-            # Если есть накопленный текст — начинаем новый абзац
-            if current_para:
-                paragraphs.append(' '.join(current_para))
-                current_para = []
-                current_len = 0
+        # Если это диалог
+        if is_dialog:
+            # Если есть накопленный текст — сохраняем его как абзац
+            if current_paragraph:
+                processed_lines.append(' '.join(current_paragraph))
+                current_paragraph = []
+            # Диалог добавляем отдельным абзацем
+            processed_lines.append(line.strip())
+            in_dialog = True
+            continue
         
-        # === ЛОГИКА ДЛЯ ОБЫЧНЫХ ПРЕДЛОЖЕНИЙ ===
-        should_break = False
+        # Если вышли из диалога (предыдущая строка была диалогом, а текущая — нет)
+        if in_dialog and not is_dialog:
+            in_dialog = False
+            # Начинаем новый абзац с этого предложения
+            if current_paragraph:
+                processed_lines.append(' '.join(current_paragraph))
+                current_paragraph = []
         
-        # 1. Если начинается новая тема
-        if is_new_topic and current_para:
-            should_break = True
-        
-        # 2. Если предложение очень длинное
-        if is_long and current_para:
-            should_break = True
-        
-        # 3. Если в абзаце уже 3-5 предложений и длина > 300 символов
-        if len(current_para) >= 3 and current_len > 300 and is_new_topic:
-            should_break = True
-        
-        # 4. Если в абзаце больше 5 предложений
-        if len(current_para) >= 5:
-            should_break = True
-        
-        # Если нужно разорвать
-        if should_break and current_para:
-            paragraphs.append(' '.join(current_para))
-            current_para = []
-            current_len = 0
-        
-        # Добавляем предложение в текущий абзац
-        current_para.append(sent)
-        current_len += len(sent)
+        # Обычное предложение — добавляем в текущий абзац
+        current_paragraph.append(line.strip())
     
     # Добавляем последний абзац
-    if current_para:
-        paragraphs.append(' '.join(current_para))
+    if current_paragraph:
+        processed_lines.append(' '.join(current_paragraph))
     
-    # Проверяем результат
-    if len(paragraphs) < 2 and len(sentences) > 10:
+    # Если получилось слишком мало абзацев — разбиваем по длине
+    if len(processed_lines) < 2 and len(text) > 400:
         return force_split_by_length(text)
     
-    return '\n\n'.join(paragraphs)
+    # Собираем результат
+    result = '\n\n'.join(processed_lines)
+    
+    # Если диалогов нет — пробуем обычное разбиение
+    if '—' not in result and '"' not in result and '«' not in result:
+        return force_split_by_length(text)
+    
+    return result
 
 
 def force_split_by_length(text: str, max_chars: int = 450) -> str:
@@ -389,7 +354,7 @@ def api_revise():
                     "summary": f"Текст переработан через цепочку переводов. Абзацев: {final_para_count}",
                     "changes": [
                         "Переведён через Google Translate (RU→JA→FI→EN→RU)",
-                        f"Разделён на {final_para_count} логических абзацев"
+                        f"Разделён на {final_para_count} логических абзацев, диалоги выделены"
                     ],
                     "checklist": []
                 })
