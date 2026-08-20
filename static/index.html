@@ -491,38 +491,120 @@ function smartSplitIntoParagraphs(text) {
         text = text.replace(pattern, replacement);
     }
 
-    // === 3. ВЫДЕЛЯЕМ ДИАЛОГИ ===
-    // Ищем все диалоги (—, «, »)
-    const dialogRegex = /(—[^—]*?)(?=—|$)/g;
-    const dialogs = text.match(dialogRegex) || [];
+    // === 3. РАЗБИЕНИЕ НА АБЗАЦЫ ===
+    // Разбиваем по предложениям (по точкам, вопросительным и восклицательным знакам)
+    let sentences = text.match(/[^.!?]+[.!?]+/g);
     
-    let result = '';
-    let lastIndex = 0;
+    if (!sentences || sentences.length < 2) {
+        // Запасной вариант: разбиваем по запятым с большой буквы
+        sentences = text.split(/,\s*(?=[А-ЯA-Z])/);
+    }
     
-    if (dialogs.length > 0) {
-        for (const dialog of dialogs) {
-            const index = text.indexOf(dialog, lastIndex);
-            if (index > lastIndex) {
-                const beforeText = text.slice(lastIndex, index).trim();
-                if (beforeText) {
-                    // Разбиваем обычный текст на абзацы
-                    result += splitByNaturalBreaks(beforeText) + '\n\n';
-                }
+    if (!sentences || sentences.length < 2) {
+        // Последний запасной вариант: разбиваем по длине
+        const chunks = [];
+        const words = text.split(' ');
+        let current = [];
+        let currentLen = 0;
+        const targetLen = 350;
+        
+        for (const word of words) {
+            if (currentLen > targetLen && current.length >= 5) {
+                chunks.push(current.join(' '));
+                current = [];
+                currentLen = 0;
             }
-            result += dialog.trim() + '\n\n';
-            lastIndex = index + dialog.length;
+            current.push(word);
+            currentLen += word.length + 1;
         }
-        
-        const afterText = text.slice(lastIndex).trim();
-        if (afterText) {
-            result += splitByNaturalBreaks(afterText);
+        if (current.length > 0) {
+            chunks.push(current.join(' '));
         }
-        
-        return result.replace(/\n{3,}/g, '\n\n');
+        return chunks.join('\n\n');
     }
 
-    // === 4. ЕСЛИ ДИАЛОГОВ НЕТ ===
-    return splitByNaturalBreaks(text);
+    // === 4. ГРУППИРУЕМ ПРЕДЛОЖЕНИЯ В АБЗАЦЫ ===
+    const paragraphs = [];
+    let currentPara = [];
+    let currentLen = 0;
+    const targetLen = 350;
+    let inDialog = false;
+
+    for (const sent of sentences) {
+        const trimmed = sent.trim();
+        if (!trimmed) continue;
+
+        // Проверяем, является ли предложение диалогом
+        // Диалог — это когда предложение начинается с "—" или '"' или '«'
+        const isDialog = trimmed.startsWith('—') || trimmed.startsWith('"') || trimmed.startsWith('«');
+        
+        // Если это диалог — выделяем в отдельный абзац
+        if (isDialog) {
+            // Закрываем текущий абзац
+            if (currentPara.length > 0) {
+                paragraphs.push(currentPara.join(' '));
+                currentPara = [];
+                currentLen = 0;
+            }
+            // Собираем все предложения диалога (до следующего не-диалога)
+            let dialogText = trimmed;
+            inDialog = true;
+            continue;
+        }
+        
+        // Если мы внутри диалога, но текущее предложение не диалог — значит диалог закончился
+        if (inDialog) {
+            // Предыдущий диалог уже был добавлен, а это — продолжение
+            // Добавляем его в новый абзац
+            paragraphs.push(dialogText);
+            dialogText = '';
+            inDialog = false;
+            // Текущее предложение начинает новый абзац
+            currentPara.push(trimmed);
+            currentLen += trimmed.length;
+            continue;
+        }
+
+        // Обычное предложение
+        if (currentLen > targetLen && currentPara.length >= 2) {
+            paragraphs.push(currentPara.join(' '));
+            currentPara = [];
+            currentLen = 0;
+        }
+
+        currentPara.push(trimmed);
+        currentLen += trimmed.length;
+    }
+
+    // Добавляем последний абзац
+    if (currentPara.length > 0) {
+        paragraphs.push(currentPara.join(' '));
+    }
+    
+    // Если после всего получился один абзац — разбиваем по длине
+    if (paragraphs.length === 1 && text.length > 500) {
+        const chunks = [];
+        const words = text.split(' ');
+        let current = [];
+        let currentLen = 0;
+        const targetLen = 350;
+        
+        for (const word of words) {
+            if (currentLen > targetLen && current.length >= 5) {
+                chunks.push(current.join(' '));
+                current = [];
+                currentLen = 0;
+            }
+            current.push(word);
+            currentLen += word.length + 1;
+        }
+        if (current.length > 0) {
+            chunks.push(current.join(' '));
+        }
+        return chunks.join('\n\n');
+    }
+
+    return paragraphs.join('\n\n');
 }
 
 // === ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ: умное разбиение ===
