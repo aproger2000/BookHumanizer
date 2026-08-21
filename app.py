@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.6.0 — стабильная версия (RU→EN→RU, минимальная очистка)
+Chapter Editor v3.7.1 — поддержка промежуточных языков (включая чешский)
 """
 import json
 import os
@@ -19,12 +19,21 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.6.0"
+APP_VERSION = "3.7.1"
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
+
+# Выбор промежуточного языка (по умолчанию английский)
+INTERMEDIATE_LANG = os.environ.get("INTERMEDIATE_LANG", "en").lower()
+VALID_LANGS = {"en", "es", "fr", "it", "de", "cs"}  # добавили чешский
+if INTERMEDIATE_LANG not in VALID_LANGS:
+    logger.warning(f"Unknown INTERMEDIATE_LANG={INTERMEDIATE_LANG}, falling back to 'en'")
+    INTERMEDIATE_LANG = "en"
+
+logger.info(f"Intermediate language: {INTERMEDIATE_LANG.upper()} (chain: RU→{INTERMEDIATE_LANG.upper()}→RU)")
 
 
 class ChapterEditError(RuntimeError):
@@ -91,8 +100,8 @@ def process_chunk_through_chain(text: str) -> str:
     if not text or len(text.strip()) < 2:
         return text
     try:
-        en = translate_with_fallback(text, target_lang="en")
-        ru = translate_with_fallback(en, target_lang="ru")
+        intermediate = translate_with_fallback(text, target_lang=INTERMEDIATE_LANG)
+        ru = translate_with_fallback(intermediate, target_lang="ru")
         return ru
     except Exception as e:
         logger.error(f"Chunk processing error: {e}")
@@ -134,7 +143,7 @@ def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> list:
 
 
 def apply_translation_chain_full(text: str) -> str:
-    logger.info(f"Starting translation chain (RU→EN→RU) for {len(text)} chars...")
+    logger.info(f"Starting translation chain (RU→{INTERMEDIATE_LANG.upper()}→RU) for {len(text)} chars...")
     chunks = split_text_into_chunks(text)
     logger.info(f"Split into {len(chunks)} chunks")
     processed_chunks = []
@@ -151,12 +160,13 @@ def apply_translation_chain_full(text: str) -> str:
     return result
 
 
-def minimal_clean(text: str) -> str:
-    # Удаляем только явные мусорные фразы
-    patterns = [
+def get_artifact_patterns(lang: str) -> list:
+    """Возвращает список паттернов артефактов для конкретного языка."""
+    base = [
         r'\bMIT\b',
         r'\bI thought so\b',
         r'\bThey will all call\b',
+        r'\bWhat I propose is simple\b',
         r'\bNo bureaucracy\b',
         r'\bNo grant fees\b',
         r'\bIn return nothing\b',
@@ -175,11 +185,65 @@ def minimal_clean(text: str) -> str:
         r'\bwhen the world changes\b',
         r'\bwe\'d like you to remember\b',
         r'\bwho your friends were\b',
+        r'\bThe sun reflected in their tinted glass\b',
+        r'\bAlexey looked down at the black SUVs\b',
+        r'\blike a глаза акулы\b',
+        r'\bglass like a\b',
+        r'\bthe genius\b',
+        r'\bof a student\b',
+        r'\bfrom Siberia\b',
+        r'\bnow he watched\b',
+        r'\bas that spark\b',
+        r'\bignited its owner\'s career\b',
+        r'\bI came to warn you\b',
+        r'\bthey want to seduce you\b',
+        r'\bthey provide the lab\b',
+        r'\bbudget and team\b',
+        r'\bwhatever you want\b',
+        r'\bhowever research requires a license\b',
+        r'\bA group came from\b',
+        r'\bsaid more quietly\b',
     ]
+
+    lang_patterns = {
+        'es': [
+            r'\bque\b', r'\bde\b', r'\bel\b', r'\bla\b', r'\blos\b', r'\blas\b',
+            r'\bun\b', r'\buna\b', r'\by\b', r'\bo\b', r'\bpero\b', r'\bes\b',
+            r'\bson\b', r'\bestá\b', r'\bestán\b', r'\bcomo\b', r'\bcuando\b',
+        ],
+        'fr': [
+            r'\ble\b', r'\bla\b', r'\bles\b', r'\bde\b', r'\bdes\b', r'\bet\b',
+            r'\bou\b', r'\bmais\b', r'\best\b', r'\bsont\b', r'\best-ce\b',
+            r'\bque\b', r'\bqui\b', r'\bou\b', r'\bdans\b', r'\bpour\b',
+        ],
+        'it': [
+            r'\bil\b', r'\bla\b', r'\ble\b', r'\bdi\b', r'\bche\b', r'\be\b',
+            r'\bo\b', r'\bma\b', r'\bè\b', r'\bsono\b', r'\bper\b', r'\bcon\b',
+        ],
+        'de': [
+            r'\bder\b', r'\bdie\b', r'\bdas\b', r'\bden\b', r'\bdem\b',
+            r'\bdes\b', r'\bmit\b', r'\bfür\b', r'\bauf\b', r'\bvon\b',
+            r'\bzu\b', r'\bund\b', r'\boder\b', r'\baber\b', r'\bdoch\b',
+            r'\bist\b', r'\bwar\b', r'\bhat\b', r'\bsagte\b', r'\bsagten\b',
+        ],
+        'cs': [
+            r'\bjsem\b', r'\bse\b', r'\bže\b', r'\bto\b', r'\bna\b',
+            r'\bpro\b', r'\bs\b', r'\bdo\b', r'\ba\b', r'\bale\b',
+            r'\bnebo\b', r'\bjsou\b', r'\bje\b', r'\bjsme\b', r'\bby\b',
+            r'\bco\b', r'\bkdo\b', r'\bjak\b', r'\bten\b', r'\btato\b',
+            r'\btoto\b', r'\bti\b', r'\bvy\b', r'\bon\b', r'\bona\b',
+            r'\bono\b', r'\bmy\b', r'\bvy\b', r'\boni\b', r'\bony\b',
+        ],
+    }
+    extra = lang_patterns.get(lang, [])
+    return base + extra
+
+
+def minimal_clean(text: str) -> str:
+    patterns = get_artifact_patterns(INTERMEDIATE_LANG)
     for pat in patterns:
         text = re.sub(pat, '', text, flags=re.IGNORECASE)
 
-    # Чистка пробелов и знаков
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
     text = re.sub(r'\s+', ' ', text)
@@ -187,7 +251,6 @@ def minimal_clean(text: str) -> str:
     text = re.sub(r'—\s*', '— ', text)
     text = text.replace('""', '"').replace('""', '"')
 
-    # Проверенные замены
     fixes = [
         (r'черного вина', 'черного кофе'),
         (r'\bТоки\b', '«Ибис»'),
@@ -211,12 +274,12 @@ def apply_light_polish(text: str) -> str:
 
 @app.get("/api/health")
 def health():
-    return jsonify(status="ok", version=APP_VERSION)
+    return jsonify(status="ok", version=APP_VERSION, chain=INTERMEDIATE_LANG.upper())
 
 
 @app.post("/api/revise")
 def api_revise():
-    logger.info("=== api_revise: START ===")
+    logger.info(f"=== api_revise: START (lang={INTERMEDIATE_LANG.upper()}) ===")
     try:
         file_storage = request.files.get("file")
         text = request.form.get("text", "")
@@ -239,13 +302,14 @@ def api_revise():
             logger.warning(f"Truncated text to {MAX_CHARS} chars")
 
         original_len = len(chapter_text)
+        logger.info(f"Original text length: {original_len}")
 
         def generate():
             try:
-                yield _sse("progress", {"chars": 0, "estimated_total": original_len, "percent": 0, "log": "Начинаем обработку..."})
+                yield _sse("progress", {"chars": 0, "estimated_total": original_len, "percent": 0, "log": f"Начинаем обработку (RU→{INTERMEDIATE_LANG.upper()}→RU)..."})
 
-                # 1. Цепочка переводов (RU→EN→RU)
-                logger.info("Step 1: Translation chain (RU→EN→RU)...")
+                # 1. Цепочка переводов
+                logger.info(f"Step 1: Translation chain (RU→{INTERMEDIATE_LANG.upper()}→RU)...")
                 processed_text = apply_translation_chain_full(chapter_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 50, "log": f"Переводы завершены ({len(processed_text)} симв.)"})
 
@@ -268,9 +332,9 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": f"Текст переработан через цепочку RU→EN→RU с минимальной очисткой. Потеря: {loss:.1%}.",
+                    "summary": f"Текст переработан через цепочку RU→{INTERMEDIATE_LANG.upper()}→RU с минимальной очисткой. Потеря: {loss:.1%}.",
                     "changes": [
-                        "Переведён через Google Translate / MyMemory (RU→EN→RU)",
+                        f"Переведён через Google Translate / MyMemory (RU→{INTERMEDIATE_LANG.upper()}→RU)",
                         "Удалены явные артефакты перевода"
                     ],
                     "checklist": []
