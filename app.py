@@ -152,7 +152,7 @@ def apply_translation_chain_full(text: str) -> str:
 
 
 def minimal_clean(text: str) -> str:
-    # Удаляем только самые явные артефакты (без удаления смысловых частей)
+    # Удаляем только явные мусорные фразы
     patterns = [
         r'\bMIT\b',
         r'\bI thought so\b',
@@ -179,7 +179,7 @@ def minimal_clean(text: str) -> str:
     for pat in patterns:
         text = re.sub(pat, '', text, flags=re.IGNORECASE)
 
-    # Чистка пробелов
+    # Чистка пробелов и знаков
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
     text = re.sub(r'\s+', ' ', text)
@@ -187,7 +187,7 @@ def minimal_clean(text: str) -> str:
     text = re.sub(r'—\s*', '— ', text)
     text = text.replace('""', '"').replace('""', '"')
 
-    # Исправления (только проверенные)
+    # Проверенные замены
     fixes = [
         (r'черного вина', 'черного кофе'),
         (r'\bТоки\b', '«Ибис»'),
