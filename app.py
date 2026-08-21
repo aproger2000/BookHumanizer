@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.7.4 — финальная чистка артефактов чешской цепочки
+Chapter Editor v3.8.0 — упрощённый пост-процессинг (только явные артефакты)
 """
 import json
 import os
@@ -19,18 +19,19 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.7.4"
+APP_VERSION = "3.8.0"
 MAX_CHARS = 30_000
-CHUNK_SIZE = 4000  # увеличено для лучшей связности
+CHUNK_SIZE = 4000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 
-INTERMEDIATE_LANG = os.environ.get("INTERMEDIATE_LANG", "cs").lower()
-VALID_LANGS = {"en", "es", "fr", "it", "de", "cs", "pl", "sk"}
+# Выбор языка: 'en' (стабильно) или 'cs' (экспериментально, выше HUMAN)
+INTERMEDIATE_LANG = os.environ.get("INTERMEDIATE_LANG", "en").lower()
+VALID_LANGS = {"en", "cs"}
 if INTERMEDIATE_LANG not in VALID_LANGS:
-    logger.warning(f"Unknown INTERMEDIATE_LANG={INTERMEDIATE_LANG}, falling back to 'cs'")
-    INTERMEDIATE_LANG = "cs"
+    logger.warning(f"Unknown INTERMEDIATE_LANG={INTERMEDIATE_LANG}, falling back to 'en'")
+    INTERMEDIATE_LANG = "en"
 
 logger.info(f"Intermediate language: {INTERMEDIATE_LANG.upper()} (chain: RU→{INTERMEDIATE_LANG.upper()}→RU)")
 
@@ -159,12 +160,13 @@ def apply_translation_chain_full(text: str) -> str:
     return result
 
 
-def get_artifact_patterns(lang: str) -> list:
-    base = [
+def minimal_clean(text: str) -> str:
+    """Удаляем только самые явные мусорные фразы, не трогая остальное."""
+    # Универсальные паттерны (для любого языка)
+    universal = [
         r'\bMIT\b',
         r'\bI thought so\b',
         r'\bThey will all call\b',
-        r'\bWhat I propose is simple\b',
         r'\bNo bureaucracy\b',
         r'\bNo grant fees\b',
         r'\bIn return nothing\b',
@@ -183,78 +185,36 @@ def get_artifact_patterns(lang: str) -> list:
         r'\bwhen the world changes\b',
         r'\bwe\'d like you to remember\b',
         r'\bwho your friends were\b',
-        r'\bThe sun reflected in their tinted glass\b',
-        r'\bAlexey looked down at the black SUVs\b',
-        r'\blike a глаза акулы\b',
-        r'\bglass like a\b',
-        r'\bthe genius\b',
-        r'\bof a student\b',
-        r'\bfrom Siberia\b',
-        r'\bnow he watched\b',
-        r'\bas that spark\b',
-        r'\bignited its owner\'s career\b',
-        r'\bI came to warn you\b',
-        r'\bthey want to seduce you\b',
-        r'\bthey provide the lab\b',
-        r'\bbudget and team\b',
-        r'\bwhatever you want\b',
-        r'\bhowever research requires a license\b',
-        r'\bA group came from\b',
-        r'\bsaid more quietly\b',
+    ]
+    # Специфические для чешской цепочки (только явные испанские и английские вставки)
+    cs_specific = [
+        (r'Vino quieren alejarte', ''),
+        (r'Laboratorio, presupuesto, Equipment\. Todo lo quieras\.', ''),
+        (r'necesitan licencia para su review', ''),
+        (r'Por suuesto necesitan tu batería', '— Разумеется, им нужна твоя батарея'),
+        (r'silent\. “, "\. — And in return\? — In return — nothing\. , \. \. like a shark\'s', ''),
+        (r'Empty Null: Final Drawings', 'Нуль-вакуум: финальные чертежи'),
+        (r'Null Vacuum: Final Drawings', 'Нуль-вакуум: финальные чертежи'),
+        # Ошибки в именах
+        (r'ММистер Штерн', 'Мистер Штерн'),
+        (r'мМистер Штерн', 'Мистер Штерн'),
+        (r'Стерн', 'Штерн'),  # универсальная замена
+        # Лишние кавычки у Ибиса
+        (r'««««Ибис»»»»', '«Ибис»'),
+        (r'«««Ибис»»»', '«Ибис»'),
+        (r'««Ибис»»', '«Ибис»'),
+        (r'««Ибис»а»', '«Ибиса»'),
     ]
 
-    lang_patterns = {
-        'es': [
-            r'\bque\b', r'\bde\b', r'\bel\b', r'\bla\b', r'\blos\b', r'\blas\b',
-            r'\bun\b', r'\buna\b', r'\by\b', r'\bo\b', r'\bpero\b', r'\bes\b',
-            r'\bson\b', r'\bestá\b', r'\bestán\b', r'\bcomo\b', r'\bcuando\b',
-        ],
-        'fr': [
-            r'\ble\b', r'\bla\b', r'\bles\b', r'\bde\b', r'\bdes\b', r'\bet\b',
-            r'\bou\b', r'\bmais\b', r'\best\b', r'\bsont\b', r'\best-ce\b',
-            r'\bque\b', r'\bqui\b', r'\bou\b', r'\bdans\b', r'\bpour\b',
-        ],
-        'it': [
-            r'\bil\b', r'\bla\b', r'\ble\b', r'\bdi\b', r'\bche\b', r'\be\b',
-            r'\bo\b', r'\bma\b', r'\bè\b', r'\bsono\b', r'\bper\b', r'\bcon\b',
-        ],
-        'de': [
-            r'\bder\b', r'\bdie\b', r'\bdas\b', r'\bden\b', r'\bdem\b',
-            r'\bdes\b', r'\bmit\b', r'\bfür\b', r'\bauf\b', r'\bvon\b',
-            r'\bzu\b', r'\bund\b', r'\boder\b', r'\baber\b', r'\bdoch\b',
-            r'\bist\b', r'\bwar\b', r'\bhat\b', r'\bsagte\b', r'\bsagten\b',
-        ],
-        'cs': [
-            r'\bjsem\b', r'\bse\b', r'\bže\b', r'\bto\b', r'\bna\b',
-            r'\bpro\b', r'\bs\b', r'\bdo\b', r'\ba\b', r'\bale\b',
-            r'\bnebo\b', r'\bjsou\b', r'\bje\b', r'\bjsme\b', r'\bby\b',
-            r'\bco\b', r'\bkdo\b', r'\bjak\b', r'\bten\b', r'\btato\b',
-            r'\btoto\b', r'\bti\b', r'\bvy\b', r'\bon\b', r'\bona\b',
-            r'\bono\b', r'\bmy\b', r'\bvy\b', r'\boni\b', r'\bony\b',
-        ],
-        'pl': [
-            r'\bjestem\b', r'\bsię\b', r'\bże\b', r'\bto\b', r'\bna\b',
-            r'\bna\b', r'\bpo\b', r'\bdo\b', r'\bi\b', r'\bale\b',
-            r'\blub\b', r'\bsą\b', r'\bjest\b', r'\bjesteśmy\b', r'\bby\b',
-            r'\bco\b', r'\bten\b', r'\bta\b', r'\bto\b', r'\btam\b',
-        ],
-        'sk': [
-            r'\bsom\b', r'\bsa\b', r'\bže\b', r'\bto\b', r'\bna\b',
-            r'\bpre\b', r'\bs\b', r'\bdo\b', r'\ba\b', r'\bale\b',
-            r'\balebo\b', r'\bsú\b', r'\bje\b', r'\bsme\b', r'\bby\b',
-            r'\bčo\b', r'\bkto\b', r'\bako\b', r'\bten\b', r'\btá\b',
-            r'\btoto\b', r'\bti\b', r'\bvy\b', r'\bon\b', r'\bona\b',
-        ],
-    }
-    extra = lang_patterns.get(lang, [])
-    return base + extra
-
-
-def minimal_clean(text: str) -> str:
-    patterns = get_artifact_patterns(INTERMEDIATE_LANG)
-    for pat in patterns:
+    # Применяем универсальные паттерны
+    for pat in universal:
         text = re.sub(pat, '', text, flags=re.IGNORECASE)
 
+    # Применяем специфические замены
+    for pat, repl in cs_specific:
+        text = re.sub(pat, repl, text, flags=re.IGNORECASE)
+
+    # Чистка лишних пробелов и знаков (без удаления текста)
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
     text = re.sub(r'\s+', ' ', text)
@@ -262,6 +222,7 @@ def minimal_clean(text: str) -> str:
     text = re.sub(r'—\s*', '— ', text)
     text = text.replace('""', '"').replace('""', '"')
 
+    # Стандартные исправления
     fixes = [
         (r'черного вина', 'черного кофе'),
         (r'\bТоки\b', '«Ибис»'),
@@ -271,68 +232,6 @@ def minimal_clean(text: str) -> str:
     ]
     for pat, repl in fixes:
         text = re.sub(pat, repl, text, flags=re.IGNORECASE)
-
-    # === ФИНАЛЬНАЯ ЧИСТКА ДЛЯ ЧЕШСКОЙ ЦЕПОЧКИ ===
-    cs_specific_fixes = [
-        # Испанские вставки
-        (r'Vino quieren alejarte', ''),
-        (r'Laboratorio, presupuesto, Equipment\. Todo lo quieras\.', ''),
-        (r'necesitan licencia para su review', ''),
-        (r'Por suuesto necesitan tu batería', '— Разумеется, им нужна твоя батарея'),
-        # Английские и смешанные
-        (r'silent\. “, "\. — And in return\? — In return — nothing\. , \. \. like a shark\'s', ''),
-        (r'Empty Null: Final Drawings', 'Нуль-вакуум: финальные чертежи'),
-        (r'Null Vacuum: Final Drawings', 'Нуль-вакуум: финальные чертежи'),
-        # Чешские артефакты
-        (r'Доконце и упрощен океан', 'Хоть посреди океана'),
-        (r'Алеспон на возвращении в страну Месице', 'Хоть на обратной стороне Луны'),
-        (r'На Месичи не в частном океане', 'На Луне нет океана'),
-        (r'Так же, чтобы доставить Бржеху Морже Дешту', 'Значит, построим на берегу моря Дождей'),
-        (r'Масарик сепжал руче', 'Масарик всплеснул руками'),
-        (r'Покуд на грибок', 'Если это сработает'),
-        (r'Як тато Йискра Карьеру «Пршишел tě vovat», řekl tišeji\.', ''),
-        (r'Пршишел tě vovat', ''),
-        (r'řekl tišeji', ''),
-        # Удаление бессмысленных чешских фраз
-        (r'Скутечне\. Кдеколи\. Алеспонь на врчолу гори\.', ''),
-        (r'Анна была не в восторге, и Пак вытахал из капсы пахлый тужик и рычала не на улице, на старом кресле\.', ''),
-        (r'Пак вытахал из капсы пахлый тужик', ''),
-        (r'Анна была не в восторге', ''),
-        # Удвоенные кавычки у Ибиса
-        (r'««««Ибис»»»»', '«Ибис»'),
-        (r'«««Ибис»»»', '«Ибис»'),
-        (r'««Ибис»»', '«Ибис»'),
-        (r'«Ибис»а', '«Ибиса»'),
-        (r'«««Ибис»»»а', '«Ибиса»'),
-        (r'««Ибис»»а', '«Ибиса»'),
-        (r'«««Ибис»»»а', '«Ибиса»'),
-        # Ошибки в имени
-        (r'ММистер Штерн', 'Мистер Штерн'),
-        (r'ММистер Штерн', 'Мистер Штерн'),
-        (r'мМистер Штерн', 'Мистер Штерн'),
-        (r'Мистер Штерн', 'Мистер Штерн'),  # уже правильно
-        (r'господин Штерн', 'господин Штерн'),
-        (r'Штерн', 'Штерн'),  # фиксируем
-        (r'Стерн', 'Штерн'),  # везде заменяем Стерн на Штерн
-        # Реплики
-        (r'Ты серьёзно спятил', 'Ты правда ненормальный'),
-        (r'Да неужели\?', '— Серьезно?'),
-        (r'— М\?', '— Мистер Штерн?'),
-        (r'истер Штерн', 'Мистер Штерн'),
-        (r'— Мир стоит на пороге великих перемен, господин Стерн', '— Мир на пороге больших перемен, мистер Штерн'),
-        (r'— Это пистолет, мистер Стерн', '— Это оружие, мистер Штерн'),
-        (r'— Что это такое\?', '— Что это?'),
-        (r'— Что это такое', '— Что это'),
-        # Убираем одиночные чешские слова
-        (r'\b[A-Za-zčřžýáíéůúěňťď]{5,}\b', ''),
-        (r'\b[A-Za-zčřžýáíéůúěňťď]+\b', ''),
-    ]
-    for pat, repl in cs_specific_fixes:
-        text = re.sub(pat, repl, text, flags=re.IGNORECASE)
-
-    # Восстановление кавычек для названий
-    text = re.sub(r'«Ибис»', '«Ибис»', text)
-    text = re.sub(r'Ибис', '«Ибис»', text)
 
     return text.strip()
 
@@ -385,7 +284,7 @@ def api_revise():
                 processed_text = apply_translation_chain_full(chapter_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 50, "log": f"Переводы завершены ({len(processed_text)} симв.)"})
 
-                logger.info("Step 2: Minimal cleanup...")
+                logger.info("Step 2: Minimal cleanup (only obvious artifacts)...")
                 processed_text = minimal_clean(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 70, "log": f"Очистка выполнена ({len(processed_text)} симв.)"})
 
@@ -399,14 +298,15 @@ def api_revise():
                 loss = (original_len - final_len) / original_len
                 logger.info(f"Final: {final_len} chars, loss {loss:.2%}")
 
+                summary = f"Текст переработан через цепочку RU→{INTERMEDIATE_LANG.upper()}→RU с минимальной очисткой. Потеря: {loss:.1%}."
+
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": f"Текст переработан через цепочку RU→{INTERMEDIATE_LANG.upper()}→RU с точечной очисткой. Потеря: {loss:.1%}.",
+                    "summary": summary,
                     "changes": [
                         f"Переведён через Google Translate / MyMemory (RU→{INTERMEDIATE_LANG.upper()}→RU)",
-                        "Удалены явные артефакты перевода",
-                        "Исправлены специфические артефакты чешской цепочки"
+                        "Удалены только явные артефакты (не затрагивая остальной текст)"
                     ],
                     "checklist": []
                 })
