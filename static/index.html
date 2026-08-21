@@ -119,104 +119,80 @@
 
 <script>
 (function() {
-    // === УМНОЕ РАЗБИЕНИЕ НА АБЗАЦЫ (без удаления текста) ===
-    function smartSplitIntoParagraphs(text) {
-        if (!text || text.length < 150) return text;
+    // === БЕЗОПАСНОЕ РАЗБИЕНИЕ НА АБЗАЦЫ (БЕЗ ПОТЕРИ СИМВОЛОВ) ===
+    function splitIntoParagraphsSafe(text) {
+        if (!text || text.length < 200) return text;
 
+        // 1. Пробуем разбить по предложениям (.!?)
         let sentences = text.match(/[^.!?]+[.!?]+/g);
-        if (!sentences || sentences.length < 2) {
-            sentences = text.split(/,\s*(?=[А-ЯA-Z])/);
-        }
-        if (!sentences || sentences.length < 2) {
-            const chunks = [];
-            const words = text.split(' ');
+        if (sentences && sentences.length >= 2) {
+            const paragraphs = [];
             let current = [];
             let currentLen = 0;
-            const targetLen = 350;
-            for (const word of words) {
-                if (currentLen > targetLen && current.length >= 5) {
-                    chunks.push(current.join(' '));
+            const targetLen = 400;
+
+            for (const sent of sentences) {
+                const trimmed = sent.trim();
+                if (!trimmed) continue;
+
+                // Диалоги — отдельный абзац
+                const isDialog = /^[—"«–]/.test(trimmed);
+                if (isDialog) {
+                    if (current.length > 0) {
+                        paragraphs.push(current.join(' '));
+                        current = [];
+                        currentLen = 0;
+                    }
+                    paragraphs.push(trimmed);
+                    continue;
+                }
+
+                if (currentLen + trimmed.length > targetLen && current.length >= 2) {
+                    paragraphs.push(current.join(' '));
                     current = [];
                     currentLen = 0;
                 }
-                current.push(word);
-                currentLen += word.length + 1;
-            }
-            if (current.length > 0) {
-                chunks.push(current.join(' '));
-            }
-            return chunks.join('\n\n');
-        }
-
-        const paragraphs = [];
-        let currentPara = [];
-        let currentLen = 0;
-        const targetLen = 350;
-        let inDialog = false;
-        let dialogText = '';
-
-        for (const sent of sentences) {
-            const trimmed = sent.trim();
-            if (!trimmed) continue;
-
-            const isDialog = trimmed.startsWith('—') || trimmed.startsWith('"') || trimmed.startsWith('«');
-
-            if (isDialog) {
-                if (currentPara.length > 0) {
-                    paragraphs.push(currentPara.join(' '));
-                    currentPara = [];
-                    currentLen = 0;
-                }
-                dialogText = trimmed;
-                inDialog = true;
-                continue;
-            }
-
-            if (inDialog) {
-                paragraphs.push(dialogText);
-                dialogText = '';
-                inDialog = false;
-                currentPara.push(trimmed);
+                current.push(trimmed);
                 currentLen += trimmed.length;
-                continue;
             }
 
-            if (currentLen > targetLen && currentPara.length >= 2) {
-                paragraphs.push(currentPara.join(' '));
-                currentPara = [];
-                currentLen = 0;
-            }
-
-            currentPara.push(trimmed);
-            currentLen += trimmed.length;
-        }
-
-        if (currentPara.length > 0) {
-            paragraphs.push(currentPara.join(' '));
-        }
-
-        if (paragraphs.length === 1 && text.length > 500) {
-            const chunks = [];
-            const words = text.split(' ');
-            let current = [];
-            let currentLen = 0;
-            const targetLen = 350;
-            for (const word of words) {
-                if (currentLen > targetLen && current.length >= 5) {
-                    chunks.push(current.join(' '));
-                    current = [];
-                    currentLen = 0;
-                }
-                current.push(word);
-                currentLen += word.length + 1;
-            }
             if (current.length > 0) {
-                chunks.push(current.join(' '));
+                paragraphs.push(current.join(' '));
             }
-            return chunks.join('\n\n');
+
+            // Если получился только один абзац, а текст длинный — используем запасной вариант
+            if (paragraphs.length === 1 && text.length > 600) {
+                return splitByLength(text);
+            }
+
+            return paragraphs.join('\n\n');
         }
 
-        return paragraphs.join('\n\n');
+        // 2. Запасной вариант: разбиение по длине (без потери символов)
+        return splitByLength(text);
+    }
+
+    function splitByLength(text) {
+        const chunkSize = 400;
+        const result = [];
+        let i = 0;
+        while (i < text.length) {
+            let end = i + chunkSize;
+            if (end >= text.length) {
+                result.push(text.slice(i));
+                break;
+            }
+            // Ищем пробел, чтобы не разрывать слово
+            let space = text.lastIndexOf(' ', end);
+            if (space <= i) {
+                space = end;
+            }
+            result.push(text.slice(i, space));
+            i = space + 1;
+            // Пропускаем лишние пробелы между абзацами
+            while (i < text.length && text[i] === ' ') i++;
+        }
+        return result.join('\n\n');
     }
 
     // === ЭЛЕМЕНТЫ ===
@@ -338,7 +314,7 @@
         })
         .then(data => {
             const rawText = data.revised_text || '';
-            const formattedText = smartSplitIntoParagraphs(rawText);
+            const formattedText = splitIntoParagraphsSafe(rawText);
             setStep(3, 'Готово!');
             resultText.value = formattedText;
             resultCount.textContent = formattedText.length + ' симв.';
