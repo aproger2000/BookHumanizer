@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.6.6 — минимальная очистка (только английские фразы-артефакты)
+Chapter Editor v3.6.7 — только удаление английских артефактов, без многоточий и лишней логики
 """
 import json
 import os
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.6.6"
+APP_VERSION = "3.6.7"
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
 
@@ -152,10 +152,7 @@ def apply_translation_chain_full(text: str) -> str:
 
 
 def minimal_clean(text: str) -> str:
-    """
-    Удаляем только конкретные английские фразы-артефакты.
-    Никаких финских, японских, одиночных букв или пунктуации.
-    """
+    """Удаляем только английские фразы-артефакты, никаких многоточий и финских слов."""
     patterns = [
         r'\bMIT\b',
         r'\bI thought so\b',
@@ -202,7 +199,7 @@ def minimal_clean(text: str) -> str:
     for pat in patterns:
         text = re.sub(pat, '', text, flags=re.IGNORECASE)
 
-    # Чистка лишних пробелов (без удаления пунктуации)
+    # Простая чистка пробелов
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
     text = re.sub(r'\s+', ' ', text)
@@ -210,7 +207,7 @@ def minimal_clean(text: str) -> str:
     text = re.sub(r'—\s*', '— ', text)
     text = text.replace('""', '"').replace('""', '"')
 
-    # Восстанавливаем типичные ошибки перевода
+    # Восстановление типичных ошибок перевода
     fixes = [
         (r'черного вина', 'черного кофе'),
         (r'\bТоки\b', '«Ибис»'),
@@ -222,84 +219,6 @@ def minimal_clean(text: str) -> str:
         text = re.sub(pat, repl, text, flags=re.IGNORECASE)
 
     return text.strip()
-"""
-Chapter Editor v3.6.2 — только перевод, без очистки артефактов
-"""
-import json
-import os
-import re
-import time
-import logging
-import random
-from pathlib import Path
-
-import requests
-from flask import Flask, Response, jsonify, request, stream_with_context
-from werkzeug.exceptions import HTTPException
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-BASE_DIR = Path(__file__).resolve().parent
-STATIC_DIR = BASE_DIR / "static"
-
-APP_VERSION = "3.6.2"
-MAX_CHARS = 30_000
-CHUNK_SIZE = 3000
-
-app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
-app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
-
-
-class ChapterEditError(RuntimeError):
-    pass
-
-
-def _sse(event_type: str, data: dict) -> str:
-    payload = {"type": event_type, **data}
-    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
-
-def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int = 2) -> str:
-    if not text or len(text.strip()) < 2:
-        return text
-
-    url_google = "https://translate.googleapis.com/translate_a/single"
-    params = {
-        "client": "gtx",
-        "sl": "auto",
-        "tl": target_lang,
-        "dt": "t",
-        "q": text
-    }
-    for attempt in range(max_retries):
-        try:
-            resp = requests.get(url_google, params=params, timeout=15)
-            if resp.status_code == 200:
-                data = resp.json()
-                translated = "".join(item[0] for item in data[0] if item[0])
-                if translated:
-                    return translated
-            logger.warning(f"Google attempt {attempt+1} failed: {resp.status_code}")
-            time.sleep(1 + random.random())
-        except Exception as e:
-            logger.warning(f"Google exception: {e}")
-            time.sleep(1 + random.random())
-
-    logger.info(f"Falling back to MyMemory (POST) for {target_lang}")
-    url_mymemory = "https://api.mymemory.translated.net/get"
-    payload = {
-        "q": text,
-        "langpair": f"auto|{target_lang}",
-        "de": "user@example.com"
-    }
-    for attempt in range(2):
-        try:
-            resp = requests.post(url_mymemory, data=payload, timeout=20)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("responseStatus") == 200:
-                    translated = data.get("responseData", {}).get("translatedText")
 
 
 def apply_light_polish(text: str) -> str:
