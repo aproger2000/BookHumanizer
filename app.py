@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.6.8 — только удаление английских фраз, без удаления пунктуации
+Chapter Editor v3.6.9 — поддержка промежуточного языка (EN, ES, FR, IT, DE)
 """
 import json
 import os
@@ -19,12 +19,21 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.6.8"
+APP_VERSION = "3.6.9"
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
+
+# Выбор промежуточного языка (по умолчанию английский)
+INTERMEDIATE_LANG = os.environ.get("INTERMEDIATE_LANG", "en").lower()
+VALID_LANGS = {"en", "es", "fr", "it", "de"}
+if INTERMEDIATE_LANG not in VALID_LANGS:
+    logger.warning(f"Unknown INTERMEDIATE_LANG={INTERMEDIATE_LANG}, falling back to 'en'")
+    INTERMEDIATE_LANG = "en"
+
+logger.info(f"Intermediate language: {INTERMEDIATE_LANG.upper()} (chain: RU→{INTERMEDIATE_LANG.upper()}→RU)")
 
 
 class ChapterEditError(RuntimeError):
@@ -88,11 +97,12 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
 
 
 def process_chunk_through_chain(text: str) -> str:
+    """Цепочка: RU → INTERMEDIATE_LANG → RU."""
     if not text or len(text.strip()) < 2:
         return text
     try:
-        en = translate_with_fallback(text, target_lang="en")
-        ru = translate_with_fallback(en, target_lang="ru")
+        intermediate = translate_with_fallback(text, target_lang=INTERMEDIATE_LANG)
+        ru = translate_with_fallback(intermediate, target_lang="ru")
         return ru
     except Exception as e:
         logger.error(f"Chunk processing error: {e}")
@@ -134,7 +144,7 @@ def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> list:
 
 
 def apply_translation_chain_full(text: str) -> str:
-    logger.info(f"Starting translation chain (RU→EN→RU) for {len(text)} chars...")
+    logger.info(f"Starting translation chain (RU→{INTERMEDIATE_LANG.upper()}→RU) for {len(text)} chars...")
     chunks = split_text_into_chunks(text)
     logger.info(f"Split into {len(chunks)} chunks")
     processed_chunks = []
@@ -151,12 +161,9 @@ def apply_translation_chain_full(text: str) -> str:
     return result
 
 
-def minimal_clean(text: str) -> str:
-    """
-    Удаляем только английские фразы-артефакты.
-    НЕ трогаем пунктуацию (многоточия, точки, запятые).
-    """
-    patterns = [
+def get_artifact_patterns(lang: str) -> list:
+    """Возвращает список паттернов артефактов для конкретного языка."""
+    base = [
         r'\bMIT\b',
         r'\bI thought so\b',
         r'\bThey will all call\b',
@@ -199,18 +206,52 @@ def minimal_clean(text: str) -> str:
         r'\bsaid more quietly\b',
     ]
 
+    # Язык-специфичные артефакты
+    lang_patterns = {
+        'es': [
+            r'\bque\b', r'\bde\b', r'\bel\b', r'\bla\b', r'\blos\b', r'\blas\b',
+            r'\bun\b', r'\buna\b', r'\by\b', r'\bo\b', r'\bpero\b', r'\bes\b',
+            r'\bson\b', r'\bestá\b', r'\bestán\b', r'\bcomo\b', r'\bcuando\b',
+        ],
+        'fr': [
+            r'\ble\b', r'\bla\b', r'\bles\b', r'\bde\b', r'\bdes\b', r'\bet\b',
+            r'\bou\b', r'\bmais\b', r'\best\b', r'\bsont\b', r'\best-ce\b',
+            r'\bque\b', r'\bqui\b', r'\bou\b', r'\bdans\b', r'\bpour\b',
+        ],
+        'it': [
+            r'\bil\b', r'\bla\b', r'\ble\b', r'\bdi\b', r'\bche\b', r'\be\b',
+            r'\bo\b', r'\bma\b', r'\bè\b', r'\bsono\b', r'\bper\b', r'\bcon\b',
+        ],
+        'de': [
+            r'\bder\b', r'\bdie\b', r'\bdas\b', r'\bden\b', r'\bdem\b',
+            r'\bdes\b', r'\bmit\b', r'\bfür\b', r'\bauf\b', r'\bvon\b',
+            r'\bzu\b', r'\bund\b', r'\boder\b', r'\baber\b', r'\bdoch\b',
+            r'\bist\b', r'\bwar\b', r'\bhat\b', r'\bsagte\b', r'\bsagten\b',
+        ],
+    }
+
+    extra = lang_patterns.get(lang, [])
+    return base + extra
+
+
+def minimal_clean(text: str) -> str:
+    """
+    Удаляем артефакты для выбранного языка.
+    """
+    patterns = get_artifact_patterns(INTERMEDIATE_LANG)
+
     for pat in patterns:
         text = re.sub(pat, '', text, flags=re.IGNORECASE)
 
-    # Чистка лишних пробелов (НЕ трогаем пунктуацию)
+    # Чистка пробелов
     text = re.sub(r'\s+', ' ', text)
-    text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)  # восстанавливаем пробелы после знаков
+    text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'^[.,!?;:\s]+$', '', text, flags=re.MULTILINE)
     text = re.sub(r'—\s*', '— ', text)
     text = text.replace('""', '"').replace('""', '"')
 
-    # Исправления типичных ошибок перевода
+    # Исправления ошибок
     fixes = [
         (r'черного вина', 'черного кофе'),
         (r'\bТоки\b', '«Ибис»'),
@@ -234,12 +275,12 @@ def apply_light_polish(text: str) -> str:
 
 @app.get("/api/health")
 def health():
-    return jsonify(status="ok", version=APP_VERSION)
+    return jsonify(status="ok", version=APP_VERSION, chain=INTERMEDIATE_LANG.upper())
 
 
 @app.post("/api/revise")
 def api_revise():
-    logger.info("=== api_revise: START ===")
+    logger.info(f"=== api_revise: START (lang={INTERMEDIATE_LANG.upper()}) ===")
     try:
         file_storage = request.files.get("file")
         text = request.form.get("text", "")
@@ -266,15 +307,15 @@ def api_revise():
 
         def generate():
             try:
-                yield _sse("progress", {"chars": 0, "estimated_total": original_len, "percent": 0, "log": "Начинаем обработку..."})
+                yield _sse("progress", {"chars": 0, "estimated_total": original_len, "percent": 0, "log": f"Начинаем обработку (RU→{INTERMEDIATE_LANG.upper()}→RU)..."})
 
-                # 1. Цепочка переводов (RU→EN→RU)
-                logger.info("Step 1: Translation chain (RU→EN→RU)...")
+                # 1. Цепочка переводов
+                logger.info(f"Step 1: Translation chain (RU→{INTERMEDIATE_LANG.upper()}→RU)...")
                 processed_text = apply_translation_chain_full(chapter_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 50, "log": f"Переводы завершены ({len(processed_text)} симв.)"})
 
-                # 2. Минимальная очистка (только артефакты)
-                logger.info("Step 2: Minimal cleanup (only English phrases)...")
+                # 2. Минимальная очистка
+                logger.info("Step 2: Minimal cleanup...")
                 processed_text = minimal_clean(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 70, "log": f"Очистка выполнена ({len(processed_text)} симв.)"})
 
@@ -292,10 +333,10 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": f"Текст переработан через цепочку RU→EN→RU с минимальной очисткой. Потеря: {loss:.1%}.",
+                    "summary": f"Текст переработан через цепочку RU→{INTERMEDIATE_LANG.upper()}→RU с минимальной очисткой. Потеря: {loss:.1%}.",
                     "changes": [
-                        "Переведён через Google Translate / MyMemory (RU→EN→RU)",
-                        "Удалены артефакты перевода (английские фразы)"
+                        f"Переведён через Google Translate / MyMemory (RU→{INTERMEDIATE_LANG.upper()}→RU)",
+                        "Удалены артефакты перевода"
                     ],
                     "checklist": []
                 })
