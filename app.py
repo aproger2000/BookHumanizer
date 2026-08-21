@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.6.4 — полная очистка от всех известных артефактов
+Chapter Editor v3.6.5 — детальное логирование всех операций
 """
 import json
 import os
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.6.4"
+APP_VERSION = "3.6.5"
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
 
@@ -151,10 +151,28 @@ def apply_translation_chain_full(text: str) -> str:
     return result
 
 
+def clean_with_logging(text: str, patterns: list, name: str) -> str:
+    """Удаляет паттерны и логирует каждое удаление."""
+    original_len = len(text)
+    removed_total = 0
+    for pat in patterns:
+        if re.search(pat, text, flags=re.IGNORECASE):
+            # Находим все совпадения для логирования
+            matches = list(re.finditer(pat, text, flags=re.IGNORECASE))
+            removed_examples = [text[m.start():m.end()] for m in matches[:3]]  # первые 3 для примера
+            text = re.sub(pat, '', text, flags=re.IGNORECASE)
+            removed_total += sum(len(m.group(0)) for m in matches)
+            logger.info(f"  Removed pattern '{pat}': {len(matches)} matches, examples: {removed_examples}")
+    logger.info(f"Clean '{name}': removed {removed_total} chars, remaining {len(text)} (loss {removed_total/original_len*100:.2f}%)")
+    return text
+
+
 def full_clean(text: str) -> str:
     """
-    Удаляем все известные артефакты (целые фразы и отдельные слова, которые точно не русские).
+    Полная очистка с детальным логированием.
     """
+    logger.info(f"Starting full cleanup on {len(text)} chars")
+
     # Финские фразы и слова
     finnish = [
         r'\bTietenkin\b', r'\bhe tarvitsevat\b', r'\bJos se toimii\b',
@@ -192,19 +210,27 @@ def full_clean(text: str) -> str:
         r'\bwho your friends were\b',
         r'\bThe sun reflected in their tinted glass\b',
         r'\bglass like a\b',
+        r'\bAlexey looked down at the black SUVs\b',
+        r'\blike a глаза акулы\b',
+        r'\b,\.',  # артефакт типа ",."
+        r'\b\.\.\.',  # тройные точки
+        r'\b\.\.',  # двойные точки
+        r'\b,\.\.',  # запятая с точками
+        r'\b,\.',  # запятая с точкой
+        r'\b\.\.\.\.',  # четыре точки
     ]
     # Японские символы
     japanese = [r'[\u3040-\u30FF]+']
 
-    all_patterns = finnish + english + japanese
-
-    for pat in all_patterns:
-        text = re.sub(pat, '', text, flags=re.IGNORECASE)
+    # Применяем очистку с логированием
+    text = clean_with_logging(text, finnish, "finnish")
+    text = clean_with_logging(text, english, "english")
+    text = clean_with_logging(text, japanese, "japanese")
 
     # Удаляем случайные одиночные латинские буквы
-    text = re.sub(r'\b[a-zA-Z]\b', '', text)
+    text = clean_with_logging(text, [r'\b[a-zA-Z]\b'], "single_letters")
 
-    # Чистка лишних пробелов и знаков
+    # Чистка лишних пробелов и знаков (без удаления текста)
     text = re.sub(r'(\w)\.(\w)', r'\1\2', text)
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
@@ -224,14 +250,17 @@ def full_clean(text: str) -> str:
     for pat, repl in fixes:
         text = re.sub(pat, repl, text, flags=re.IGNORECASE)
 
+    logger.info(f"Full cleanup complete. Final length: {len(text)}")
     return text.strip()
 
 
 def apply_light_polish(text: str) -> str:
+    logger.info(f"Polishing {len(text)} chars...")
     text = re.sub(r'\s+', ' ', text)
     text = text.replace('"', '"').replace('"', '"')
     text = text.replace(' - ', ' — ')
     text = re.sub(r'—\s*', '— ', text)
+    logger.info(f"Polishing complete. Length: {len(text)}")
     return text
 
 
@@ -265,6 +294,7 @@ def api_revise():
             logger.warning(f"Truncated text to {MAX_CHARS} chars")
 
         original_len = len(chapter_text)
+        logger.info(f"Original text length: {original_len}")
 
         def generate():
             try:
@@ -273,17 +303,17 @@ def api_revise():
                 # 1. Цепочка переводов (RU→EN→RU)
                 logger.info("Step 1: Translation chain (RU→EN→RU)...")
                 processed_text = apply_translation_chain_full(chapter_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 50, "log": "Переводы завершены"})
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 50, "log": f"Переводы завершены ({len(processed_text)} симв.)"})
 
-                # 2. Полная очистка артефактов
+                # 2. Полная очистка артефактов (с логированием)
                 logger.info("Step 2: Full cleanup...")
                 processed_text = full_clean(processed_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 70, "log": "Очистка выполнена"})
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 70, "log": f"Очистка выполнена ({len(processed_text)} симв.)"})
 
                 # 3. Полировка
                 logger.info("Step 3: Light polish...")
                 processed_text = apply_light_polish(processed_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 85, "log": "Полировка выполнена"})
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 85, "log": f"Полировка выполнена ({len(processed_text)} симв.)"})
 
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 100, "log": "Готово!"})
 
