@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.6.1 — безопасная очистка, минимальная потеря длины
+Chapter Editor v3.6.2 — только перевод, без очистки артефактов
 """
 import json
 import os
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.6.1"
+APP_VERSION = "3.6.2"
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
 
@@ -151,87 +151,8 @@ def apply_translation_chain_full(text: str) -> str:
     return result
 
 
-def clean_translation_artifacts(text: str) -> str:
-    """
-    Безопасная очистка: удаляем только явные целые фразы на финском и английском,
-    которые не могут быть частью русского текста. Короткие паттерны удалены.
-    """
-    # Только полные финские предложения/фразы (не отдельные слова)
-    finnish_phrases = [
-        r'\bTietenkin\b',           # "Конечно" (фин.)
-        r'\bhe tarvitsevat\b',      # "они нуждаются"
-        r'\bJos se toimii\b',       # "если это работает"
-        r'\bvaikka se ei\b',        # "хотя это не"
-        r'\bRakennamme\b',          # "мы строим"
-        r'\bJa lentää\b',           # "и летит"
-        r'\bMikä tämä on\b',        # "что это"
-        r'\bAleksei kysyi\b',       # "Алексей спросил"
-        r'\bTalomme suunnitelma\b', # "план нашего дома"
-        r'\bKuussa ei ole\b',       # "на Луне нет"
-        r'\bsademeren\b',           # "дождевое море"
-        r'\baamiaiseksi\b',         # "на завтрак"
-        r'\bkuvaan\b',              # "в картинку" (но может быть частью слова, удаляем только если отдельно)
-    ]
-    # Английские целые фразы (не отдельные слова)
-    english_phrases = [
-        r'\bfirst to spot\b',
-        r'\bthe genius\b',
-        r'\bof a student\b',
-        r'\bfrom Siberia\b',
-        r'\bnow he watched\b',
-        r'\bas that spark\b',
-        r'\bignited its owner\'s career\b',
-        r'\bI came to warn you\b',
-        r'\bthey want to seduce you\b',
-        r'\bthey provide the lab\b',
-        r'\bbudget and team\b',
-        r'\bwhatever you want\b',
-        r'\bhowever research requires a license\b',
-        r'\bA group came from\b',
-        r'\bsaid more quietly\b',
-    ]
-    # Японские символы (любые) — удаляем полностью
-    japanese_patterns = [r'[\u3040-\u30FF]+']
-
-    all_patterns = finnish_phrases + english_phrases + japanese_patterns
-
-    for pattern in all_patterns:
-        # Логируем, если найдено совпадение (для отладки)
-        if re.search(pattern, text, flags=re.IGNORECASE):
-            logger.info(f"Removing artifact: {pattern}")
-            text = re.sub(pattern, '', text, flags=re.IGNORECASE)
-
-    # Точечные замены для известных ошибок перевода
-    fixes = [
-        (r'черного вина', 'черного кофе'),
-        (r'\bТоки\b', '«Ибис»'),
-        (r'не испортил', 'не шутил'),
-        (r'—\s*знать', '— Я знаю'),
-    ]
-    for pattern, replacement in fixes:
-        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
-
-    # Чистка лишних пробелов и знаков
-    text = re.sub(r'(\w)\.(\w)', r'\1\2', text)
-    text = re.sub(r'\s+', ' ', text)
-    text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
-    text = re.sub(r'\s+', ' ', text)
-    # Удаление пустых строк, состоящих только из знаков препинания
-    text = re.sub(r'^[.,!?;:\s]+$', '', text, flags=re.MULTILINE)
-
-    # Восстановление тире в диалогах
-    text = re.sub(r'—\s*', '— ', text)
-
-    # Если после очистки текст потерял знаки препинания, пытаемся восстановить по заглавным буквам
-    if not re.search(r'[.!?]', text):
-        sentences = re.split(r'(?<=[а-яa-z])\s+(?=[А-ЯA-Z])', text)
-        if len(sentences) > 1:
-            text = '. '.join(sentences) + '.'
-
-    return text.strip()
-
-
 def apply_light_polish(text: str) -> str:
+    """Только минимальная полировка (пробелы и кавычки)."""
     text = re.sub(r'\s+', ' ', text)
     text = text.replace('"', '"').replace('"', '"')
     text = text.replace(' - ', ' — ')
@@ -277,15 +198,10 @@ def api_revise():
                 # 1. Цепочка переводов (RU→EN→RU)
                 logger.info("Step 1: Translation chain (RU→EN→RU)...")
                 processed_text = apply_translation_chain_full(chapter_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 40, "log": "Переводы завершены"})
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 60, "log": "Переводы завершены"})
 
-                # 2. Безопасная очистка артефактов
-                logger.info("Step 2: Cleaning artifacts (safe)...")
-                processed_text = clean_translation_artifacts(processed_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 60, "log": "Артефакты удалены"})
-
-                # 3. Финальная полировка (без разбиения)
-                logger.info("Step 3: Final polish...")
+                # 2. Минимальная полировка (без очистки)
+                logger.info("Step 2: Light polish...")
                 processed_text = apply_light_polish(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 85, "log": "Полировка выполнена"})
 
@@ -298,10 +214,10 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": f"Текст переработан через цепочку RU→EN→RU с безопасной очисткой. Потеря: {loss:.1%}.",
+                    "summary": f"Текст переработан через цепочку RU→EN→RU (без очистки). Потеря: {loss:.1%}.",
                     "changes": [
                         "Переведён через Google Translate / MyMemory (RU→EN→RU)",
-                        "Безопасная очистка артефактов (только явные мусорные фразы)"
+                        "Минимальная полировка (пробелы, кавычки)"
                     ],
                     "checklist": []
                 })
