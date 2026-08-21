@@ -119,26 +119,103 @@
 
 <script>
 (function() {
-    // === ПРОСТОЕ РАЗБИЕНИЕ НА АБЗАЦЫ (без потери текста) ===
-    function splitIntoParagraphs(text) {
-        if (!text || text.length < 200) return text;
-        const chunkSize = 400;
-        const words = text.split(' ');
+    // === УМНОЕ РАЗБИЕНИЕ НА АБЗАЦЫ (без удаления текста) ===
+    function smartSplitIntoParagraphs(text) {
+        if (!text || text.length < 150) return text;
+
+        let sentences = text.match(/[^.!?]+[.!?]+/g);
+        if (!sentences || sentences.length < 2) {
+            sentences = text.split(/,\s*(?=[А-ЯA-Z])/);
+        }
+        if (!sentences || sentences.length < 2) {
+            const chunks = [];
+            const words = text.split(' ');
+            let current = [];
+            let currentLen = 0;
+            const targetLen = 350;
+            for (const word of words) {
+                if (currentLen > targetLen && current.length >= 5) {
+                    chunks.push(current.join(' '));
+                    current = [];
+                    currentLen = 0;
+                }
+                current.push(word);
+                currentLen += word.length + 1;
+            }
+            if (current.length > 0) {
+                chunks.push(current.join(' '));
+            }
+            return chunks.join('\n\n');
+        }
+
         const paragraphs = [];
-        let current = [];
+        let currentPara = [];
         let currentLen = 0;
-        for (const word of words) {
-            if (currentLen + word.length + 1 > chunkSize && current.length > 0) {
-                paragraphs.push(current.join(' '));
-                current = [];
+        const targetLen = 350;
+        let inDialog = false;
+        let dialogText = '';
+
+        for (const sent of sentences) {
+            const trimmed = sent.trim();
+            if (!trimmed) continue;
+
+            const isDialog = trimmed.startsWith('—') || trimmed.startsWith('"') || trimmed.startsWith('«');
+
+            if (isDialog) {
+                if (currentPara.length > 0) {
+                    paragraphs.push(currentPara.join(' '));
+                    currentPara = [];
+                    currentLen = 0;
+                }
+                dialogText = trimmed;
+                inDialog = true;
+                continue;
+            }
+
+            if (inDialog) {
+                paragraphs.push(dialogText);
+                dialogText = '';
+                inDialog = false;
+                currentPara.push(trimmed);
+                currentLen += trimmed.length;
+                continue;
+            }
+
+            if (currentLen > targetLen && currentPara.length >= 2) {
+                paragraphs.push(currentPara.join(' '));
+                currentPara = [];
                 currentLen = 0;
             }
-            current.push(word);
-            currentLen += word.length + 1;
+
+            currentPara.push(trimmed);
+            currentLen += trimmed.length;
         }
-        if (current.length > 0) {
-            paragraphs.push(current.join(' '));
+
+        if (currentPara.length > 0) {
+            paragraphs.push(currentPara.join(' '));
         }
+
+        if (paragraphs.length === 1 && text.length > 500) {
+            const chunks = [];
+            const words = text.split(' ');
+            let current = [];
+            let currentLen = 0;
+            const targetLen = 350;
+            for (const word of words) {
+                if (currentLen > targetLen && current.length >= 5) {
+                    chunks.push(current.join(' '));
+                    current = [];
+                    currentLen = 0;
+                }
+                current.push(word);
+                currentLen += word.length + 1;
+            }
+            if (current.length > 0) {
+                chunks.push(current.join(' '));
+            }
+            return chunks.join('\n\n');
+        }
+
         return paragraphs.join('\n\n');
     }
 
@@ -261,7 +338,7 @@
         })
         .then(data => {
             const rawText = data.revised_text || '';
-            const formattedText = splitIntoParagraphs(rawText);
+            const formattedText = smartSplitIntoParagraphs(rawText);
             setStep(3, 'Готово!');
             resultText.value = formattedText;
             resultCount.textContent = formattedText.length + ' симв.';
