@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.6.5 — детальное логирование всех операций
+Chapter Editor v3.6.6 — минимальная очистка (только английские фразы-артефакты)
 """
 import json
 import os
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.6.5"
+APP_VERSION = "3.6.6"
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
 
@@ -151,87 +151,58 @@ def apply_translation_chain_full(text: str) -> str:
     return result
 
 
-def clean_with_logging(text: str, patterns: list, name: str) -> str:
-    """Удаляет паттерны и логирует каждое удаление."""
-    original_len = len(text)
-    removed_total = 0
-    for pat in patterns:
-        if re.search(pat, text, flags=re.IGNORECASE):
-            # Находим все совпадения для логирования
-            matches = list(re.finditer(pat, text, flags=re.IGNORECASE))
-            removed_examples = [text[m.start():m.end()] for m in matches[:3]]  # первые 3 для примера
-            text = re.sub(pat, '', text, flags=re.IGNORECASE)
-            removed_total += sum(len(m.group(0)) for m in matches)
-            logger.info(f"  Removed pattern '{pat}': {len(matches)} matches, examples: {removed_examples}")
-    logger.info(f"Clean '{name}': removed {removed_total} chars, remaining {len(text)} (loss {removed_total/original_len*100:.2f}%)")
-    return text
-
-
-def full_clean(text: str) -> str:
+def minimal_clean(text: str) -> str:
     """
-    Полная очистка с детальным логированием.
+    Удаляем только конкретные английские фразы-артефакты.
+    Никаких финских, японских, одиночных букв или пунктуации.
     """
-    logger.info(f"Starting full cleanup on {len(text)} chars")
-
-    # Финские фразы и слова
-    finnish = [
-        r'\bTietenkin\b', r'\bhe tarvitsevat\b', r'\bJos se toimii\b',
-        r'\bvaikka se ei\b', r'\btoimi\b', r'\bpuolella\b',
-        r'\bvaltamerta\b', r'\bRakennamme\b', r'\bsiis\b',
-        r'\bsademeren\b', r'\bJa lentää\b', r'\bsinne\b',
-        r'\baamiaiseksi\b', r'\bkuvaan\b', r'\bMikä tämä on\b',
-        r'\bAleksei kysyi\b', r'\bTalomme suunnitelma\b',
-        r'\bKuussa ei ole\b', r'\brannoille\b',
-        r'\bettä\b', r'\bjoka\b', r'\bmitä\b', r'\bniin\b',
-        r'\bkun\b', r'\bvoi\b', r'\bse\b', r'\bja\b',
-    ]
-    # Английские фразы (все, что встречались)
-    english = [
-        r'\bfirst to spot\b', r'\bthe genius\b', r'\bof a student\b',
-        r'\bfrom Siberia\b', r'\bnow he watched\b', r'\bas that spark\b',
-        r'\bignited its owner\'s career\b', r'\bI came to warn you\b',
-        r'\bthey want to seduce you\b', r'\bthey provide the lab\b',
-        r'\bbudget and team\b', r'\bwhatever you want\b',
-        r'\bhowever research requires a license\b',
-        r'\bA group came from\b', r'\bMIT\b', r'\bthey need\b',
-        r'\bsaid more quietly\b', r'\bbudget\b', r'\bteam\b',
-        r'\bresearch\b', r'\blicense\b', r'\brequires\b', r'\bcame from\b',
-        r'\bI thought so\b', r'\bThey will all call\b',
-        r'\bWhat I propose is simple\b', r'\bNo bureaucracy\b',
-        r'\bNo grant fees\b', r'\bIn return nothing\b',
-        r'\bIt\'s just that\b', r'\bfrom the beginning\b',
-        r'\bAlexey remained silent\b', r'\bCross continued\b',
-        r'\bfunds\?', r'\bfunds\.', r'\bI\?', r'\bI\.',
-        r'\bI,\b', r'\bthey will all call\b', r'\band every day\b',
-        r'\bthe offers will become\b', r'\bless and less\b',
-        r'\bpolite\b', r'\byou continue to work\b',
+    patterns = [
+        r'\bMIT\b',
+        r'\bI thought so\b',
+        r'\bThey will all call\b',
+        r'\bWhat I propose is simple\b',
+        r'\bNo bureaucracy\b',
+        r'\bNo grant fees\b',
+        r'\bIn return nothing\b',
+        r'\bIt\'s just that\b',
+        r'\bfrom the beginning\b',
+        r'\bAlexey remained silent\b',
+        r'\bCross continued\b',
+        r'\bfunds\?',
+        r'\bfunds\.',
+        r'\band every day\b',
+        r'\bthe offers will become\b',
+        r'\bless and less\b',
+        r'\bpolite\b',
+        r'\byou continue to work\b',
         r'\bwe provide you with peace of mind\b',
-        r'\bwhen the world changes\b', r'\bwe\'d like you to remember\b',
+        r'\bwhen the world changes\b',
+        r'\bwe\'d like you to remember\b',
         r'\bwho your friends were\b',
         r'\bThe sun reflected in their tinted glass\b',
-        r'\bglass like a\b',
         r'\bAlexey looked down at the black SUVs\b',
         r'\blike a глаза акулы\b',
-        r'\b,\.',  # артефакт типа ",."
-        r'\b\.\.\.',  # тройные точки
-        r'\b\.\.',  # двойные точки
-        r'\b,\.\.',  # запятая с точками
-        r'\b,\.',  # запятая с точкой
-        r'\b\.\.\.\.',  # четыре точки
+        r'\bglass like a\b',
+        r'\bthe genius\b',
+        r'\bof a student\b',
+        r'\bfrom Siberia\b',
+        r'\bnow he watched\b',
+        r'\bas that spark\b',
+        r'\bignited its owner\'s career\b',
+        r'\bI came to warn you\b',
+        r'\bthey want to seduce you\b',
+        r'\bthey provide the lab\b',
+        r'\bbudget and team\b',
+        r'\bwhatever you want\b',
+        r'\bhowever research requires a license\b',
+        r'\bA group came from\b',
+        r'\bsaid more quietly\b',
     ]
-    # Японские символы
-    japanese = [r'[\u3040-\u30FF]+']
 
-    # Применяем очистку с логированием
-    text = clean_with_logging(text, finnish, "finnish")
-    text = clean_with_logging(text, english, "english")
-    text = clean_with_logging(text, japanese, "japanese")
+    for pat in patterns:
+        text = re.sub(pat, '', text, flags=re.IGNORECASE)
 
-    # Удаляем случайные одиночные латинские буквы
-    text = clean_with_logging(text, [r'\b[a-zA-Z]\b'], "single_letters")
-
-    # Чистка лишних пробелов и знаков (без удаления текста)
-    text = re.sub(r'(\w)\.(\w)', r'\1\2', text)
+    # Чистка лишних пробелов (без удаления пунктуации)
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
     text = re.sub(r'\s+', ' ', text)
@@ -239,7 +210,7 @@ def full_clean(text: str) -> str:
     text = re.sub(r'—\s*', '— ', text)
     text = text.replace('""', '"').replace('""', '"')
 
-    # Восстанавливаем типичные ошибки
+    # Восстанавливаем типичные ошибки перевода
     fixes = [
         (r'черного вина', 'черного кофе'),
         (r'\bТоки\b', '«Ибис»'),
@@ -250,17 +221,92 @@ def full_clean(text: str) -> str:
     for pat, repl in fixes:
         text = re.sub(pat, repl, text, flags=re.IGNORECASE)
 
-    logger.info(f"Full cleanup complete. Final length: {len(text)}")
     return text.strip()
+"""
+Chapter Editor v3.6.2 — только перевод, без очистки артефактов
+"""
+import json
+import os
+import re
+import time
+import logging
+import random
+from pathlib import Path
+
+import requests
+from flask import Flask, Response, jsonify, request, stream_with_context
+from werkzeug.exceptions import HTTPException
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
+
+APP_VERSION = "3.6.2"
+MAX_CHARS = 30_000
+CHUNK_SIZE = 3000
+
+app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
+app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
+
+
+class ChapterEditError(RuntimeError):
+    pass
+
+
+def _sse(event_type: str, data: dict) -> str:
+    payload = {"type": event_type, **data}
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int = 2) -> str:
+    if not text or len(text.strip()) < 2:
+        return text
+
+    url_google = "https://translate.googleapis.com/translate_a/single"
+    params = {
+        "client": "gtx",
+        "sl": "auto",
+        "tl": target_lang,
+        "dt": "t",
+        "q": text
+    }
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(url_google, params=params, timeout=15)
+            if resp.status_code == 200:
+                data = resp.json()
+                translated = "".join(item[0] for item in data[0] if item[0])
+                if translated:
+                    return translated
+            logger.warning(f"Google attempt {attempt+1} failed: {resp.status_code}")
+            time.sleep(1 + random.random())
+        except Exception as e:
+            logger.warning(f"Google exception: {e}")
+            time.sleep(1 + random.random())
+
+    logger.info(f"Falling back to MyMemory (POST) for {target_lang}")
+    url_mymemory = "https://api.mymemory.translated.net/get"
+    payload = {
+        "q": text,
+        "langpair": f"auto|{target_lang}",
+        "de": "user@example.com"
+    }
+    for attempt in range(2):
+        try:
+            resp = requests.post(url_mymemory, data=payload, timeout=20)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("responseStatus") == 200:
+                    translated = data.get("responseData", {}).get("translatedText")
 
 
 def apply_light_polish(text: str) -> str:
-    logger.info(f"Polishing {len(text)} chars...")
     text = re.sub(r'\s+', ' ', text)
     text = text.replace('"', '"').replace('"', '"')
     text = text.replace(' - ', ' — ')
     text = re.sub(r'—\s*', '— ', text)
-    logger.info(f"Polishing complete. Length: {len(text)}")
     return text
 
 
@@ -305,9 +351,9 @@ def api_revise():
                 processed_text = apply_translation_chain_full(chapter_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 50, "log": f"Переводы завершены ({len(processed_text)} симв.)"})
 
-                # 2. Полная очистка артефактов (с логированием)
-                logger.info("Step 2: Full cleanup...")
-                processed_text = full_clean(processed_text)
+                # 2. Минимальная очистка (только артефакты)
+                logger.info("Step 2: Minimal cleanup...")
+                processed_text = minimal_clean(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 70, "log": f"Очистка выполнена ({len(processed_text)} симв.)"})
 
                 # 3. Полировка
@@ -324,10 +370,10 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": f"Текст переработан через цепочку RU→EN→RU с полной очисткой. Потеря: {loss:.1%}.",
+                    "summary": f"Текст переработан через цепочку RU→EN→RU с минимальной очисткой. Потеря: {loss:.1%}.",
                     "changes": [
                         "Переведён через Google Translate / MyMemory (RU→EN→RU)",
-                        "Полная очистка артефактов (финские, английские, японские)"
+                        "Удалены артефакты перевода (английские фразы)"
                     ],
                     "checklist": []
                 })
