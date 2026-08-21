@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.6.7 — только удаление английских артефактов, без многоточий и лишней логики
+Chapter Editor v3.6.8 — только удаление английских фраз, без удаления пунктуации
 """
 import json
 import os
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.6.7"
+APP_VERSION = "3.6.8"
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
 
@@ -152,7 +152,10 @@ def apply_translation_chain_full(text: str) -> str:
 
 
 def minimal_clean(text: str) -> str:
-    """Удаляем только английские фразы-артефакты, никаких многоточий и финских слов."""
+    """
+    Удаляем только английские фразы-артефакты.
+    НЕ трогаем пунктуацию (многоточия, точки, запятые).
+    """
     patterns = [
         r'\bMIT\b',
         r'\bI thought so\b',
@@ -199,15 +202,15 @@ def minimal_clean(text: str) -> str:
     for pat in patterns:
         text = re.sub(pat, '', text, flags=re.IGNORECASE)
 
-    # Простая чистка пробелов
+    # Чистка лишних пробелов (НЕ трогаем пунктуацию)
     text = re.sub(r'\s+', ' ', text)
-    text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
+    text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)  # восстанавливаем пробелы после знаков
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'^[.,!?;:\s]+$', '', text, flags=re.MULTILINE)
     text = re.sub(r'—\s*', '— ', text)
     text = text.replace('""', '"').replace('""', '"')
 
-    # Восстановление типичных ошибок перевода
+    # Исправления типичных ошибок перевода
     fixes = [
         (r'черного вина', 'черного кофе'),
         (r'\bТоки\b', '«Ибис»'),
@@ -271,7 +274,7 @@ def api_revise():
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 50, "log": f"Переводы завершены ({len(processed_text)} симв.)"})
 
                 # 2. Минимальная очистка (только артефакты)
-                logger.info("Step 2: Minimal cleanup...")
+                logger.info("Step 2: Minimal cleanup (only English phrases)...")
                 processed_text = minimal_clean(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 70, "log": f"Очистка выполнена ({len(processed_text)} симв.)"})
 
