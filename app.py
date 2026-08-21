@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.6.9 — поддержка промежуточного языка (EN, ES, FR, IT, DE)
+Chapter Editor v3.7.0 — поддержка промежуточного языка + универсальная коррекция артефактов
 """
 import json
 import os
@@ -13,13 +13,21 @@ import requests
 from flask import Flask, Response, jsonify, request, stream_with_context
 from werkzeug.exceptions import HTTPException
 
+# Импорт пост-редактора
+try:
+    import post_editor
+    POST_EDITOR_AVAILABLE = True
+except ImportError:
+    POST_EDITOR_AVAILABLE = False
+    logging.warning("post_editor module not found. Artifact correction disabled.")
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.6.9"
+APP_VERSION = "3.7.0"
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
 
@@ -34,6 +42,7 @@ if INTERMEDIATE_LANG not in VALID_LANGS:
     INTERMEDIATE_LANG = "en"
 
 logger.info(f"Intermediate language: {INTERMEDIATE_LANG.upper()} (chain: RU→{INTERMEDIATE_LANG.upper()}→RU)")
+logger.info(f"Post-editor available: {POST_EDITOR_AVAILABLE}")
 
 
 class ChapterEditError(RuntimeError):
@@ -97,7 +106,6 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
 
 
 def process_chunk_through_chain(text: str) -> str:
-    """Цепочка: RU → INTERMEDIATE_LANG → RU."""
     if not text or len(text.strip()) < 2:
         return text
     try:
@@ -206,7 +214,6 @@ def get_artifact_patterns(lang: str) -> list:
         r'\bsaid more quietly\b',
     ]
 
-    # Язык-специфичные артефакты
     lang_patterns = {
         'es': [
             r'\bque\b', r'\bde\b', r'\bel\b', r'\bla\b', r'\blos\b', r'\blas\b',
@@ -229,21 +236,15 @@ def get_artifact_patterns(lang: str) -> list:
             r'\bist\b', r'\bwar\b', r'\bhat\b', r'\bsagte\b', r'\bsagten\b',
         ],
     }
-
     extra = lang_patterns.get(lang, [])
     return base + extra
 
 
 def minimal_clean(text: str) -> str:
-    """
-    Удаляем артефакты для выбранного языка.
-    """
     patterns = get_artifact_patterns(INTERMEDIATE_LANG)
-
     for pat in patterns:
         text = re.sub(pat, '', text, flags=re.IGNORECASE)
 
-    # Чистка пробелов
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
     text = re.sub(r'\s+', ' ', text)
@@ -251,7 +252,6 @@ def minimal_clean(text: str) -> str:
     text = re.sub(r'—\s*', '— ', text)
     text = text.replace('""', '"').replace('""', '"')
 
-    # Исправления ошибок
     fixes = [
         (r'черного вина', 'черного кофе'),
         (r'\bТоки\b', '«Ибис»'),
@@ -312,17 +312,27 @@ def api_revise():
                 # 1. Цепочка переводов
                 logger.info(f"Step 1: Translation chain (RU→{INTERMEDIATE_LANG.upper()}→RU)...")
                 processed_text = apply_translation_chain_full(chapter_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 50, "log": f"Переводы завершены ({len(processed_text)} симв.)"})
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 40, "log": f"Переводы завершены ({len(processed_text)} симв.)"})
 
                 # 2. Минимальная очистка
                 logger.info("Step 2: Minimal cleanup...")
                 processed_text = minimal_clean(processed_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 70, "log": f"Очистка выполнена ({len(processed_text)} симв.)"})
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 60, "log": f"Очистка выполнена ({len(processed_text)} симв.)"})
 
-                # 3. Полировка
-                logger.info("Step 3: Light polish...")
+                # 3. Пост-редактор: коррекция артефактов на основе оригинала
+                if POST_EDITOR_AVAILABLE and len(processed_text) > 200:
+                    logger.info("Step 3: Post-editing (artifact correction)...")
+                    try:
+                        processed_text = post_editor.repair_artifacts(chapter_text, processed_text)
+                        yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 80, "log": f"Пост-коррекция выполнена ({len(processed_text)} симв.)"})
+                    except Exception as e:
+                        logger.exception("Post-editor error")
+                        yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 75, "log": f"Ошибка пост-редактора: {str(e)}"})
+
+                # 4. Полировка
+                logger.info("Step 4: Light polish...")
                 processed_text = apply_light_polish(processed_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 85, "log": f"Полировка выполнена ({len(processed_text)} симв.)"})
+                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 90, "log": f"Полировка выполнена ({len(processed_text)} симв.)"})
 
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 100, "log": "Готово!"})
 
@@ -330,13 +340,16 @@ def api_revise():
                 loss = (original_len - final_len) / original_len
                 logger.info(f"Final: {final_len} chars, loss {loss:.2%}")
 
+                summary = f"Текст переработан через цепочку RU→{INTERMEDIATE_LANG.upper()}→RU с минимальной очисткой и пост-коррекцией. Потеря: {loss:.1%}."
+
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": f"Текст переработан через цепочку RU→{INTERMEDIATE_LANG.upper()}→RU с минимальной очисткой. Потеря: {loss:.1%}.",
+                    "summary": summary,
                     "changes": [
                         f"Переведён через Google Translate / MyMemory (RU→{INTERMEDIATE_LANG.upper()}→RU)",
-                        "Удалены артефакты перевода"
+                        "Минимальная очистка артефактов",
+                        "Пост-коррекция на основе оригинала (только при явных артефактах)"
                     ],
                     "checklist": []
                 })
