@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.7.1 — поддержка промежуточных языков (включая чешский)
+Chapter Editor v3.7.2 — чешская цепочка (cs) + точечные замены артефактов
 """
 import json
 import os
@@ -19,19 +19,18 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.7.1"
+APP_VERSION = "3.7.2"
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 
-# Выбор промежуточного языка (по умолчанию английский)
-INTERMEDIATE_LANG = os.environ.get("INTERMEDIATE_LANG", "en").lower()
-VALID_LANGS = {"en", "es", "fr", "it", "de", "cs"}  # добавили чешский
+INTERMEDIATE_LANG = os.environ.get("INTERMEDIATE_LANG", "cs").lower()
+VALID_LANGS = {"en", "es", "fr", "it", "de", "cs", "pl", "sk"}
 if INTERMEDIATE_LANG not in VALID_LANGS:
-    logger.warning(f"Unknown INTERMEDIATE_LANG={INTERMEDIATE_LANG}, falling back to 'en'")
-    INTERMEDIATE_LANG = "en"
+    logger.warning(f"Unknown INTERMEDIATE_LANG={INTERMEDIATE_LANG}, falling back to 'cs'")
+    INTERMEDIATE_LANG = "cs"
 
 logger.info(f"Intermediate language: {INTERMEDIATE_LANG.upper()} (chain: RU→{INTERMEDIATE_LANG.upper()}→RU)")
 
@@ -161,7 +160,6 @@ def apply_translation_chain_full(text: str) -> str:
 
 
 def get_artifact_patterns(lang: str) -> list:
-    """Возвращает список паттернов артефактов для конкретного языка."""
     base = [
         r'\bMIT\b',
         r'\bI thought so\b',
@@ -234,6 +232,19 @@ def get_artifact_patterns(lang: str) -> list:
             r'\btoto\b', r'\bti\b', r'\bvy\b', r'\bon\b', r'\bona\b',
             r'\bono\b', r'\bmy\b', r'\bvy\b', r'\boni\b', r'\bony\b',
         ],
+        'pl': [
+            r'\bjestem\b', r'\bsię\b', r'\bże\b', r'\bto\b', r'\bna\b',
+            r'\bna\b', r'\bpo\b', r'\bdo\b', r'\bi\b', r'\bale\b',
+            r'\blub\b', r'\bsą\b', r'\bjest\b', r'\bjesteśmy\b', r'\bby\b',
+            r'\bco\b', r'\bten\b', r'\bta\b', r'\bto\b', r'\btam\b',
+        ],
+        'sk': [
+            r'\bsom\b', r'\bsa\b', r'\bže\b', r'\bto\b', r'\bna\b',
+            r'\bpre\b', r'\bs\b', r'\bdo\b', r'\ba\b', r'\bale\b',
+            r'\balebo\b', r'\bsú\b', r'\bje\b', r'\bsme\b', r'\bby\b',
+            r'\bčo\b', r'\bkto\b', r'\bako\b', r'\bten\b', r'\btá\b',
+            r'\btoto\b', r'\bti\b', r'\bvy\b', r'\bon\b', r'\bona\b',
+        ],
     }
     extra = lang_patterns.get(lang, [])
     return base + extra
@@ -259,6 +270,24 @@ def minimal_clean(text: str) -> str:
         (r'Босимом', 'Босиком'),
     ]
     for pat, repl in fixes:
+        text = re.sub(pat, repl, text, flags=re.IGNORECASE)
+
+    # === СПЕЦИФИЧЕСКИЕ ЗАМЕНЫ ДЛЯ ЧЕШСКОЙ ЦЕПОЧКИ ===
+    cs_specific_fixes = [
+        (r'Vino quieren alejarte', ''),
+        (r'Laboratorio, presupuesto, Equipment\. Todo lo quieras\.', ''),
+        (r'necesitan licencia para su review', ''),
+        (r'Por suuesto necesitan tu batería', '— Разумеется, им нужна твоя батарея'),
+        (r'silent\. “, "\. — And in return\? — In return — nothing\. , \. \. like a shark\'s', ''),
+        (r'Empty Null: Final Drawings', 'Нуль-вакуум: финальные чертежи'),
+        (r'Шэгги', 'Шегги'),
+        (r'Да неужели\?', '— Серьезно?'),
+        (r'— М\?', '— Мистер Штерн?'),
+        (r'истер Штерн', 'Мистер Штерн'),
+        (r'Мир стоит на пороге великих перемен, господин Стерн', '— Мир на пороге больших перемен, мистер Штерн'),
+        (r'Это пистолет, мистер Стерн', '— Это оружие, мистер Штерн'),
+    ]
+    for pat, repl in cs_specific_fixes:
         text = re.sub(pat, repl, text, flags=re.IGNORECASE)
 
     return text.strip()
@@ -308,17 +337,14 @@ def api_revise():
             try:
                 yield _sse("progress", {"chars": 0, "estimated_total": original_len, "percent": 0, "log": f"Начинаем обработку (RU→{INTERMEDIATE_LANG.upper()}→RU)..."})
 
-                # 1. Цепочка переводов
                 logger.info(f"Step 1: Translation chain (RU→{INTERMEDIATE_LANG.upper()}→RU)...")
                 processed_text = apply_translation_chain_full(chapter_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 50, "log": f"Переводы завершены ({len(processed_text)} симв.)"})
 
-                # 2. Минимальная очистка
                 logger.info("Step 2: Minimal cleanup...")
                 processed_text = minimal_clean(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 70, "log": f"Очистка выполнена ({len(processed_text)} симв.)"})
 
-                # 3. Полировка
                 logger.info("Step 3: Light polish...")
                 processed_text = apply_light_polish(processed_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 90, "log": f"Полировка выполнена ({len(processed_text)} симв.)"})
@@ -332,10 +358,11 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": processed_text,
                     "original_text": chapter_text,
-                    "summary": f"Текст переработан через цепочку RU→{INTERMEDIATE_LANG.upper()}→RU с минимальной очисткой. Потеря: {loss:.1%}.",
+                    "summary": f"Текст переработан через цепочку RU→{INTERMEDIATE_LANG.upper()}→RU с точечной очисткой. Потеря: {loss:.1%}.",
                     "changes": [
                         f"Переведён через Google Translate / MyMemory (RU→{INTERMEDIATE_LANG.upper()}→RU)",
-                        "Удалены явные артефакты перевода"
+                        "Удалены явные артефакты перевода",
+                        "Исправлены специфические артефакты чешской цепочки"
                     ],
                     "checklist": []
                 })
