@@ -119,11 +119,10 @@
 
 <script>
 (function() {
-    // === БЕЗОПАСНОЕ РАЗБИЕНИЕ НА АБЗАЦЫ (БЕЗ ПОТЕРИ СИМВОЛОВ) ===
+    // === БЕЗОПАСНОЕ РАЗБИЕНИЕ НА АБЗАЦЫ ===
     function splitIntoParagraphsSafe(text) {
         if (!text || text.length < 200) return text;
 
-        // 1. Пробуем разбить по предложениям (.!?)
         let sentences = text.match(/[^.!?]+[.!?]+/g);
         if (sentences && sentences.length >= 2) {
             const paragraphs = [];
@@ -135,7 +134,6 @@
                 const trimmed = sent.trim();
                 if (!trimmed) continue;
 
-                // Диалоги — отдельный абзац
                 const isDialog = /^[—"«–]/.test(trimmed);
                 if (isDialog) {
                     if (current.length > 0) {
@@ -167,7 +165,6 @@
             return paragraphs.join('\n\n');
         }
 
-        // 2. Запасной вариант: разбиение по длине
         return splitByLength(text);
     }
 
