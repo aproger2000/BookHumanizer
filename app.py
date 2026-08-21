@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.6.0 — упрощённая цепочка переводов (RU→EN→RU), без разбиения на абзацы
+Chapter Editor v3.6.0 — упрощённая цепочка переводов (RU→EN→RU)
 """
 import json
 import os
@@ -134,7 +134,7 @@ def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> list:
 
 
 def apply_translation_chain_full(text: str) -> str:
-    logger.info(f"Starting translation chain for {len(text)} chars...")
+    logger.info(f"Starting translation chain (RU→EN→RU) for {len(text)} chars...")
     chunks = split_text_into_chunks(text)
     logger.info(f"Split into {len(chunks)} chunks")
     processed_chunks = []
@@ -240,7 +240,7 @@ def api_revise():
             try:
                 yield _sse("progress", {"chars": 0, "estimated_total": original_len, "percent": 0, "log": "Начинаем обработку..."})
 
-                # 1. Упрощённая цепочка переводов
+                # 1. Упрощённая цепочка переводов (RU→EN→RU)
                 logger.info("Step 1: Translation chain (RU→EN→RU)...")
                 processed_text = apply_translation_chain_full(chapter_text)
                 yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 40, "log": "Переводы завершены"})
