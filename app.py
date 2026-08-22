@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.9.1 — поабзацная обработка с реальным временем
+Chapter Editor v3.9.3 — устойчивая обработка с задержками и ретраями
 """
 import json
 import os
@@ -19,9 +19,12 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.9.1"
+APP_VERSION = "3.9.3"
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
+
+# Глобальная задержка между запросами к переводчикам (сек)
+REQUEST_DELAY = 1.5
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
@@ -36,11 +39,21 @@ def _sse(event_type: str, data: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-# === ПЕРЕВОДЧИКИ ===
-def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int = 2) -> str:
+# === УЛУЧШЕННЫЙ ПЕРЕВОДЧИК С ЗАДЕРЖКАМИ ===
+_last_request_time = 0
+
+def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int = 3) -> str:
+    global _last_request_time
     if not text or len(text.strip()) < 2:
         return text
 
+    # Принудительная задержка между запросами
+    elapsed = time.time() - _last_request_time
+    if elapsed < REQUEST_DELAY:
+        time.sleep(REQUEST_DELAY - elapsed)
+    _last_request_time = time.time()
+
+    # Google Translate (публичный)
     url_google = "https://translate.googleapis.com/translate_a/single"
     params = {
         "client": "gtx",
@@ -49,20 +62,28 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
         "dt": "t",
         "q": text
     }
+
     for attempt in range(max_retries):
         try:
-            resp = requests.get(url_google, params=params, timeout=15)
+            resp = requests.get(url_google, params=params, timeout=20)
             if resp.status_code == 200:
                 data = resp.json()
                 translated = "".join(item[0] for item in data[0] if item[0])
                 if translated:
                     return translated
-            logger.warning(f"Google attempt {attempt+1} failed: {resp.status_code}")
-            time.sleep(1 + random.random())
+            elif resp.status_code == 429:
+                wait = 2 ** attempt + random.random() * 2
+                logger.warning(f"Google 429 (attempt {attempt+1}), waiting {wait:.1f}s")
+                time.sleep(wait)
+                continue
+            else:
+                logger.warning(f"Google attempt {attempt+1} failed: {resp.status_code}")
+                time.sleep(1 + random.random())
         except Exception as e:
             logger.warning(f"Google exception: {e}")
             time.sleep(1 + random.random())
 
+    # Fallback: MyMemory (POST)
     logger.info(f"Falling back to MyMemory (POST) for {target_lang}")
     url_mymemory = "https://api.mymemory.translated.net/get"
     payload = {
@@ -70,7 +91,8 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
         "langpair": f"auto|{target_lang}",
         "de": "user@example.com"
     }
-    for attempt in range(2):
+
+    for attempt in range(max_retries):
         try:
             resp = requests.post(url_mymemory, data=payload, timeout=20)
             if resp.status_code == 200:
@@ -79,12 +101,20 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
                     translated = data.get("responseData", {}).get("translatedText")
                     if translated:
                         return translated
-            logger.warning(f"MyMemory attempt {attempt+1} failed: {resp.status_code}")
-            time.sleep(1 + random.random())
+            elif resp.status_code == 429:
+                wait = 2 ** attempt + random.random() * 2
+                logger.warning(f"MyMemory 429 (attempt {attempt+1}), waiting {wait:.1f}s")
+                time.sleep(wait)
+                continue
+            else:
+                logger.warning(f"MyMemory attempt {attempt+1} failed: {resp.status_code}")
+                time.sleep(1 + random.random())
         except Exception as e:
             logger.warning(f"MyMemory exception: {e}")
             time.sleep(1 + random.random())
 
+    # Если ничего не помогло — возвращаем исходный текст
+    logger.error(f"All translation attempts failed for target {target_lang}. Returning original.")
     return text
 
 
@@ -165,6 +195,7 @@ def process_paragraph(paragraph: str, style: str = "neutral") -> dict:
     for chain in chains:
         logger.info(f"Testing chain {chain['name']} on paragraph: {paragraph[:50]}...")
         revised = translate_chunk(paragraph, chain["langs"])
+        # Простая очистка
         revised = re.sub(r'Vino quieren alejarte|Laboratorio, presupuesto|Empty Null: Final Drawings', '', revised)
         revised = re.sub(r'««««Ибис»»»»', '«Ибис»', revised)
         revised = revised.strip()
@@ -229,6 +260,10 @@ def api_revise():
 
                 results = []
                 for idx, para in enumerate(paragraphs):
+                    # Задержка между абзацами, чтобы не перегружать API
+                    if idx > 0:
+                        time.sleep(1.0)
+
                     yield _sse("paragraph_start", {
                         "index": idx,
                         "original": para,
@@ -246,7 +281,6 @@ def api_revise():
                         "chain": result["chain"]
                     })
 
-                    # Прогресс по количеству обработанных абзацев
                     yield _sse("progress", {
                         "chars": idx + 1,
                         "estimated_total": total,
