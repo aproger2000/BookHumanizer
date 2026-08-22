@@ -1,488 +1,62 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chapter Editor</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: #f0f4fa; color: #1a2634; font-family: 'Inter', sans-serif; min-height: 100vh; display: flex; flex-direction: column; padding: 24px; }
-        .container { max-width: 1400px; margin: 0 auto; width: 100%; flex: 1; display: flex; flex-direction: column; }
-        header { display: flex; justify-content: space-between; align-items: center; padding: 16px 0 24px; border-bottom: 1px solid #d0d9e4; flex-wrap: wrap; gap: 12px; }
-        .logo h1 { font-size: 22px; font-weight: 600; color: #1a2634; letter-spacing: -0.3px; }
-        .logo .sub { font-size: 13px; color: #6b7f94; font-weight: 400; }
-        .version-badge { background: #e4eaf2; padding: 6px 14px; border-radius: 20px; font-size: 12px; color: #3d546a; font-weight: 500; }
-        .main-grid { display: grid; grid-template-columns: 1fr 1.5fr; gap: 24px; margin-top: 28px; flex: 1; }
-        @media (max-width: 768px) { .main-grid { grid-template-columns: 1fr; } body { padding: 16px; } }
-        .panel { background: #ffffff; border-radius: 16px; border: 1px solid #d0d9e4; padding: 24px; display: flex; flex-direction: column; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
-        .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-        .panel-header h2 { font-size: 15px; font-weight: 500; color: #2c3e50; letter-spacing: 0.3px; }
-        .panel-header .count { font-size: 12px; color: #6b7f94; background: #eef3f8; padding: 4px 12px; border-radius: 12px; }
-        textarea { width: 100%; flex: 1; min-height: 400px; background: #f7fafc; border: 1px solid #d0d9e4; border-radius: 12px; color: #1a2634; font-family: 'Inter', monospace; font-size: 14px; line-height: 1.7; padding: 16px; resize: vertical; transition: border-color 0.2s; }
-        textarea:focus { outline: none; border-color: #6c8fc7; }
-        textarea::placeholder { color: #8fa2b8; }
-        .controls { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 16px; padding-top: 16px; border-top: 1px solid #e4eaf2; }
-        .controls select { background: #f7fafc; border: 1px solid #d0d9e4; border-radius: 10px; padding: 10px 16px; color: #1a2634; font-family: 'Inter', sans-serif; font-size: 13px; cursor: pointer; flex: 1; min-width: 120px; }
-        .btn { padding: 10px 28px; border: none; border-radius: 10px; font-family: 'Inter', sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
-        .btn-primary { background: #2c3e50; color: #ffffff; }
-        .btn-primary:hover { background: #1a2a3a; transform: translateY(-1px); box-shadow: 0 4px 16px rgba(44, 62, 80, 0.2); }
-        .btn-primary:disabled { background: #8fa2b8; cursor: not-allowed; transform: none; box-shadow: none; }
-        .btn-secondary { background: #e4eaf2; color: #2c3e50; }
-        .btn-secondary:hover { background: #d0d9e4; }
-        .progress-container { margin-top: 12px; background: #eef3f8; border-radius: 8px; height: 6px; overflow: hidden; opacity: 0; transition: opacity 0.3s; }
-        .progress-container.active { opacity: 1; }
-        .progress-bar { height: 100%; width: 0%; background: #2c3e50; border-radius: 8px; transition: width 0.2s ease; }
-        .status-text { font-size: 13px; color: #6b7f94; margin-top: 10px; min-height: 20px; }
-        .status-text.success { color: #1e7e34; }
-        .status-text.error { color: #b3362a; }
-        .step-indicator { display: flex; gap: 8px; margin-top: 8px; font-size: 12px; color: #6b7f94; align-items: center; flex-wrap: wrap; }
-        .step-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #d0d9e4; transition: all 0.3s; }
-        .step-dot.active { background: #2c3e50; transform: scale(1.2); }
-        .step-dot.done { background: #1e7e34; }
-        .step-label { font-size: 12px; color: #6b7f94; margin-left: 4px; }
-        .result-panel .panel-body {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            background: #f7fafc;
-            border-radius: 12px;
-            border: 1px solid #d0d9e4;
-            padding: 16px;
-            overflow-y: auto;
-            min-height: 400px;
-            max-height: 600px;
-        }
-        .result-paragraph {
-            padding: 8px 12px;
-            margin-bottom: 4px;
-            border-radius: 6px;
-            transition: background-color 0.3s;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-        }
-        .result-paragraph.processing {
-            background-color: #fff3cd;
-        }
-        .result-paragraph.done {
-            background-color: #d4edda;
-        }
-        .result-paragraph.error {
-            background-color: #f8d7da;
-        }
-        .result-paragraph .chain-badge {
-            font-size: 10px;
-            background: #6b7f94;
-            color: #fff;
-            padding: 1px 6px;
-            border-radius: 10px;
-            margin-left: 8px;
-        }
-        .result-paragraph.done .chain-badge {
-            background: #1e7e34;
-        }
-        .result-paragraph.error .chain-badge {
-            background: #b3362a;
-        }
-        .checklist { margin-top: 12px; padding: 12px 16px; background: #f7fafc; border-radius: 10px; border: 1px solid #d0d9e4; display: none; }
-        .checklist.visible { display: block; }
-        .checklist-item { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: 13px; color: #2c3e50; }
-        .checklist-item .icon { font-size: 16px; width: 20px; text-align: center; }
-        .checklist-item .icon.pass { color: #1e7e34; }
-        .checklist-item .icon.fail { color: #b3362a; }
-        .checklist-item .icon.unknown { color: #8fa2b8; }
-        .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #d0d9e4; display: flex; justify-content: space-between; font-size: 12px; color: #8fa2b8; flex-wrap: wrap; gap: 8px; }
-        .footer a { color: #6b7f94; text-decoration: none; }
-        .footer a:hover { color: #2c3e50; }
-        .copy-btn { background: #eef3f8; border: 1px solid #d0d9e4; color: #2c3e50; padding: 4px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; transition: all 0.2s; }
-        .copy-btn:hover { background: #d0d9e4; }
-        .result-placeholder { color: #8fa2b8; font-style: italic; text-align: center; padding: 20px; }
-    </style>
-</head>
-<body>
-<div class="container">
-    <header>
-        <div class="logo"><h1>Chapter Editor <span class="sub">— текст как живой</span></h1></div>
-        <span class="version-badge" id="versionBadge">v...</span>
-    </header>
+<!-- Добавляем стили для sourceProgress -->
+<style>
+#sourceProgress {
+    display: none;
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid #d0d9e4;
+    border-radius: 12px;
+    padding: 8px;
+    background: #f7fafc;
+    margin-top: 8px;
+}
+.source-paragraph {
+    padding: 4px 8px;
+    margin-bottom: 2px;
+    border-radius: 4px;
+    transition: background-color 0.3s;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+.source-paragraph.processing { background-color: #fff3cd; }
+.source-paragraph.done { background-color: #d4edda; }
+.source-paragraph.error { background-color: #f8d7da; }
+</style>
 
-    <div class="main-grid">
-        <div class="panel">
-            <div class="panel-header">
-                <h2>📄 Исходный текст</h2>
-                <span class="count" id="sourceCount">0 симв.</span>
-            </div>
-            <textarea id="sourceText" placeholder="Вставьте главу сюда или загрузите файл..."></textarea>
-            <div class="controls">
-                <select id="styleSelect">
-                    <option value="neutral">Нейтральный</option>
-                    <option value="dynamic_scifi" selected>Динамичная НФ</option>
-                </select>
-                <button class="btn btn-secondary" id="loadBtn">📂 Загрузить</button>
-                <button class="btn btn-primary" id="editBtn">✏️ Редактировать</button>
-            </div>
-            <div class="progress-container" id="progressContainer">
-                <div class="progress-bar" id="progressBar"></div>
-            </div>
-            <div class="step-indicator" id="stepIndicator">
-                <span>Шаги:</span>
-                <span class="step-dot" id="step1"></span>
-                <span class="step-label" id="step1Label">Отправка</span>
-                <span class="step-dot" id="step2"></span>
-                <span class="step-label" id="step2Label">Генерация</span>
-                <span class="step-dot" id="step3"></span>
-                <span class="step-label" id="step3Label">Пост-обработка</span>
-                <span class="step-dot" id="step4"></span>
-                <span class="step-label" id="step4Label">Готово</span>
-            </div>
-            <div class="status-text" id="statusText">Готов к работе</div>
-            <input type="file" id="fileInput" accept=".txt,.md,.docx" style="display:none">
-        </div>
+<!-- В левой панели после textarea -->
+<div id="sourceProgress"></div>
 
-        <div class="panel result-panel">
-            <div class="panel-header">
-                <h2>✨ Отредактированный текст</h2>
-                <div style="display:flex; gap:8px; align-items:center;">
-                    <span class="count" id="resultCount">0 симв.</span>
-                    <button class="copy-btn" id="copyBtn">📋 Копировать</button>
-                </div>
-            </div>
-            <div class="panel-body" id="resultContainer">
-                <div class="result-placeholder" id="resultPlaceholder">Результат будет появляться здесь по мере обработки абзацев...</div>
-            </div>
-            <div class="checklist" id="checklist">
-                <div id="checklistItems"></div>
-            </div>
-        </div>
-    </div>
-
-    <div class="footer">
-        <span id="footerVersion">Chapter Editor — поабзацная обработка с визуализацией</span>
-        <span><a href="#" onclick="location.reload()">Перезагрузить</a></span>
-    </div>
-</div>
-
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    // === ЭЛЕМЕНТЫ ===
-    const sourceText = document.getElementById('sourceText');
-    const resultContainer = document.getElementById('resultContainer');
-    const resultPlaceholder = document.getElementById('resultPlaceholder');
-    const editBtn = document.getElementById('editBtn');
-    const loadBtn = document.getElementById('loadBtn');
-    const fileInput = document.getElementById('fileInput');
-    const styleSelect = document.getElementById('styleSelect');
-    const statusText = document.getElementById('statusText');
-    const progressContainer = document.getElementById('progressContainer');
-    const progressBar = document.getElementById('progressBar');
-    const sourceCount = document.getElementById('sourceCount');
-    const resultCount = document.getElementById('resultCount');
-    const checklistDiv = document.getElementById('checklist');
-    const checklistItems = document.getElementById('checklistItems');
-    const copyBtn = document.getElementById('copyBtn');
-
-    // === СОСТОЯНИЕ ===
-    let paragraphElements = {};
-    let resultText = '';
-
-    // === ФУНКЦИЯ ДОБАВЛЕНИЯ АБЗАЦА ===
-    function addParagraph(index, text, status, chain) {
-        // Убираем плейсхолдер
-        if (resultPlaceholder) {
-            resultPlaceholder.style.display = 'none';
-        }
-
-        // Проверяем, есть ли уже такой абзац
-        let el = document.getElementById('para-' + index);
-        if (!el) {
-            el = document.createElement('div');
-            el.id = 'para-' + index;
-            el.className = 'result-paragraph';
-            resultContainer.appendChild(el);
-        }
-        el.className = 'result-paragraph ' + status;
-        const chainBadge = chain ? `<span class="chain-badge">${chain}</span>` : '';
-        el.innerHTML = text + chainBadge;
-
-        // Обновляем счётчик символов
-        updateResultCount();
-    }
-
-    function updateResultCount() {
-        let fullText = '';
-        const paras = resultContainer.querySelectorAll('.result-paragraph');
-        paras.forEach(p => {
-            // Берём текст без бейджа
-            const textNode = p.childNodes[0];
-            if (textNode) fullText += textNode.textContent + '\n\n';
-        });
-        resultText = fullText.trim();
-        document.getElementById('resultCount').textContent = resultText.length + ' симв.';
-    }
-
-    // === ШАГИ ===
-    const stepDots = {
-        step1: document.getElementById('step1'),
-        step2: document.getElementById('step2'),
-        step3: document.getElementById('step3'),
-        step4: document.getElementById('step4')
-    };
-
-    function resetSteps() {
-        Object.values(stepDots).forEach(s => { s.className = 'step-dot'; });
-    }
-
-    function setStep(step, label) {
-        resetSteps();
-        const names = ['step1', 'step2', 'step3', 'step4'];
-        for (let i = 0; i < names.length; i++) {
-            if (i < step) stepDots[names[i]].className = 'step-dot done';
-            else if (i === step) stepDots[names[i]].className = 'step-dot active';
-            else stepDots[names[i]].className = 'step-dot';
-        }
-        if (label) statusText.textContent = '⏳ ' + label;
-    }
-
-    sourceText.addEventListener('input', function() {
-        sourceCount.textContent = this.value.length + ' симв.';
-    });
-
-    loadBtn.addEventListener('click', function() { fileInput.click(); });
-    fileInput.addEventListener('change', function(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = function(ev) {
-            sourceText.value = ev.target.result;
-            sourceCount.textContent = sourceText.value.length + ' симв.';
-            statusText.textContent = '✅ Файл загружен: ' + file.name;
-            statusText.className = 'status-text success';
-        };
-        reader.onerror = function() {
-            statusText.textContent = '❌ Ошибка чтения файла';
-            statusText.className = 'status-text error';
-        };
-        reader.readAsText(file, 'UTF-8');
-    });
-
-    copyBtn.addEventListener('click', function() {
-        if (!resultText) {
-            statusText.textContent = '⚠️ Нет текста для копирования';
-            statusText.className = 'status-text error';
-            return;
-        }
-        navigator.clipboard.writeText(resultText).then(() => {
-            statusText.textContent = '✅ Текст скопирован в буфер обмена';
-            statusText.className = 'status-text success';
-        }).catch(() => {
-            // fallback
-            const textarea = document.createElement('textarea');
-            textarea.value = resultText;
-            document.body.appendChild(textarea);
-            textarea.select();
-            document.execCommand('copy');
-            document.body.removeChild(textarea);
-            statusText.textContent = '✅ Текст скопирован';
-            statusText.className = 'status-text success';
-        });
-    });
-
-    editBtn.addEventListener('click', function() {
-        const text = sourceText.value.trim();
-        if (!text) {
-            statusText.textContent = '⚠️ Вставьте текст или загрузите файл';
-            statusText.className = 'status-text error';
-            return;
-        }
-
-        const style = styleSelect.value;
-        editBtn.disabled = true;
-        editBtn.textContent = '⏳ Обработка...';
-        statusText.textContent = '⏳ Начинаем обработку по абзацам...';
-        statusText.className = 'status-text';
-        progressContainer.classList.add('active');
-        progressBar.style.width = '0%';
-        checklistDiv.classList.remove('visible');
-        // Очищаем результат
-        resultContainer.innerHTML = '';
-        // Возвращаем плейсхолдер
-        const placeholder = document.createElement('div');
-        placeholder.className = 'result-placeholder';
-        placeholder.id = 'resultPlaceholder';
-        placeholder.textContent = 'Результат будет появляться здесь по мере обработки абзацев...';
-        resultContainer.appendChild(placeholder);
-        resultText = '';
-        document.getElementById('resultCount').textContent = '0 симв.';
-        paragraphElements = {};
-        resetSteps();
-
-        const formData = new FormData();
-        formData.append('text', text);
-        formData.append('style', style);
-
-        setStep(0, 'Отправка запроса...');
-
-        fetch('/api/revise', {
-            method: 'POST',
-            body: formData,
-        })
-        .then(response => {
-            if (!response.ok) {
-                return response.json().then(err => {
-                    throw new Error(err.detail || 'Ошибка сервера');
-                });
-            }
-            setStep(1, 'Генерация текста...');
-            return handleStream(response);
-        })
-        .then(data => {
-            setStep(3, 'Готово!');
-            statusText.textContent = '✅ Готово! ' + (data.summary || '');
-            statusText.className = 'status-text success';
-            if (data.checklist && data.checklist.length) {
-                renderChecklist(data.checklist);
-                checklistDiv.classList.add('visible');
-            }
-        })
-        .catch(err => {
-            statusText.textContent = '❌ ' + err.message;
-            statusText.className = 'status-text error';
-            setStep(-1, 'Ошибка');
-        })
-        .finally(() => {
-            editBtn.disabled = false;
-            editBtn.textContent = '✏️ Редактировать';
-            progressContainer.classList.remove('active');
-            progressBar.style.width = '0%';
-        });
-    });
-
-    function handleStream(response) {
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let resolved = false;
-
-        return new Promise((resolve, reject) => {
-            function read() {
-                reader.read().then(({ done, value }) => {
-                    if (done) {
-                        if (!resolved) reject(new Error('Соединение закрыто'));
-                        return;
-                    }
-                    buffer += decoder.decode(value, { stream: true });
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop() || '';
-
-                    for (const line of lines) {
-                        if (!line.startsWith('data: ')) continue;
-                        const payload = line.slice(6).trim();
-                        if (!payload) continue;
-                        try {
-                            const event = JSON.parse(payload);
-                            handleEvent(event, resolve, reject, () => { resolved = true; });
-                        } catch (e) { /* игнорируем ошибки парсинга */ }
-                    }
-                    read();
-                }).catch(reject);
-            }
-            read();
-        });
-    }
-
-    function handleEvent(event, resolve, reject, markResolved) {
-        switch (event.type) {
-            case 'progress':
-                const total = event.estimated_total || 10000;
-                const pct = Math.min(100, (event.chars / total) * 100);
-                progressBar.style.width = pct + '%';
-                statusText.textContent = '⏳ ' + (event.log || 'Генерация... ' + Math.round(pct) + '%');
-                setStep(1, (event.log || 'Генерация... ' + Math.round(pct) + '%'));
-                break;
-            case 'paragraph_start':
-                // Добавляем абзац в состоянии "processing"
-                addParagraph(event.index, event.original, 'processing', null);
-                break;
-            case 'paragraph_status':
-                // Обновляем абзац с результатом
-                addParagraph(event.index, event.revised, event.status, event.chain);
-                break;
-            case 'done':
-                markResolved();
-                setStep(2, 'Пост-обработка...');
-                // Если есть финальный текст, обновляем
-                if (event.revised_text) {
-                    // Очищаем и добавляем все абзацы (для случая, если не было событий)
-                    // В реальности они уже добавлены, но на всякий случай
-                }
-                resolve(event);
-                break;
-            case 'error':
-                markResolved();
-                reject(new Error(event.detail || 'Ошибка обработки'));
-                break;
-            default:
-                break;
-        }
-    }
-
-    function renderChecklist(checklist) {
-        checklistItems.innerHTML = '';
-        let passedCount = 0;
-        const total = checklist.length;
-        checklist.forEach(item => {
-            const div = document.createElement('div');
-            div.className = 'checklist-item';
-            const icon = document.createElement('span');
-            icon.className = 'icon';
-            if (item.passed === true) {
-                icon.textContent = '✅';
-                icon.classList.add('pass');
-                passedCount++;
-            } else if (item.passed === false) {
-                icon.textContent = '❌';
-                icon.classList.add('fail');
-            } else {
-                icon.textContent = '⏳';
-                icon.classList.add('unknown');
-            }
-            const label = document.createElement('span');
-            label.textContent = item.label;
-            if (item.note) {
-                const note = document.createElement('span');
-                note.style.cssText = 'color: #6b7f94; font-size: 12px; margin-left: 8px;';
-                note.textContent = '— ' + item.note;
-                div.appendChild(icon);
-                div.appendChild(label);
-                div.appendChild(note);
-            } else {
-                div.appendChild(icon);
-                div.appendChild(label);
-            }
-            checklistItems.appendChild(div);
-        });
-        const header = document.createElement('div');
-        header.style.cssText = 'font-weight: 500; margin-bottom: 8px; color: #2c3e50; font-size: 13px;';
-        header.textContent = `📋 Чек-лист: ${passedCount}/${total} пунктов выполнено`;
-        checklistItems.prepend(header);
-    }
-
-    fetch('/api/health')
-        .then(res => res.json())
-        .then(data => {
-            const version = 'v' + data.version;
-            document.getElementById('versionBadge').textContent = version;
-            document.getElementById('footerVersion').textContent = 'Chapter Editor ' + version + ' — поабзацная обработка с визуализацией';
-            statusText.textContent = '✅ Сервер версии ' + data.version + ' готов';
-            statusText.className = 'status-text success';
-        })
-        .catch(() => {
-            document.getElementById('versionBadge').textContent = 'v3.9.1';
-            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.9.1 — поабзацная обработка';
-            statusText.textContent = '⚠️ Не удалось подключиться к серверу';
-            statusText.className = 'status-text error';
-        });
+<!-- В JavaScript: при старте обработки -->
+const sourceTextArea = document.getElementById('sourceText');
+const sourceProgress = document.getElementById('sourceProgress');
+// При клике на "Редактировать":
+const paragraphs = splitIntoParagraphsSafe(text).split('\n\n'); // или использовать серверное разбиение
+sourceProgress.innerHTML = '';
+paragraphs.forEach((p, i) => {
+    const div = document.createElement('div');
+    div.className = 'source-paragraph';
+    div.id = 'source-para-' + i;
+    div.textContent = p;
+    sourceProgress.appendChild(div);
 });
-</script>
-</body>
-</html>
+sourceTextArea.style.display = 'none';
+sourceProgress.style.display = 'block';
+
+// При получении статуса абзаца (paragraph_status)
+const idx = event.index;
+const status = event.status;
+const el = document.getElementById('source-para-' + idx);
+if (el) {
+    el.className = 'source-paragraph ' + status;
+    // Автоскролл к этому абзацу
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+// Также скроллим правую панель
+const resultPara = document.getElementById('para-' + idx);
+if (resultPara) {
+    resultPara.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+// При завершении обработки:
+sourceTextArea.style.display = 'block';
+sourceProgress.style.display = 'none';
