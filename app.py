@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.9.7 — финальная стабильная версия с улучшенной обработкой коротких абзацев, двумя прогресс-барами и оценкой HUMAN
+Chapter Editor v3.9.8 — полная цепочка, итоговая проверка нейродетектором
 """
 import json
 import os
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.9.7"
+APP_VERSION = "3.9.8"
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
 
@@ -150,39 +150,16 @@ def get_human_score(text: str) -> int:
     return max(0, min(100, int(score)))
 
 
-def is_ai_generated(text: str) -> bool:
-    return get_human_score(text) < 50
-
-
-def get_chain_display(chain_name: str, chain_langs: list) -> str:
-    """Возвращает читаемое отображение цепочки."""
-    if chain_name == "EN":
-        return "EN"
-    elif chain_name == "FULL":
-        return "FULL (EN→CS→ES→IT→FR→RU)"
-    else:
-        return chain_name
-
-
-# === ОБРАБОТКА АБЗАЦА ===
 def process_paragraph(paragraph: str, style: str = "neutral") -> dict:
     if not paragraph:
         return {"original": paragraph, "revised": paragraph, "status": "error", "chain": "none", "human_score": 0}
 
-    # Для коротких абзацев используем FULL цепочку и добавляем вводные слова
+    # Цепочки: сначала EN, потом FULL для коротких абзацев
+    chains = [
+        {"name": "EN", "langs": ["en"]},
+    ]
     if len(paragraph) < 50:
-        chains = [{"name": "FULL", "langs": ["en", "cs", "es", "it", "fr"]}]
-        # Добавляем вводные слова для увеличения длины и разнообразия
-        intro_words = ["В самом деле", "По сути", "Как известно", "Следует отметить", "В конечном счёте"]
-        # Если абзац не начинается с диалога, добавим вводное слово
-        if not re.match(r'^[—"«–]', paragraph):
-            intro = random.choice(intro_words)
-            paragraph = f"{intro}, {paragraph[0].lower() + paragraph[1:] if paragraph else paragraph}"
-    else:
-        chains = [
-            {"name": "EN", "langs": ["en"]},
-            {"name": "FULL", "langs": ["en", "cs", "es", "it", "fr"]},
-        ]
+        chains.append({"name": "EN→CS→ES→IT→FR", "langs": ["en", "cs", "es", "it", "fr"]})
 
     best_result = None
     best_score = 0
@@ -203,7 +180,6 @@ def process_paragraph(paragraph: str, style: str = "neutral") -> dict:
                     "revised": revised,
                     "status": "done" if score > 50 else "error",
                     "chain": chain["name"],
-                    "chain_display": get_chain_display(chain["name"], chain["langs"]),
                     "human_score": score
                 }
             if score >= 70:
@@ -217,48 +193,47 @@ def process_paragraph(paragraph: str, style: str = "neutral") -> dict:
         "revised": paragraph,
         "status": "error",
         "chain": "none",
-        "chain_display": "none",
         "human_score": 0
     }
 
 
-# === ОЦЕНКА ВСЕГО ТЕКСТА ===
-def evaluate_full_text(text: str) -> dict:
-    """Разбивает текст на сегменты и возвращает распределение по категориям."""
-    if not text:
-        return {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0, "total": 0, "avg_score": 0}
+# === ИТОГОВАЯ ПРОВЕРКА ВСЕГО ТЕКСТА ===
+def analyze_overall(text: str) -> dict:
+    """Возвращает распределение по категориям для всего текста."""
+    if not text or len(text) < 100:
+        return {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0, "score": 0}
 
-    # Разбиваем на предложения или абзацы (возьмём абзацы)
-    segments = split_paragraphs(text)
-    if not segments:
-        segments = [text]
+    # Разбиваем на сегменты (примерно по предложениям)
+    segments = re.split(r'(?<=[.!?])\s+', text)
+    if len(segments) < 3:
+        return {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0, "score": 0}
 
-    scores = []
-    categories = {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0}
-
+    results = {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0}
     for seg in segments:
+        if len(seg) < 15:
+            continue
         score = get_human_score(seg)
-        scores.append(score)
         if score < 30:
-            categories["AI"] += 1
+            results["AI"] += 1
         elif score < 50:
-            categories["LIKELY_AI"] += 1
+            results["LIKELY_AI"] += 1
         elif score < 70:
-            categories["LIKELY_HUMAN"] += 1
+            results["LIKELY_HUMAN"] += 1
         else:
-            categories["HUMAN"] += 1
+            results["HUMAN"] += 1
 
-    total = len(segments)
-    avg_score = sum(scores) // len(scores) if scores else 0
+    total = sum(results.values())
+    if total == 0:
+        return {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0, "score": 0}
 
-    return {
-        "AI": categories["AI"],
-        "LIKELY_AI": categories["LIKELY_AI"],
-        "LIKELY_HUMAN": categories["LIKELY_HUMAN"],
-        "HUMAN": categories["HUMAN"],
-        "total": total,
-        "avg_score": avg_score
-    }
+    # Проценты
+    for k in results:
+        results[k] = int(results[k] / total * 100)
+
+    # Общий HUMAN score (взвешенный)
+    score = results["HUMAN"] * 1.0 + results["LIKELY_HUMAN"] * 0.7 + results["LIKELY_AI"] * 0.3
+    results["score"] = int(score)
+    return results
 
 
 @app.get("/api/health")
@@ -315,7 +290,6 @@ def api_revise():
                             "revised": para,
                             "status": "error",
                             "chain": "none",
-                            "chain_display": "none",
                             "human_score": 0
                         }
                     results.append(result)
@@ -325,18 +299,10 @@ def api_revise():
                         "original": result["original"],
                         "revised": result["revised"],
                         "status": result["status"],
-                        "chain": result.get("chain_display", result.get("chain", "none")),
+                        "chain": result["chain"],
                         "human_score": result.get("human_score", 0)
                     })
 
-                    # Прогресс по абзацам
-                    yield _sse("paragraph_progress", {
-                        "current": idx + 1,
-                        "total": total,
-                        "percent": (idx + 1) / total * 100
-                    })
-
-                    # Общий прогресс (для верхнего бара)
                     yield _sse("progress", {
                         "chars": idx + 1,
                         "estimated_total": total,
@@ -344,18 +310,27 @@ def api_revise():
                         "log": f"Обработано {idx+1}/{total} абзацев"
                     })
 
+                    yield _sse("paragraph_progress", {
+                        "current": idx + 1,
+                        "total": total,
+                        "percent": (idx + 1) / total * 100
+                    })
+
                 final_text = "\n\n".join(r["revised"] for r in results)
 
-                # Оценка всего текста
-                eval_result = evaluate_full_text(final_text)
+                scores = [r.get("human_score", 0) for r in results if r.get("human_score", 0) > 0]
+                avg_score = sum(scores) // len(scores) if scores else 0
+
+                # Итоговая проверка всего текста
+                overall = analyze_overall(final_text)
 
                 yield _sse("done", {
                     "revised_text": final_text,
                     "original_text": chapter_text,
-                    "summary": f"Обработано {total} абзацев. Успешно: {sum(1 for r in results if r['status']=='done')}, ошибок: {sum(1 for r in results if r['status']=='error')}. Средний HUMAN: {eval_result['avg_score']}%",
+                    "summary": f"Обработано {total} абзацев. Успешно: {sum(1 for r in results if r['status']=='done')}, ошибок: {sum(1 for r in results if r['status']=='error')}. Средний HUMAN: {avg_score}%",
                     "paragraphs": results,
-                    "average_human_score": eval_result['avg_score'],
-                    "evaluation": eval_result,
+                    "average_human_score": avg_score,
+                    "overall_analysis": overall,
                     "checklist": []
                 })
             except ChapterEditError as e:
