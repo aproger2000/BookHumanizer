@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.8.0 — упрощённый пост-процессинг (только явные артефакты)
+Chapter Editor v3.9.0 — поабзацная обработка с эмуляцией нейродетектора
 """
 import json
 import os
@@ -19,21 +19,12 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.8.0"
+APP_VERSION = "3.9.0"
 MAX_CHARS = 30_000
-CHUNK_SIZE = 4000
+CHUNK_SIZE = 3000  # для внутреннего разбиения при переводе
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
-
-# Выбор языка: 'en' (стабильно) или 'cs' (экспериментально, выше HUMAN)
-INTERMEDIATE_LANG = os.environ.get("INTERMEDIATE_LANG", "en").lower()
-VALID_LANGS = {"en", "cs"}
-if INTERMEDIATE_LANG not in VALID_LANGS:
-    logger.warning(f"Unknown INTERMEDIATE_LANG={INTERMEDIATE_LANG}, falling back to 'en'")
-    INTERMEDIATE_LANG = "en"
-
-logger.info(f"Intermediate language: {INTERMEDIATE_LANG.upper()} (chain: RU→{INTERMEDIATE_LANG.upper()}→RU)")
 
 
 class ChapterEditError(RuntimeError):
@@ -45,6 +36,7 @@ def _sse(event_type: str, data: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+# === ПЕРЕВОДЧИКИ ===
 def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int = 2) -> str:
     if not text or len(text.strip()) < 2:
         return text
@@ -96,86 +88,62 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
     return text
 
 
-def process_chunk_through_chain(text: str) -> str:
+def translate_chunk(text: str, chain: list) -> str:
+    """Применяет цепочку переводов: [lang1, lang2, ...] -> RU."""
     if not text or len(text.strip()) < 2:
         return text
     try:
-        intermediate = translate_with_fallback(text, target_lang=INTERMEDIATE_LANG)
-        ru = translate_with_fallback(intermediate, target_lang="ru")
+        current = text
+        for lang in chain:
+            current = translate_with_fallback(current, target_lang=lang)
+        # финальный перевод обратно на русский
+        ru = translate_with_fallback(current, target_lang="ru")
         return ru
     except Exception as e:
-        logger.error(f"Chunk processing error: {e}")
+        logger.error(f"Chain {chain} error: {e}")
         return text
 
 
-def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> list:
-    if len(text) <= chunk_size:
-        return [text]
-
-    chunks = []
-    current_chunk = ""
+def split_paragraphs(text: str) -> list:
+    """Разбивает текст на абзацы по двойному переносу."""
+    if not text:
+        return []
+    # Нормализуем переносы
+    text = text.replace('\r\n', '\n')
     paragraphs = text.split('\n\n')
-    if len(paragraphs) > 1:
-        for para in paragraphs:
-            if len(current_chunk) + len(para) + 2 <= chunk_size:
-                current_chunk += para + "\n\n"
-            else:
-                if current_chunk:
-                    chunks.append(current_chunk.strip())
-                current_chunk = para + "\n\n"
-        if current_chunk:
-            chunks.append(current_chunk.strip())
-        return chunks
-
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    for sentence in sentences:
-        if len(current_chunk) + len(sentence) + 1 <= chunk_size:
-            current_chunk += sentence + " "
-        else:
-            if current_chunk:
-                chunks.append(current_chunk.strip())
-            current_chunk = sentence + " "
-
-    if current_chunk:
-        chunks.append(current_chunk.strip())
-
-    return chunks
+    # Удаляем пустые
+    return [p.strip() for p in paragraphs if p.strip()]
 
 
-def apply_translation_chain_full(text: str) -> str:
-    logger.info(f"Starting translation chain (RU→{INTERMEDIATE_LANG.upper()}→RU) for {len(text)} chars...")
-    chunks = split_text_into_chunks(text)
-    logger.info(f"Split into {len(chunks)} chunks")
-    processed_chunks = []
-    for i, chunk in enumerate(chunks):
-        logger.info(f"Processing chunk {i+1}/{len(chunks)}...")
-        processed = process_chunk_through_chain(chunk)
-        processed_chunks.append(processed)
+# === ЭМУЛЯТОР НЕЙРОДЕТЕКТОРА ===
+# В реальном проекте здесь был бы вызов внешнего API
+def is_ai_generated(text: str) -> bool:
+    """
+    Эмуляция детектора: возвращает True, если текст похож на ИИ.
+    Критерии: >30% латиницы, наличие маркеров, короткие повторяющиеся фразы.
+    """
+    if not text or len(text) < 20:
+        return False
 
-    if '\n\n' in text:
-        result = "\n\n".join(processed_chunks)
-    else:
-        result = " ".join(processed_chunks)
-    logger.info(f"Translation complete. Result length: {len(result)}")
-    return result
+    # Доля латиницы
+    letters = sum(1 for ch in text if ch.isalpha())
+    if letters == 0:
+        return False
+    latin_count = sum(1 for ch in text if 'a' <= ch.lower() <= 'z')
+    latin_ratio = latin_count / letters
+    if latin_ratio > 0.3:
+        return True
 
-
-def minimal_clean(text: str) -> str:
-    """Удаляем только самые явные мусорные фразы, не трогая остальное."""
-    universal = [
-        r'\bMIT\b',
+    # Маркеры ИИ-текста
+    markers = [
         r'\bI thought so\b',
-        r'\bThey will all call\b',
         r'\bNo bureaucracy\b',
         r'\bNo grant fees\b',
         r'\bIn return nothing\b',
-        r'\bIt\'s just that\b',
         r'\bfrom the beginning\b',
         r'\bAlexey remained silent\b',
         r'\bCross continued\b',
         r'\bfunds\?',
-        r'\bfunds\.',
-        r'\band every day\b',
         r'\bthe offers will become\b',
         r'\bless and less\b',
         r'\bpolite\b',
@@ -184,67 +152,76 @@ def minimal_clean(text: str) -> str:
         r'\bwhen the world changes\b',
         r'\bwe\'d like you to remember\b',
         r'\bwho your friends were\b',
+        r'Vino quieren alejarte',
+        r'Laboratorio, presupuesto',
+        r'Empty Null: Final Drawings',
+        r'««««Ибис»»»»',
+    ]
+    for m in markers:
+        if re.search(m, text, flags=re.IGNORECASE):
+            return True
+
+    return False
+
+
+# === ОСНОВНАЯ ЛОГИКА ОБРАБОТКИ ===
+def process_paragraph(paragraph: str, style: str = "neutral") -> dict:
+    """
+    Обрабатывает один абзац:
+    1. Пробует цепочку EN.
+    2. Проверяет через детектор.
+    3. Если плохо — пробует CS.
+    4. Если всё ещё плохо — пробует ES.
+    Возвращает словарь с результатом и статусом.
+    """
+    if not paragraph:
+        return {"original": paragraph, "revised": paragraph, "status": "error", "chain": "none"}
+
+    chains = [
+        {"name": "EN", "langs": ["en"]},
+        {"name": "CS", "langs": ["cs"]},
+        {"name": "ES", "langs": ["es"]},
     ]
 
-    cs_specific = [
-        (r'Vino quieren alejarte', ''),
-        (r'Laboratorio, presupuesto, Equipment\. Todo lo quieras\.', ''),
-        (r'necesitan licencia para su review', ''),
-        (r'Por suuesto necesitan tu batería', '— Разумеется, им нужна твоя батарея'),
-        (r'silent\. “, "\. — And in return\? — In return — nothing\. , \. \. like a shark\'s', ''),
-        (r'Empty Null: Final Drawings', 'Нуль-вакуум: финальные чертежи'),
-        (r'Null Vacuum: Final Drawings', 'Нуль-вакуум: финальные чертежи'),
-        (r'ММистер Штерн', 'Мистер Штерн'),
-        (r'мМистер Штерн', 'Мистер Штерн'),
-        (r'Стерн', 'Штерн'),
-        (r'««««Ибис»»»»', '«Ибис»'),
-        (r'«««Ибис»»»', '«Ибис»'),
-        (r'««Ибис»»', '«Ибис»'),
-        (r'««Ибис»а»', '«Ибиса»'),
-    ]
+    for chain in chains:
+        logger.info(f"Testing chain {chain['name']} on paragraph: {paragraph[:50]}...")
+        revised = translate_chunk(paragraph, chain["langs"])
+        # Простая очистка (удаляем явный мусор)
+        revised = re.sub(r'Vino quieren alejarte|Laboratorio, presupuesto|Empty Null: Final Drawings', '', revised)
+        revised = re.sub(r'««««Ибис»»»»', '«Ибис»', revised)
+        revised = revised.strip()
+        if revised and len(revised) > 0:
+            # Проверяем через детектор
+            if not is_ai_generated(revised):
+                logger.info(f"Chain {chain['name']} passed detector.")
+                return {
+                    "original": paragraph,
+                    "revised": revised,
+                    "status": "done",
+                    "chain": chain["name"]
+                }
+            else:
+                logger.info(f"Chain {chain['name']} failed detector, trying next.")
+        else:
+            logger.warning(f"Chain {chain['name']} produced empty result.")
 
-    for pat in universal:
-        text = re.sub(pat, '', text, flags=re.IGNORECASE)
-
-    for pat, repl in cs_specific:
-        text = re.sub(pat, repl, text, flags=re.IGNORECASE)
-
-    text = re.sub(r'\s+', ' ', text)
-    text = re.sub(r'\s*([.,!?;:])\s*', r'\1 ', text)
-    text = re.sub(r'\s+', ' ', text)
-    text = re.sub(r'^[.,!?;:\s]+$', '', text, flags=re.MULTILINE)
-    text = re.sub(r'—\s*', '— ', text)
-    text = text.replace('""', '"').replace('""', '"')
-
-    fixes = [
-        (r'черного вина', 'черного кофе'),
-        (r'\bТоки\b', '«Ибис»'),
-        (r'не испортил', 'не шутил'),
-        (r'—\s*знать', '— Я знаю'),
-        (r'Босимом', 'Босиком'),
-    ]
-    for pat, repl in fixes:
-        text = re.sub(pat, repl, text, flags=re.IGNORECASE)
-
-    return text.strip()
-
-
-def apply_light_polish(text: str) -> str:
-    text = re.sub(r'\s+', ' ', text)
-    text = text.replace('"', '"').replace('"', '"')
-    text = text.replace(' - ', ' — ')
-    text = re.sub(r'—\s*', '— ', text)
-    return text
+    # Если все цепочки не дали результат, возвращаем оригинал
+    return {
+        "original": paragraph,
+        "revised": paragraph,
+        "status": "error",
+        "chain": "none"
+    }
 
 
 @app.get("/api/health")
 def health():
-    return jsonify(status="ok", version=APP_VERSION, chain=INTERMEDIATE_LANG.upper())
+    return jsonify(status="ok", version=APP_VERSION)
 
 
 @app.post("/api/revise")
 def api_revise():
-    logger.info(f"=== api_revise: START (lang={INTERMEDIATE_LANG.upper()}) ===")
+    logger.info("=== api_revise: START (paragraph-by-paragraph) ===")
     try:
         file_storage = request.files.get("file")
         text = request.form.get("text", "")
@@ -266,41 +243,45 @@ def api_revise():
             chapter_text = chapter_text[:MAX_CHARS]
             logger.warning(f"Truncated text to {MAX_CHARS} chars")
 
-        original_len = len(chapter_text)
-        logger.info(f"Original text length: {original_len}")
+        paragraphs = split_paragraphs(chapter_text)
+        total = len(paragraphs)
+        logger.info(f"Split into {total} paragraphs")
 
         def generate():
             try:
-                yield _sse("progress", {"chars": 0, "estimated_total": original_len, "percent": 0, "log": f"Начинаем обработку (RU→{INTERMEDIATE_LANG.upper()}→RU)..."})
+                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем обработку {total} абзацев..."})
 
-                logger.info(f"Step 1: Translation chain (RU→{INTERMEDIATE_LANG.upper()}→RU)...")
-                processed_text = apply_translation_chain_full(chapter_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 50, "log": f"Переводы завершены ({len(processed_text)} симв.)"})
+                results = []
+                for idx, para in enumerate(paragraphs):
+                    # Отправляем прогресс для текущего абзаца
+                    yield _sse("progress", {
+                        "chars": idx + 1,
+                        "estimated_total": total,
+                        "percent": (idx + 1) / total * 100,
+                        "log": f"Обработка абзаца {idx+1}/{total}",
+                        "paragraph_index": idx,
+                        "paragraph_original": para,
+                        "status": "processing"
+                    })
+                    result = process_paragraph(para, style)
+                    results.append(result)
+                    # Отправляем статус абзаца после обработки
+                    yield _sse("paragraph_status", {
+                        "index": idx,
+                        "original": result["original"],
+                        "revised": result["revised"],
+                        "status": result["status"],
+                        "chain": result["chain"]
+                    })
 
-                logger.info("Step 2: Minimal cleanup (only obvious artifacts)...")
-                processed_text = minimal_clean(processed_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 70, "log": f"Очистка выполнена ({len(processed_text)} симв.)"})
-
-                logger.info("Step 3: Light polish...")
-                processed_text = apply_light_polish(processed_text)
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 90, "log": f"Полировка выполнена ({len(processed_text)} симв.)"})
-
-                yield _sse("progress", {"chars": len(processed_text), "estimated_total": original_len, "percent": 100, "log": "Готово!"})
-
-                final_len = len(processed_text)
-                loss = (original_len - final_len) / original_len
-                logger.info(f"Final: {final_len} chars, loss {loss:.2%}")
-
-                summary = f"Текст переработан через цепочку RU→{INTERMEDIATE_LANG.upper()}→RU с минимальной очисткой. Потеря: {loss:.1%}."
+                # Собираем финальный текст
+                final_text = "\n\n".join(r["revised"] for r in results)
 
                 yield _sse("done", {
-                    "revised_text": processed_text,
+                    "revised_text": final_text,
                     "original_text": chapter_text,
-                    "summary": summary,
-                    "changes": [
-                        f"Переведён через Google Translate / MyMemory (RU→{INTERMEDIATE_LANG.upper()}→RU)",
-                        "Удалены только явные артефакты"
-                    ],
+                    "summary": f"Обработано {total} абзацев. Успешно: {sum(1 for r in results if r['status']=='done')}, ошибок: {sum(1 for r in results if r['status']=='error')}",
+                    "paragraphs": results,
                     "checklist": []
                 })
             except ChapterEditError as e:
