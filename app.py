@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.9.3 — расширенные цепочки, HUMAN score для каждого абзаца
+Chapter Editor v3.9.4 — обработка коротких абзацев полной цепочкой, HUMAN score
 """
 import json
 import os
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.9.3"
+APP_VERSION = "3.9.4"
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
 
@@ -36,7 +36,7 @@ def _sse(event_type: str, data: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-# === УЛУЧШЕННЫЙ ПЕРЕВОДЧИК С РЕТРАЯМИ ===
+# === ПЕРЕВОДЧИК ===
 def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int = 5) -> str:
     if not text or len(text.strip()) < 2:
         return text
@@ -70,7 +70,6 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
             logger.warning(f"Google exception: {e}")
             time.sleep(0.5 + random.random())
 
-    # Fallback: MyMemory
     logger.info(f"Falling back to MyMemory (POST) for {target_lang}")
     url_mymemory = "https://api.mymemory.translated.net/get"
     payload = {
@@ -126,42 +125,28 @@ def split_paragraphs(text: str) -> list:
     return [p.strip() for p in paragraphs if p.strip()]
 
 
-# === УЛУЧШЕННЫЙ ДЕТЕКТОР С ВОЗВРАТОМ HUMAN SCORE ===
+# === ДЕТЕКТОР С HUMAN SCORE ===
 def get_human_score(text: str) -> int:
-    """Возвращает оценку 0-100, где 100 — максимально человеческий текст."""
     if not text or len(text) < 20:
-        return 50  # нейтрально
+        return 50
 
-    # 1. Доля латиницы
     letters = sum(1 for ch in text if ch.isalpha())
     if letters == 0:
-        return 80  # только кириллица — хорошо
+        return 80
     latin_count = sum(1 for ch in text if 'a' <= ch.lower() <= 'z')
     latin_ratio = latin_count / letters
-    score = max(0, 100 - (latin_ratio * 120))  # штраф за латиницу
+    score = max(0, 100 - (latin_ratio * 120))
 
-    # 2. Маркеры ИИ
     markers = [
-        r'\bI thought so\b',
-        r'\bNo bureaucracy\b',
-        r'\bNo grant fees\b',
-        r'\bIn return nothing\b',
-        r'\bfrom the beginning\b',
-        r'\bAlexey remained silent\b',
-        r'\bCross continued\b',
-        r'\bfunds\?',
-        r'\bthe offers will become\b',
-        r'\bless and less\b',
-        r'\bpolite\b',
-        r'\byou continue to work\b',
-        r'\bwe provide you with peace of mind\b',
-        r'\bwhen the world changes\b',
-        r'\bwe\'d like you to remember\b',
-        r'\bwho your friends were\b',
-        r'Vino quieren alejarte',
-        r'Laboratorio, presupuesto',
-        r'Empty Null: Final Drawings',
-        r'««««Ибис»»»»',
+        r'\bI thought so\b', r'\bNo bureaucracy\b', r'\bNo grant fees\b',
+        r'\bIn return nothing\b', r'\bfrom the beginning\b',
+        r'\bAlexey remained silent\b', r'\bCross continued\b',
+        r'\bfunds\?', r'\bthe offers will become\b', r'\bless and less\b',
+        r'\bpolite\b', r'\byou continue to work\b',
+        r'\bwe provide you with peace of mind\b', r'\bwhen the world changes\b',
+        r'\bwe\'d like you to remember\b', r'\bwho your friends were\b',
+        r'Vino quieren alejarte', r'Laboratorio, presupuesto',
+        r'Empty Null: Final Drawings', r'««««Ибис»»»»',
     ]
     marker_penalty = 0
     for m in markers:
@@ -169,27 +154,24 @@ def get_human_score(text: str) -> int:
             marker_penalty += 15
     score -= marker_penalty
 
-    # 3. Средняя длина слова (если слишком короткая или слишком длинная — подозрительно)
     words = re.findall(r'[а-яА-Яa-zA-Z]+', text)
     if words:
         avg_len = sum(len(w) for w in words) / len(words)
         if avg_len < 3 or avg_len > 12:
             score -= 10
 
-    # 4. Повторы (если одно и то же слово повторяется слишком часто)
     word_counts = {}
     for w in words:
         w_lower = w.lower()
         word_counts[w_lower] = word_counts.get(w_lower, 0) + 1
     max_repeat = max(word_counts.values()) if word_counts else 0
-    if max_repeat > len(words) * 0.15:  # более 15% повторов
+    if max_repeat > len(words) * 0.15:
         score -= 15
 
     return max(0, min(100, int(score)))
 
 
 def is_ai_generated(text: str) -> bool:
-    """Упрощённый вызов: возвращает True, если human_score < 50."""
     return get_human_score(text) < 50
 
 
@@ -197,14 +179,19 @@ def process_paragraph(paragraph: str, style: str = "neutral") -> dict:
     if not paragraph:
         return {"original": paragraph, "revised": paragraph, "status": "error", "chain": "none", "human_score": 0}
 
-    # Расширенный список цепочек
-    chains = [
-        {"name": "EN", "langs": ["en"]},
-        {"name": "CS", "langs": ["cs"]},
-        {"name": "ES", "langs": ["es"]},
-        {"name": "IT", "langs": ["it"]},
-        {"name": "FR", "langs": ["fr"]},
-    ]
+    # Для коротких абзацев (<50 символов) используем полную цепочку
+    if len(paragraph) < 50:
+        chains = [
+            {"name": "FULL", "langs": ["en", "cs", "es", "it", "fr"]},
+        ]
+    else:
+        chains = [
+            {"name": "EN", "langs": ["en"]},
+            {"name": "CS", "langs": ["cs"]},
+            {"name": "ES", "langs": ["es"]},
+            {"name": "IT", "langs": ["it"]},
+            {"name": "FR", "langs": ["fr"]},
+        ]
 
     best_result = None
     best_score = 0
@@ -212,7 +199,6 @@ def process_paragraph(paragraph: str, style: str = "neutral") -> dict:
     for chain in chains:
         logger.info(f"Testing chain {chain['name']} on paragraph: {paragraph[:50]}...")
         revised = translate_chunk(paragraph, chain["langs"])
-        # Простая очистка
         revised = re.sub(r'Vino quieren alejarte|Laboratorio, presupuesto|Empty Null: Final Drawings', '', revised)
         revised = re.sub(r'««««Ибис»»»»', '«Ибис»', revised)
         revised = revised.strip()
@@ -228,15 +214,12 @@ def process_paragraph(paragraph: str, style: str = "neutral") -> dict:
                     "chain": chain["name"],
                     "human_score": score
                 }
-            if score >= 70:  # Достаточно хороший результат, можно остановиться
+            if score >= 70:
                 break
-        else:
-            logger.warning(f"Chain {chain['name']} produced empty result.")
 
     if best_result:
         return best_result
 
-    # Если ничего не помогло — возвращаем оригинал
     return {
         "original": paragraph,
         "revised": paragraph,
@@ -312,11 +295,16 @@ def api_revise():
 
                 final_text = "\n\n".join(r["revised"] for r in results)
 
+                # Рассчитываем средний HUMAN score
+                scores = [r.get("human_score", 0) for r in results if r.get("human_score", 0) > 0]
+                avg_score = sum(scores) // len(scores) if scores else 0
+
                 yield _sse("done", {
                     "revised_text": final_text,
                     "original_text": chapter_text,
-                    "summary": f"Обработано {total} абзацев. Успешно: {sum(1 for r in results if r['status']=='done')}, ошибок: {sum(1 for r in results if r['status']=='error')}",
+                    "summary": f"Обработано {total} абзацев. Успешно: {sum(1 for r in results if r['status']=='done')}, ошибок: {sum(1 for r in results if r['status']=='error')}. Средний HUMAN: {avg_score}%",
                     "paragraphs": results,
+                    "average_human_score": avg_score,
                     "checklist": []
                 })
             except ChapterEditError as e:
