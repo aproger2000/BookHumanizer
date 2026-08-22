@@ -112,7 +112,35 @@
             font-size: 12px;
             font-weight: 600;
         }
-        /* Второй прогресс-бар в правой панели */
+        .overall-analysis {
+            margin-top: 12px;
+            padding: 12px 16px;
+            background: #f7fafc;
+            border-radius: 10px;
+            border: 1px solid #d0d9e4;
+            flex-shrink: 0;
+            display: none;
+        }
+        .overall-analysis.visible { display: block; }
+        .overall-analysis .title { font-weight: 600; font-size: 13px; color: #2c3e50; margin-bottom: 6px; }
+        .overall-analysis .stats { display: flex; gap: 16px; flex-wrap: wrap; }
+        .overall-analysis .stat { font-size: 13px; }
+        .overall-analysis .stat .label { color: #6b7f94; }
+        .overall-analysis .stat .value { font-weight: 600; }
+        .overall-analysis .stat .value.green { color: #1e7e34; }
+        .overall-analysis .stat .value.yellow { color: #b38600; }
+        .overall-analysis .stat .value.red { color: #b3362a; }
+        .overall-status {
+            display: inline-block;
+            padding: 2px 12px;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 13px;
+            margin-left: 8px;
+        }
+        .overall-status.success { background: #d4edda; color: #1e7e34; }
+        .overall-status.warning { background: #fff3cd; color: #b38600; }
+        .overall-status.error { background: #f8d7da; color: #b3362a; }
         .progress-container-secondary {
             margin-top: 8px;
             background: #eef3f8;
@@ -158,7 +186,6 @@
                 <button class="btn btn-secondary" id="loadBtn">📂 Загрузить</button>
                 <button class="btn btn-primary" id="editBtn">✏️ Редактировать</button>
             </div>
-            <!-- Первый прогресс-бар (общий) -->
             <div class="progress-container" id="progressContainer">
                 <div class="progress-bar" id="progressBar"></div>
             </div>
@@ -189,12 +216,20 @@
             <div class="panel-body" id="resultContainer">
                 <div class="result-placeholder" id="resultPlaceholder">Результат будет появляться здесь по мере обработки абзацев...</div>
             </div>
-            <!-- Второй прогресс-бар (по абзацам) и подпись -->
+            <!-- Второй прогресс-бар (по абзацам) -->
             <div class="progress-container-secondary" id="progressContainerSecondary">
                 <div class="progress-bar-secondary" id="progressBarSecondary"></div>
                 <div class="progress-label">
                     <span id="progressLabelText">Абзацы: 0/0</span>
                     <span id="progressPercentText">0%</span>
+                </div>
+            </div>
+            <!-- Блок итоговой проверки -->
+            <div class="overall-analysis" id="overallAnalysis">
+                <div class="title">🔍 Итоговая проверка нейродетектором</div>
+                <div class="stats" id="overallStats"></div>
+                <div style="margin-top:6px;">
+                    <span class="overall-status" id="overallStatus"></span>
                 </div>
             </div>
             <div class="checklist" id="checklist">
@@ -233,6 +268,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const checklistItems = document.getElementById('checklistItems');
     const copyBtn = document.getElementById('copyBtn');
     const avgScoreBadge = document.getElementById('avgScoreBadge');
+    const overallAnalysis = document.getElementById('overallAnalysis');
+    const overallStats = document.getElementById('overallStats');
+    const overallStatus = document.getElementById('overallStatus');
 
     // === СОСТОЯНИЕ ===
     let resultText = '';
@@ -272,6 +310,27 @@ document.addEventListener('DOMContentLoaded', function() {
             avgScoreBadge.style.display = 'inline';
             avgScoreBadge.textContent = 'Средний HUMAN: ' + avgScore + '%';
         }
+    }
+
+    function updateOverallAnalysis(data) {
+        if (!data || data.score === undefined) {
+            overallAnalysis.classList.remove('visible');
+            return;
+        }
+        overallAnalysis.classList.add('visible');
+        const categories = ['AI', 'LIKELY_AI', 'LIKELY_HUMAN', 'HUMAN'];
+        const colors = ['red', 'red', 'yellow', 'green'];
+        let html = '';
+        for (const cat of categories) {
+            const val = data[cat] || 0;
+            const color = colors[categories.indexOf(cat)];
+            html += `<div class="stat"><span class="label">${cat}:</span> <span class="value ${color}">${val}%</span></div>`;
+        }
+        overallStats.innerHTML = html;
+
+        const score = data.score || 0;
+        overallStatus.textContent = score >= 70 ? '✅ Успешно' : (score >= 50 ? '⚠️ Так себе' : '❌ Не успешно');
+        overallStatus.className = 'overall-status ' + (score >= 70 ? 'success' : (score >= 50 ? 'warning' : 'error'));
     }
 
     function updateParagraphProgress(current, total) {
@@ -444,6 +503,7 @@ document.addEventListener('DOMContentLoaded', function() {
         progressLabelText.textContent = 'Абзацы: 0/0';
         progressPercentText.textContent = '0%';
         checklistDiv.classList.remove('visible');
+        overallAnalysis.classList.remove('visible');
         resultContainer.innerHTML = '';
         const placeholder = document.createElement('div');
         placeholder.className = 'result-placeholder';
@@ -483,6 +543,9 @@ document.addEventListener('DOMContentLoaded', function() {
             statusText.className = 'status-text success';
             if (data.average_human_score) {
                 updateAvgScore(data.average_human_score);
+            }
+            if (data.overall_analysis) {
+                updateOverallAnalysis(data.overall_analysis);
             }
             if (data.checklist && data.checklist.length) {
                 renderChecklist(data.checklist);
@@ -629,8 +692,8 @@ document.addEventListener('DOMContentLoaded', function() {
             statusText.className = 'status-text success';
         })
         .catch(() => {
-            document.getElementById('versionBadge').textContent = 'v3.9.10';
-            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.9.10 — поабзацная обработка';
+            document.getElementById('versionBadge').textContent = 'v3.9.11';
+            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.9.11 — поабзацная обработка';
             statusText.textContent = '⚠️ Не удалось подключиться к серверу';
             statusText.className = 'status-text error';
         });
