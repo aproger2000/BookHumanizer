@@ -55,23 +55,6 @@
         .footer a:hover { color: #2c3e50; }
         .copy-btn { background: #eef3f8; border: 1px solid #d0d9e4; color: #2c3e50; padding: 4px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; transition: all 0.2s; }
         .copy-btn:hover { background: #d0d9e4; }
-
-        /* === СТИЛИ ДЛЯ ХАЙЛАЙТЕРА АБЗАЦЕВ === */
-        .paragraph-highlight {
-            transition: background-color 0.3s;
-        }
-        .paragraph-highlight.processing {
-            background-color: #fff3cd; /* жёлтый */
-        }
-        .paragraph-highlight.done {
-            background-color: #d4edda; /* зелёный */
-        }
-        .paragraph-highlight.error {
-            background-color: #f8d7da; /* красный */
-        }
-        .paragraph-highlight.default {
-            background-color: transparent;
-        }
     </style>
 </head>
 <body>
@@ -80,9 +63,7 @@
         <div class="logo"><h1>Chapter Editor <span class="sub">— текст как живой</span></h1></div>
         <span class="version-badge" id="versionBadge">v...</span>
     </header>
-
     <div class="main-grid">
-        <!-- Левая панель: исходный текст -->
         <div class="panel">
             <div class="panel-header">
                 <h2>📄 Исходный текст</h2>
@@ -114,8 +95,6 @@
             <div class="status-text" id="statusText">Готов к работе</div>
             <input type="file" id="fileInput" accept=".txt,.md,.docx" style="display:none">
         </div>
-
-        <!-- Правая панель: результат -->
         <div class="panel result-panel">
             <div class="panel-header">
                 <h2>✨ Отредактированный текст</h2>
@@ -132,7 +111,6 @@
             </div>
         </div>
     </div>
-
     <div class="footer">
         <span id="footerVersion">Chapter Editor — обработка через цепочку переводов</span>
         <span><a href="#" onclick="location.reload()">Перезагрузить</a></span>
@@ -141,7 +119,6 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // === ЭЛЕМЕНТЫ ===
     const sourceText = document.getElementById('sourceText');
     const resultText = document.getElementById('resultText');
     const editBtn = document.getElementById('editBtn');
@@ -157,21 +134,17 @@ document.addEventListener('DOMContentLoaded', function() {
     const checklistItems = document.getElementById('checklistItems');
     const copyBtn = document.getElementById('copyBtn');
 
-    // === БЕЗОПАСНОЕ РАЗБИЕНИЕ НА АБЗАЦЫ (без потери текста) ===
     function splitIntoParagraphsSafe(text) {
         if (!text || text.length < 200) return text;
-
         let sentences = text.match(/[^.!?]+[.!?]+/g);
         if (sentences && sentences.length >= 2) {
             const paragraphs = [];
             let current = [];
             let currentLen = 0;
             const targetLen = 400;
-
             for (const sent of sentences) {
                 const trimmed = sent.trim();
                 if (!trimmed) continue;
-
                 const isDialog = /^[—"«–]/.test(trimmed);
                 if (isDialog) {
                     if (current.length > 0) {
@@ -182,7 +155,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     paragraphs.push(trimmed);
                     continue;
                 }
-
                 if (currentLen + trimmed.length > targetLen && current.length >= 2) {
                     paragraphs.push(current.join(' '));
                     current = [];
@@ -191,18 +163,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 current.push(trimmed);
                 currentLen += trimmed.length;
             }
-
             if (current.length > 0) {
                 paragraphs.push(current.join(' '));
             }
-
             if (paragraphs.length === 1 && text.length > 600) {
                 return splitByLength(text);
             }
-
             return paragraphs.join('\n\n');
         }
-
         return splitByLength(text);
     }
 
@@ -227,29 +195,6 @@ document.addEventListener('DOMContentLoaded', function() {
         return result.join('\n\n');
     }
 
-    // === ОБНОВЛЁННАЯ ФУНКЦИЯ ОБРАБОТКИ С ХАЙЛАЙТЕРОМ ===
-    function processWithHighlighting(originalText, translatedText) {
-        // Разбиваем на абзацы
-        const originalParagraphs = originalText.split('\n\n');
-        const translatedParagraphs = translatedText.split('\n\n');
-
-        // Если количество абзацев не совпадает, просто возвращаем переведённый текст (он уже разбит)
-        if (originalParagraphs.length !== translatedParagraphs.length) {
-            return translatedText;
-        }
-
-        // Формируем результат с хайлайтером
-        let resultHtml = '';
-        for (let i = 0; i < originalParagraphs.length; i++) {
-            const orig = originalParagraphs[i] || '';
-            const trans = translatedParagraphs[i] || '';
-            // Для демонстрации пока просто объединяем, хайлайтер будет добавлен позже
-            resultHtml += trans + '\n\n';
-        }
-        return resultHtml.trim();
-    }
-
-    // === ШАГИ ===
     const stepDots = {
         step1: document.getElementById('step1'),
         step2: document.getElementById('step2'),
@@ -352,7 +297,6 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .then(data => {
             const rawText = data.revised_text || '';
-            // Применяем безопасное разбиение и хайлайтер
             const formattedText = splitIntoParagraphsSafe(rawText);
             setStep(3, 'Готово!');
             resultText.value = formattedText;
