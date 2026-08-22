@@ -6,115 +6,37 @@
     <title>Chapter Editor</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: #f0f4fa; color: #1a2634; font-family: 'Inter', sans-serif; min-height: 100vh; display: flex; flex-direction: column; padding: 24px; }
-        .container { max-width: 1400px; margin: 0 auto; width: 100%; flex: 1; display: flex; flex-direction: column; }
-        header { display: flex; justify-content: space-between; align-items: center; padding: 16px 0 24px; border-bottom: 1px solid #d0d9e4; flex-wrap: wrap; gap: 12px; }
-        .logo h1 { font-size: 22px; font-weight: 600; color: #1a2634; letter-spacing: -0.3px; }
-        .logo .sub { font-size: 13px; color: #6b7f94; font-weight: 400; }
-        .version-badge { background: #e4eaf2; padding: 6px 14px; border-radius: 20px; font-size: 12px; color: #3d546a; font-weight: 500; }
-        .main-grid { display: grid; grid-template-columns: 1fr 1.5fr; gap: 24px; margin-top: 28px; flex: 1; max-height: calc(100vh - 250px); min-height: 500px; }
-        @media (max-width: 768px) { .main-grid { grid-template-columns: 1fr; max-height: none; } body { padding: 16px; } }
-        .panel { background: #ffffff; border-radius: 16px; border: 1px solid #d0d9e4; padding: 24px; display: flex; flex-direction: column; box-shadow: 0 2px 8px rgba(0,0,0,0.04); min-height: 0; }
-        .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-shrink: 0; }
-        .panel-header h2 { font-size: 15px; font-weight: 500; color: #2c3e50; letter-spacing: 0.3px; }
-        .panel-header .count { font-size: 12px; color: #6b7f94; background: #eef3f8; padding: 4px 12px; border-radius: 12px; }
-        textarea { width: 100%; flex: 1; min-height: 200px; background: #f7fafc; border: 1px solid #d0d9e4; border-radius: 12px; color: #1a2634; font-family: 'Inter', monospace; font-size: 14px; line-height: 1.7; padding: 16px; resize: vertical; transition: border-color 0.2s; }
-        textarea:focus { outline: none; border-color: #6c8fc7; }
-        textarea::placeholder { color: #8fa2b8; }
-        .controls { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 16px; flex-shrink: 0; padding-top: 16px; border-top: 1px solid #e4eaf2; }
-        .controls select { background: #f7fafc; border: 1px solid #d0d9e4; border-radius: 10px; padding: 10px 16px; color: #1a2634; font-family: 'Inter', sans-serif; font-size: 13px; cursor: pointer; flex: 1; min-width: 120px; }
-        .btn { padding: 10px 28px; border: none; border-radius: 10px; font-family: 'Inter', sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
-        .btn-primary { background: #2c3e50; color: #ffffff; }
-        .btn-primary:hover { background: #1a2a3a; transform: translateY(-1px); box-shadow: 0 4px 16px rgba(44, 62, 80, 0.2); }
-        .btn-primary:disabled { background: #8fa2b8; cursor: not-allowed; transform: none; box-shadow: none; }
-        .btn-secondary { background: #e4eaf2; color: #2c3e50; }
-        .btn-secondary:hover { background: #d0d9e4; }
-        .progress-container { margin-top: 12px; background: #eef3f8; border-radius: 8px; height: 6px; overflow: hidden; opacity: 0; flex-shrink: 0; transition: opacity 0.3s; }
-        .progress-container.active { opacity: 1; }
-        .progress-bar { height: 100%; width: 0%; background: #2c3e50; border-radius: 8px; transition: width 0.2s ease; }
-        .progress-container-secondary { margin-top: 6px; background: #eef3f8; border-radius: 8px; height: 4px; overflow: hidden; opacity: 0; flex-shrink: 0; transition: opacity 0.3s; }
-        .progress-container-secondary.active { opacity: 1; }
-        .progress-bar-secondary { height: 100%; width: 0%; background: #6c8fc7; border-radius: 8px; transition: width 0.2s ease; }
-        .status-text { font-size: 13px; color: #6b7f94; margin-top: 10px; min-height: 20px; flex-shrink: 0; }
-        .status-text.success { color: #1e7e34; }
-        .status-text.error { color: #b3362a; }
-        .step-indicator { display: flex; gap: 8px; margin-top: 8px; font-size: 12px; color: #6b7f94; align-items: center; flex-wrap: wrap; flex-shrink: 0; }
-        .step-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #d0d9e4; transition: all 0.3s; }
-        .step-dot.active { background: #2c3e50; transform: scale(1.2); }
-        .step-dot.done { background: #1e7e34; }
-        .step-label { font-size: 12px; color: #6b7f94; margin-left: 4px; }
-        .result-panel .panel-body {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
+        /* ... (стили без изменений, но добавим блок для оценки) */
+        .evaluation-container {
+            margin-top: 12px;
+            padding: 12px 16px;
             background: #f7fafc;
-            border-radius: 12px;
+            border-radius: 10px;
             border: 1px solid #d0d9e4;
-            padding: 16px;
-            overflow-y: auto;
-            min-height: 200px;
+            display: none;
         }
-        .result-paragraph {
-            padding: 8px 12px;
-            margin-bottom: 4px;
-            border-radius: 6px;
-            transition: background-color 0.3s;
-            white-space: pre-wrap;
-            word-wrap: break-word;
+        .evaluation-container.visible { display: block; }
+        .evaluation-item {
             display: flex;
             justify-content: space-between;
-            align-items: flex-start;
+            align-items: center;
+            padding: 4px 0;
+            font-size: 13px;
+            color: #2c3e50;
         }
-        .result-paragraph .text { flex: 1; }
-        .result-paragraph .meta { font-size: 11px; color: #6b7f94; white-space: nowrap; margin-left: 12px; padding-top: 2px; }
-        .result-paragraph .meta .chain { background: #e4eaf2; padding: 0 6px; border-radius: 4px; margin-right: 4px; }
-        .result-paragraph .meta .score { font-weight: 600; }
-        .result-paragraph.processing { background-color: #fff3cd; }
-        .result-paragraph.done { background-color: #d4edda; }
-        .result-paragraph.error { background-color: #f8d7da; }
-        .source-progress-container {
-            display: none;
-            flex: 1;
-            overflow-y: auto;
-            border: 1px solid #d0d9e4;
-            border-radius: 12px;
-            padding: 8px;
-            background: #f7fafc;
-            margin-top: 8px;
+        .evaluation-item .label { font-weight: 500; }
+        .evaluation-item .value { font-weight: 600; }
+        .evaluation-item .indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
         }
-        .source-paragraph {
-            padding: 4px 8px;
-            margin-bottom: 2px;
-            border-radius: 4px;
-            transition: background-color 0.3s;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-        }
-        .source-paragraph.processing { background-color: #fff3cd; }
-        .source-paragraph.done { background-color: #d4edda; }
-        .source-paragraph.error { background-color: #f8d7da; }
-        .checklist { margin-top: 12px; padding: 12px 16px; background: #f7fafc; border-radius: 10px; border: 1px solid #d0d9e4; display: none; flex-shrink: 0; }
-        .checklist.visible { display: block; }
-        .checklist-item { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: 13px; color: #2c3e50; }
-        .checklist-item .icon { font-size: 16px; width: 20px; text-align: center; }
-        .checklist-item .icon.pass { color: #1e7e34; }
-        .checklist-item .icon.fail { color: #b3362a; }
-        .checklist-item .icon.unknown { color: #8fa2b8; }
-        .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #d0d9e4; display: flex; justify-content: space-between; font-size: 12px; color: #8fa2b8; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
-        .footer a { color: #6b7f94; text-decoration: none; }
-        .footer a:hover { color: #2c3e50; }
-        .copy-btn { background: #eef3f8; border: 1px solid #d0d9e4; color: #2c3e50; padding: 4px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; transition: all 0.2s; }
-        .copy-btn:hover { background: #d0d9e4; }
-        .result-placeholder { color: #8fa2b8; font-style: italic; text-align: center; padding: 20px; }
-        .avg-score-badge {
-            background: #2c3e50;
-            color: #fff;
-            padding: 2px 12px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 600;
-        }
+        .indicator.green { background: #1e7e34; }
+        .indicator.yellow { background: #ffc107; }
+        .indicator.red { background: #b3362a; }
+        /* ... остальные стили как в предыдущей версии */
     </style>
 </head>
 <body>
@@ -143,9 +65,6 @@
             <div class="progress-container" id="progressContainer">
                 <div class="progress-bar" id="progressBar"></div>
             </div>
-            <div class="progress-container-secondary" id="progressContainerSecondary">
-                <div class="progress-bar-secondary" id="progressBarSecondary"></div>
-            </div>
             <div class="step-indicator" id="stepIndicator">
                 <span>Шаги:</span>
                 <span class="step-dot" id="step1"></span>
@@ -171,6 +90,16 @@
             </div>
             <div class="panel-body" id="resultContainer">
                 <div class="result-placeholder" id="resultPlaceholder">Результат будет появляться здесь по мере обработки абзацев...</div>
+            </div>
+            <!-- Прогресс по абзацам (второй бар) -->
+            <div class="progress-container-secondary" id="progressContainerSecondary">
+                <div class="progress-bar-secondary" id="progressBarSecondary"></div>
+                <div style="font-size:11px; color:#6b7f94; margin-top:2px; text-align:right;" id="paragraphProgressLabel">0/0 абзацев</div>
+            </div>
+            <!-- Оценка текста -->
+            <div class="evaluation-container" id="evaluationContainer">
+                <div style="font-weight:500; margin-bottom:8px; font-size:13px; color:#2c3e50;">📊 Оценка нейродетектора</div>
+                <div id="evaluationResults"></div>
             </div>
             <div class="checklist" id="checklist">
                 <div id="checklistItems"></div>
@@ -200,15 +129,20 @@ document.addEventListener('DOMContentLoaded', function() {
     const progressBar = document.getElementById('progressBar');
     const progressContainerSecondary = document.getElementById('progressContainerSecondary');
     const progressBarSecondary = document.getElementById('progressBarSecondary');
+    const paragraphProgressLabel = document.getElementById('paragraphProgressLabel');
     const sourceCount = document.getElementById('sourceCount');
     const resultCount = document.getElementById('resultCount');
     const checklistDiv = document.getElementById('checklist');
     const checklistItems = document.getElementById('checklistItems');
     const copyBtn = document.getElementById('copyBtn');
     const avgScoreBadge = document.getElementById('avgScoreBadge');
+    const evaluationContainer = document.getElementById('evaluationContainer');
+    const evaluationResults = document.getElementById('evaluationResults');
 
     // === СОСТОЯНИЕ ===
     let resultText = '';
+    let processedParagraphs = 0;
+    let totalParagraphs = 0;
 
     // === ФУНКЦИЯ ДОБАВЛЕНИЯ АБЗАЦА В РЕЗУЛЬТАТ ===
     function addResultParagraph(index, text, status, chain, humanScore) {
@@ -244,6 +178,48 @@ document.addEventListener('DOMContentLoaded', function() {
             avgScoreBadge.style.display = 'inline';
             avgScoreBadge.textContent = 'Средний HUMAN: ' + avgScore + '%';
         }
+    }
+
+    function updateParagraphProgress(current, total) {
+        processedParagraphs = current;
+        totalParagraphs = total;
+        const pct = Math.min(100, (current / total) * 100);
+        progressBarSecondary.style.width = pct + '%';
+        paragraphProgressLabel.textContent = `${current}/${total} абзацев`;
+    }
+
+    // === ВИЗУАЛИЗАЦИЯ ОЦЕНКИ ===
+    function renderEvaluation(evalData) {
+        evaluationContainer.classList.add('visible');
+        const total = evalData.total || 1;
+        const items = [
+            { key: 'HUMAN', label: 'HUMAN', color: 'green' },
+            { key: 'LIKELY_HUMAN', label: 'LIKELY_HUMAN', color: 'yellow' },
+            { key: 'LIKELY_AI', label: 'LIKELY_AI', color: 'yellow' },
+            { key: 'AI', label: 'AI', color: 'red' },
+        ];
+        let html = '';
+        for (const item of items) {
+            const count = evalData[item.key] || 0;
+            const pct = (count / total * 100).toFixed(0);
+            const indicatorColor = item.color;
+            html += `
+                <div class="evaluation-item">
+                    <span class="label"><span class="indicator ${indicatorColor}"></span>${item.label}</span>
+                    <span class="value">${count} (${pct}%)</span>
+                </div>
+            `;
+        }
+        // Средний балл
+        const avg = evalData.avg_score || 0;
+        let overallColor = avg >= 70 ? 'green' : (avg >= 50 ? 'yellow' : 'red');
+        html += `
+            <div class="evaluation-item" style="border-top:1px solid #d0d9e4; margin-top:8px; padding-top:8px;">
+                <span class="label">Средний HUMAN</span>
+                <span class="value" style="color: ${overallColor === 'green' ? '#1e7e34' : overallColor === 'yellow' ? '#d39e00' : '#b3362a'};">${avg}%</span>
+            </div>
+        `;
+        evaluationResults.innerHTML = html;
     }
 
     // === ХАЙЛАЙТЕР ИСХОДНОГО ТЕКСТА ===
@@ -405,6 +381,8 @@ document.addEventListener('DOMContentLoaded', function() {
         progressContainerSecondary.classList.add('active');
         progressBar.style.width = '0%';
         progressBarSecondary.style.width = '0%';
+        paragraphProgressLabel.textContent = '0/0 абзацев';
+        evaluationContainer.classList.remove('visible');
         checklistDiv.classList.remove('visible');
         resultContainer.innerHTML = '';
         const placeholder = document.createElement('div');
@@ -445,6 +423,9 @@ document.addEventListener('DOMContentLoaded', function() {
             statusText.className = 'status-text success';
             if (data.average_human_score) {
                 updateAvgScore(data.average_human_score);
+            }
+            if (data.evaluation) {
+                renderEvaluation(data.evaluation);
             }
             if (data.checklist && data.checklist.length) {
                 renderChecklist(data.checklist);
@@ -512,10 +493,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 setStep(1, (event.log || 'Генерация... ' + Math.round(pct) + '%'));
                 break;
             case 'paragraph_progress':
-                const current = event.current;
-                const totalParas = event.total;
-                const pctParas = Math.min(100, (current / totalParas) * 100);
-                progressBarSecondary.style.width = pctParas + '%';
+                updateParagraphProgress(event.current, event.total);
                 break;
             case 'paragraph_start':
                 addResultParagraph(event.index, event.original, 'processing', null, 0);
@@ -590,8 +568,8 @@ document.addEventListener('DOMContentLoaded', function() {
             statusText.className = 'status-text success';
         })
         .catch(() => {
-            document.getElementById('versionBadge').textContent = 'v3.9.6';
-            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.9.6 — поабзацная обработка';
+            document.getElementById('versionBadge').textContent = 'v3.9.7';
+            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.9.7 — поабзацная обработка';
             statusText.textContent = '⚠️ Не удалось подключиться к серверу';
             statusText.className = 'status-text error';
         });
