@@ -41,8 +41,49 @@
         .step-dot.active { background: #2c3e50; transform: scale(1.2); }
         .step-dot.done { background: #1e7e34; }
         .step-label { font-size: 12px; color: #6b7f94; margin-left: 4px; }
-        .result-panel .panel-body { flex: 1; display: flex; flex-direction: column; }
-        .result-panel .panel-body textarea { flex: 1; min-height: 400px; }
+        .result-panel .panel-body {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #f7fafc;
+            border-radius: 12px;
+            border: 1px solid #d0d9e4;
+            padding: 16px;
+            overflow-y: auto;
+            min-height: 400px;
+            max-height: 600px;
+        }
+        .result-paragraph {
+            padding: 8px 12px;
+            margin-bottom: 4px;
+            border-radius: 6px;
+            transition: background-color 0.3s;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .result-paragraph.processing {
+            background-color: #fff3cd;
+        }
+        .result-paragraph.done {
+            background-color: #d4edda;
+        }
+        .result-paragraph.error {
+            background-color: #f8d7da;
+        }
+        .result-paragraph .chain-badge {
+            font-size: 10px;
+            background: #6b7f94;
+            color: #fff;
+            padding: 1px 6px;
+            border-radius: 10px;
+            margin-left: 8px;
+        }
+        .result-paragraph.done .chain-badge {
+            background: #1e7e34;
+        }
+        .result-paragraph.error .chain-badge {
+            background: #b3362a;
+        }
         .checklist { margin-top: 12px; padding: 12px 16px; background: #f7fafc; border-radius: 10px; border: 1px solid #d0d9e4; display: none; }
         .checklist.visible { display: block; }
         .checklist-item { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: 13px; color: #2c3e50; }
@@ -55,23 +96,7 @@
         .footer a:hover { color: #2c3e50; }
         .copy-btn { background: #eef3f8; border: 1px solid #d0d9e4; color: #2c3e50; padding: 4px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; transition: all 0.2s; }
         .copy-btn:hover { background: #d0d9e4; }
-
-        /* === СТИЛИ ДЛЯ ХАЙЛАЙТЕРА === */
-        .paragraph-highlight {
-            transition: background-color 0.3s;
-        }
-        .paragraph-highlight.processing {
-            background-color: #fff3cd; /* жёлтый */
-        }
-        .paragraph-highlight.done {
-            background-color: #d4edda; /* зелёный */
-        }
-        .paragraph-highlight.error {
-            background-color: #f8d7da; /* красный */
-        }
-        .paragraph-highlight.default {
-            background-color: transparent;
-        }
+        .result-placeholder { color: #8fa2b8; font-style: italic; text-align: center; padding: 20px; }
     </style>
 </head>
 <body>
@@ -82,7 +107,6 @@
     </header>
 
     <div class="main-grid">
-        <!-- Левая панель: исходный текст -->
         <div class="panel">
             <div class="panel-header">
                 <h2>📄 Исходный текст</h2>
@@ -115,7 +139,6 @@
             <input type="file" id="fileInput" accept=".txt,.md,.docx" style="display:none">
         </div>
 
-        <!-- Правая панель: результат -->
         <div class="panel result-panel">
             <div class="panel-header">
                 <h2>✨ Отредактированный текст</h2>
@@ -124,8 +147,8 @@
                     <button class="copy-btn" id="copyBtn">📋 Копировать</button>
                 </div>
             </div>
-            <div class="panel-body">
-                <textarea id="resultText" placeholder="Результат появится здесь..." readonly></textarea>
+            <div class="panel-body" id="resultContainer">
+                <div class="result-placeholder" id="resultPlaceholder">Результат будет появляться здесь по мере обработки абзацев...</div>
             </div>
             <div class="checklist" id="checklist">
                 <div id="checklistItems"></div>
@@ -134,7 +157,7 @@
     </div>
 
     <div class="footer">
-        <span id="footerVersion">Chapter Editor — поабзацная обработка с нейродетектором</span>
+        <span id="footerVersion">Chapter Editor — поабзацная обработка с визуализацией</span>
         <span><a href="#" onclick="location.reload()">Перезагрузить</a></span>
     </div>
 </div>
@@ -143,7 +166,8 @@
 document.addEventListener('DOMContentLoaded', function() {
     // === ЭЛЕМЕНТЫ ===
     const sourceText = document.getElementById('sourceText');
-    const resultText = document.getElementById('resultText');
+    const resultContainer = document.getElementById('resultContainer');
+    const resultPlaceholder = document.getElementById('resultPlaceholder');
     const editBtn = document.getElementById('editBtn');
     const loadBtn = document.getElementById('loadBtn');
     const fileInput = document.getElementById('fileInput');
@@ -157,26 +181,43 @@ document.addEventListener('DOMContentLoaded', function() {
     const checklistItems = document.getElementById('checklistItems');
     const copyBtn = document.getElementById('copyBtn');
 
-    // === ПЕРЕМЕННЫЕ ДЛЯ АБЗАЦЕВ ===
-    let paragraphStatuses = [];
+    // === СОСТОЯНИЕ ===
+    let paragraphElements = {};
+    let resultText = '';
 
-    // === ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ЦВЕТА СТАТУСА ===
-    function getStatusClass(status) {
-        switch (status) {
-            case 'processing': return 'processing';
-            case 'done': return 'done';
-            case 'error': return 'error';
-            default: return 'default';
+    // === ФУНКЦИЯ ДОБАВЛЕНИЯ АБЗАЦА ===
+    function addParagraph(index, text, status, chain) {
+        // Убираем плейсхолдер
+        if (resultPlaceholder) {
+            resultPlaceholder.style.display = 'none';
         }
+
+        // Проверяем, есть ли уже такой абзац
+        let el = document.getElementById('para-' + index);
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'para-' + index;
+            el.className = 'result-paragraph';
+            resultContainer.appendChild(el);
+        }
+        el.className = 'result-paragraph ' + status;
+        const chainBadge = chain ? `<span class="chain-badge">${chain}</span>` : '';
+        el.innerHTML = text + chainBadge;
+
+        // Обновляем счётчик символов
+        updateResultCount();
     }
 
-    // === БЕЗОПАСНОЕ РАЗБИЕНИЕ (только для отображения, если сервер не дал абзацев) ===
-    function splitIntoParagraphsSafe(text) {
-        if (!text) return text;
-        // Если текст уже содержит абзацы, оставляем как есть
-        if (text.includes('\n\n')) return text;
-        // Иначе разбиваем по 400 символов
-        return text;
+    function updateResultCount() {
+        let fullText = '';
+        const paras = resultContainer.querySelectorAll('.result-paragraph');
+        paras.forEach(p => {
+            // Берём текст без бейджа
+            const textNode = p.childNodes[0];
+            if (textNode) fullText += textNode.textContent + '\n\n';
+        });
+        resultText = fullText.trim();
+        document.getElementById('resultCount').textContent = resultText.length + ' симв.';
     }
 
     // === ШАГИ ===
@@ -225,17 +266,22 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     copyBtn.addEventListener('click', function() {
-        if (!resultText.value) {
+        if (!resultText) {
             statusText.textContent = '⚠️ Нет текста для копирования';
             statusText.className = 'status-text error';
             return;
         }
-        navigator.clipboard.writeText(resultText.value).then(() => {
+        navigator.clipboard.writeText(resultText).then(() => {
             statusText.textContent = '✅ Текст скопирован в буфер обмена';
             statusText.className = 'status-text success';
         }).catch(() => {
-            resultText.select();
+            // fallback
+            const textarea = document.createElement('textarea');
+            textarea.value = resultText;
+            document.body.appendChild(textarea);
+            textarea.select();
             document.execCommand('copy');
+            document.body.removeChild(textarea);
             statusText.textContent = '✅ Текст скопирован';
             statusText.className = 'status-text success';
         });
@@ -257,10 +303,18 @@ document.addEventListener('DOMContentLoaded', function() {
         progressContainer.classList.add('active');
         progressBar.style.width = '0%';
         checklistDiv.classList.remove('visible');
-        resultText.value = '';
-        resultCount.textContent = '0 симв.';
+        // Очищаем результат
+        resultContainer.innerHTML = '';
+        // Возвращаем плейсхолдер
+        const placeholder = document.createElement('div');
+        placeholder.className = 'result-placeholder';
+        placeholder.id = 'resultPlaceholder';
+        placeholder.textContent = 'Результат будет появляться здесь по мере обработки абзацев...';
+        resultContainer.appendChild(placeholder);
+        resultText = '';
+        document.getElementById('resultCount').textContent = '0 симв.';
+        paragraphElements = {};
         resetSteps();
-        paragraphStatuses = [];
 
         const formData = new FormData();
         formData.append('text', text);
@@ -282,23 +336,12 @@ document.addEventListener('DOMContentLoaded', function() {
             return handleStream(response);
         })
         .then(data => {
-            const rawText = data.revised_text || '';
-            // Применяем разбиение только если сервер не вернул абзацы
-            const formattedText = rawText.includes('\n\n') ? rawText : splitIntoParagraphsSafe(rawText);
             setStep(3, 'Готово!');
-            resultText.value = formattedText;
-            resultCount.textContent = formattedText.length + ' симв.';
             statusText.textContent = '✅ Готово! ' + (data.summary || '');
             statusText.className = 'status-text success';
-
             if (data.checklist && data.checklist.length) {
                 renderChecklist(data.checklist);
                 checklistDiv.classList.add('visible');
-            }
-
-            // Обновляем хайлайтер на основе полученных статусов абзацев
-            if (data.paragraphs && data.paragraphs.length > 0) {
-                applyParagraphHighlights(data.paragraphs);
             }
         })
         .catch(err => {
@@ -319,7 +362,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const decoder = new TextDecoder();
         let buffer = '';
         let resolved = false;
-        let lastParagraphs = [];
 
         return new Promise((resolve, reject) => {
             function read() {
@@ -338,7 +380,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         if (!payload) continue;
                         try {
                             const event = JSON.parse(payload);
-                            handleEvent(event, resolve, reject, () => { resolved = true; }, lastParagraphs);
+                            handleEvent(event, resolve, reject, () => { resolved = true; });
                         } catch (e) { /* игнорируем ошибки парсинга */ }
                     }
                     read();
@@ -348,7 +390,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    function handleEvent(event, resolve, reject, markResolved, lastParagraphs) {
+    function handleEvent(event, resolve, reject, markResolved) {
         switch (event.type) {
             case 'progress':
                 const total = event.estimated_total || 10000;
@@ -356,32 +398,22 @@ document.addEventListener('DOMContentLoaded', function() {
                 progressBar.style.width = pct + '%';
                 statusText.textContent = '⏳ ' + (event.log || 'Генерация... ' + Math.round(pct) + '%');
                 setStep(1, (event.log || 'Генерация... ' + Math.round(pct) + '%'));
-                // Если пришёл статус абзаца, обновляем визуализацию
-                if (event.paragraph_original !== undefined) {
-                    // Сохраняем для последующего применения
-                }
+                break;
+            case 'paragraph_start':
+                // Добавляем абзац в состоянии "processing"
+                addParagraph(event.index, event.original, 'processing', null);
                 break;
             case 'paragraph_status':
-                // Получаем статус отдельного абзаца
-                const idx = event.index;
-                const status = event.status;
-                const original = event.original;
-                const revised = event.revised;
-                // Сохраняем в массив
-                lastParagraphs[idx] = { original, revised, status };
-                // Обновляем хайлайтер
-                applySingleParagraphHighlight(idx, status);
+                // Обновляем абзац с результатом
+                addParagraph(event.index, event.revised, event.status, event.chain);
                 break;
             case 'done':
                 markResolved();
                 setStep(2, 'Пост-обработка...');
-                // В done приходят все абзацы в поле paragraphs
-                if (event.paragraphs && event.paragraphs.length > 0) {
-                    lastParagraphs = event.paragraphs.map((p, i) => ({
-                        original: p.original,
-                        revised: p.revised,
-                        status: p.status
-                    }));
+                // Если есть финальный текст, обновляем
+                if (event.revised_text) {
+                    // Очищаем и добавляем все абзацы (для случая, если не было событий)
+                    // В реальности они уже добавлены, но на всякий случай
                 }
                 resolve(event);
                 break;
@@ -391,51 +423,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 break;
             default:
                 break;
-        }
-    }
-
-    function applySingleParagraphHighlight(index, status) {
-        // Находим соответствующий абзац в правом поле
-        const textarea = resultText;
-        const paragraphs = textarea.value.split('\n\n');
-        if (index >= paragraphs.length) return;
-
-        // Обновляем текст с хайлайтером — пока просто меняем цвет фона всего текста
-        // В реальном проекте можно сделать более сложную разметку
-        // Для простоты будем использовать CSS-классы на блоке textarea
-        // Но textarea не поддерживает внутреннюю разметку, поэтому используем отдельный div
-        // Пока просто меняем стиль textarea в зависимости от статуса
-        // Это упрощённая версия, но для демонстрации подойдёт
-        if (status === 'processing') {
-            resultText.style.backgroundColor = '#fff3cd';
-        } else if (status === 'done') {
-            resultText.style.backgroundColor = '#d4edda';
-        } else if (status === 'error') {
-            resultText.style.backgroundColor = '#f8d7da';
-        } else {
-            resultText.style.backgroundColor = '';
-        }
-    }
-
-    function applyParagraphHighlights(paragraphs) {
-        // Массовое обновление хайлайтера
-        // Просто проходим по всем абзацам и устанавливаем цвет
-        let hasProcessing = false;
-        let hasError = false;
-        let hasDone = false;
-        for (const p of paragraphs) {
-            if (p.status === 'processing') hasProcessing = true;
-            if (p.status === 'error') hasError = true;
-            if (p.status === 'done') hasDone = true;
-        }
-        if (hasProcessing) {
-            resultText.style.backgroundColor = '#fff3cd';
-        } else if (hasError) {
-            resultText.style.backgroundColor = '#f8d7da';
-        } else if (hasDone) {
-            resultText.style.backgroundColor = '#d4edda';
-        } else {
-            resultText.style.backgroundColor = '';
         }
     }
 
@@ -485,13 +472,13 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(data => {
             const version = 'v' + data.version;
             document.getElementById('versionBadge').textContent = version;
-            document.getElementById('footerVersion').textContent = 'Chapter Editor ' + version + ' — поабзацная обработка с нейродетектором';
+            document.getElementById('footerVersion').textContent = 'Chapter Editor ' + version + ' — поабзацная обработка с визуализацией';
             statusText.textContent = '✅ Сервер версии ' + data.version + ' готов';
             statusText.className = 'status-text success';
         })
         .catch(() => {
-            document.getElementById('versionBadge').textContent = 'v3.9.0';
-            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.9.0 — поабзацная обработка';
+            document.getElementById('versionBadge').textContent = 'v3.9.1';
+            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.9.1 — поабзацная обработка';
             statusText.textContent = '⚠️ Не удалось подключиться к серверу';
             statusText.className = 'status-text error';
         });
