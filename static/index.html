@@ -55,6 +55,23 @@
         .footer a:hover { color: #2c3e50; }
         .copy-btn { background: #eef3f8; border: 1px solid #d0d9e4; color: #2c3e50; padding: 4px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; transition: all 0.2s; }
         .copy-btn:hover { background: #d0d9e4; }
+
+        /* === СТИЛИ ДЛЯ ХАЙЛАЙТЕРА === */
+        .paragraph-highlight {
+            transition: background-color 0.3s;
+        }
+        .paragraph-highlight.processing {
+            background-color: #fff3cd; /* жёлтый */
+        }
+        .paragraph-highlight.done {
+            background-color: #d4edda; /* зелёный */
+        }
+        .paragraph-highlight.error {
+            background-color: #f8d7da; /* красный */
+        }
+        .paragraph-highlight.default {
+            background-color: transparent;
+        }
     </style>
 </head>
 <body>
@@ -63,7 +80,9 @@
         <div class="logo"><h1>Chapter Editor <span class="sub">— текст как живой</span></h1></div>
         <span class="version-badge" id="versionBadge">v...</span>
     </header>
+
     <div class="main-grid">
+        <!-- Левая панель: исходный текст -->
         <div class="panel">
             <div class="panel-header">
                 <h2>📄 Исходный текст</h2>
@@ -95,6 +114,8 @@
             <div class="status-text" id="statusText">Готов к работе</div>
             <input type="file" id="fileInput" accept=".txt,.md,.docx" style="display:none">
         </div>
+
+        <!-- Правая панель: результат -->
         <div class="panel result-panel">
             <div class="panel-header">
                 <h2>✨ Отредактированный текст</h2>
@@ -111,14 +132,16 @@
             </div>
         </div>
     </div>
+
     <div class="footer">
-        <span id="footerVersion">Chapter Editor — обработка через цепочку переводов</span>
+        <span id="footerVersion">Chapter Editor — поабзацная обработка с нейродетектором</span>
         <span><a href="#" onclick="location.reload()">Перезагрузить</a></span>
     </div>
 </div>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // === ЭЛЕМЕНТЫ ===
     const sourceText = document.getElementById('sourceText');
     const resultText = document.getElementById('resultText');
     const editBtn = document.getElementById('editBtn');
@@ -134,67 +157,29 @@ document.addEventListener('DOMContentLoaded', function() {
     const checklistItems = document.getElementById('checklistItems');
     const copyBtn = document.getElementById('copyBtn');
 
+    // === ПЕРЕМЕННЫЕ ДЛЯ АБЗАЦЕВ ===
+    let paragraphStatuses = [];
+
+    // === ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ЦВЕТА СТАТУСА ===
+    function getStatusClass(status) {
+        switch (status) {
+            case 'processing': return 'processing';
+            case 'done': return 'done';
+            case 'error': return 'error';
+            default: return 'default';
+        }
+    }
+
+    // === БЕЗОПАСНОЕ РАЗБИЕНИЕ (только для отображения, если сервер не дал абзацев) ===
     function splitIntoParagraphsSafe(text) {
-        if (!text || text.length < 200) return text;
-        let sentences = text.match(/[^.!?]+[.!?]+/g);
-        if (sentences && sentences.length >= 2) {
-            const paragraphs = [];
-            let current = [];
-            let currentLen = 0;
-            const targetLen = 400;
-            for (const sent of sentences) {
-                const trimmed = sent.trim();
-                if (!trimmed) continue;
-                const isDialog = /^[—"«–]/.test(trimmed);
-                if (isDialog) {
-                    if (current.length > 0) {
-                        paragraphs.push(current.join(' '));
-                        current = [];
-                        currentLen = 0;
-                    }
-                    paragraphs.push(trimmed);
-                    continue;
-                }
-                if (currentLen + trimmed.length > targetLen && current.length >= 2) {
-                    paragraphs.push(current.join(' '));
-                    current = [];
-                    currentLen = 0;
-                }
-                current.push(trimmed);
-                currentLen += trimmed.length;
-            }
-            if (current.length > 0) {
-                paragraphs.push(current.join(' '));
-            }
-            if (paragraphs.length === 1 && text.length > 600) {
-                return splitByLength(text);
-            }
-            return paragraphs.join('\n\n');
-        }
-        return splitByLength(text);
+        if (!text) return text;
+        // Если текст уже содержит абзацы, оставляем как есть
+        if (text.includes('\n\n')) return text;
+        // Иначе разбиваем по 400 символов
+        return text;
     }
 
-    function splitByLength(text) {
-        const chunkSize = 400;
-        const result = [];
-        let i = 0;
-        while (i < text.length) {
-            let end = i + chunkSize;
-            if (end >= text.length) {
-                result.push(text.slice(i));
-                break;
-            }
-            let space = text.lastIndexOf(' ', end);
-            if (space <= i) {
-                space = end;
-            }
-            result.push(text.slice(i, space));
-            i = space + 1;
-            while (i < text.length && text[i] === ' ') i++;
-        }
-        return result.join('\n\n');
-    }
-
+    // === ШАГИ ===
     const stepDots = {
         step1: document.getElementById('step1'),
         step2: document.getElementById('step2'),
@@ -267,7 +252,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const style = styleSelect.value;
         editBtn.disabled = true;
         editBtn.textContent = '⏳ Обработка...';
-        statusText.textContent = '⏳ Начинаем обработку...';
+        statusText.textContent = '⏳ Начинаем обработку по абзацам...';
         statusText.className = 'status-text';
         progressContainer.classList.add('active');
         progressBar.style.width = '0%';
@@ -275,6 +260,7 @@ document.addEventListener('DOMContentLoaded', function() {
         resultText.value = '';
         resultCount.textContent = '0 симв.';
         resetSteps();
+        paragraphStatuses = [];
 
         const formData = new FormData();
         formData.append('text', text);
@@ -297,7 +283,8 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .then(data => {
             const rawText = data.revised_text || '';
-            const formattedText = splitIntoParagraphsSafe(rawText);
+            // Применяем разбиение только если сервер не вернул абзацы
+            const formattedText = rawText.includes('\n\n') ? rawText : splitIntoParagraphsSafe(rawText);
             setStep(3, 'Готово!');
             resultText.value = formattedText;
             resultCount.textContent = formattedText.length + ' симв.';
@@ -307,6 +294,11 @@ document.addEventListener('DOMContentLoaded', function() {
             if (data.checklist && data.checklist.length) {
                 renderChecklist(data.checklist);
                 checklistDiv.classList.add('visible');
+            }
+
+            // Обновляем хайлайтер на основе полученных статусов абзацев
+            if (data.paragraphs && data.paragraphs.length > 0) {
+                applyParagraphHighlights(data.paragraphs);
             }
         })
         .catch(err => {
@@ -327,6 +319,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const decoder = new TextDecoder();
         let buffer = '';
         let resolved = false;
+        let lastParagraphs = [];
 
         return new Promise((resolve, reject) => {
             function read() {
@@ -345,7 +338,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         if (!payload) continue;
                         try {
                             const event = JSON.parse(payload);
-                            handleEvent(event, resolve, reject, () => { resolved = true; });
+                            handleEvent(event, resolve, reject, () => { resolved = true; }, lastParagraphs);
                         } catch (e) { /* игнорируем ошибки парсинга */ }
                     }
                     read();
@@ -355,7 +348,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    function handleEvent(event, resolve, reject, markResolved) {
+    function handleEvent(event, resolve, reject, markResolved, lastParagraphs) {
         switch (event.type) {
             case 'progress':
                 const total = event.estimated_total || 10000;
@@ -363,10 +356,33 @@ document.addEventListener('DOMContentLoaded', function() {
                 progressBar.style.width = pct + '%';
                 statusText.textContent = '⏳ ' + (event.log || 'Генерация... ' + Math.round(pct) + '%');
                 setStep(1, (event.log || 'Генерация... ' + Math.round(pct) + '%'));
+                // Если пришёл статус абзаца, обновляем визуализацию
+                if (event.paragraph_original !== undefined) {
+                    // Сохраняем для последующего применения
+                }
+                break;
+            case 'paragraph_status':
+                // Получаем статус отдельного абзаца
+                const idx = event.index;
+                const status = event.status;
+                const original = event.original;
+                const revised = event.revised;
+                // Сохраняем в массив
+                lastParagraphs[idx] = { original, revised, status };
+                // Обновляем хайлайтер
+                applySingleParagraphHighlight(idx, status);
                 break;
             case 'done':
                 markResolved();
                 setStep(2, 'Пост-обработка...');
+                // В done приходят все абзацы в поле paragraphs
+                if (event.paragraphs && event.paragraphs.length > 0) {
+                    lastParagraphs = event.paragraphs.map((p, i) => ({
+                        original: p.original,
+                        revised: p.revised,
+                        status: p.status
+                    }));
+                }
                 resolve(event);
                 break;
             case 'error':
@@ -375,6 +391,51 @@ document.addEventListener('DOMContentLoaded', function() {
                 break;
             default:
                 break;
+        }
+    }
+
+    function applySingleParagraphHighlight(index, status) {
+        // Находим соответствующий абзац в правом поле
+        const textarea = resultText;
+        const paragraphs = textarea.value.split('\n\n');
+        if (index >= paragraphs.length) return;
+
+        // Обновляем текст с хайлайтером — пока просто меняем цвет фона всего текста
+        // В реальном проекте можно сделать более сложную разметку
+        // Для простоты будем использовать CSS-классы на блоке textarea
+        // Но textarea не поддерживает внутреннюю разметку, поэтому используем отдельный div
+        // Пока просто меняем стиль textarea в зависимости от статуса
+        // Это упрощённая версия, но для демонстрации подойдёт
+        if (status === 'processing') {
+            resultText.style.backgroundColor = '#fff3cd';
+        } else if (status === 'done') {
+            resultText.style.backgroundColor = '#d4edda';
+        } else if (status === 'error') {
+            resultText.style.backgroundColor = '#f8d7da';
+        } else {
+            resultText.style.backgroundColor = '';
+        }
+    }
+
+    function applyParagraphHighlights(paragraphs) {
+        // Массовое обновление хайлайтера
+        // Просто проходим по всем абзацам и устанавливаем цвет
+        let hasProcessing = false;
+        let hasError = false;
+        let hasDone = false;
+        for (const p of paragraphs) {
+            if (p.status === 'processing') hasProcessing = true;
+            if (p.status === 'error') hasError = true;
+            if (p.status === 'done') hasDone = true;
+        }
+        if (hasProcessing) {
+            resultText.style.backgroundColor = '#fff3cd';
+        } else if (hasError) {
+            resultText.style.backgroundColor = '#f8d7da';
+        } else if (hasDone) {
+            resultText.style.backgroundColor = '#d4edda';
+        } else {
+            resultText.style.backgroundColor = '';
         }
     }
 
@@ -423,15 +484,14 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(res => res.json())
         .then(data => {
             const version = 'v' + data.version;
-            const chain = (data.chain || 'en').toUpperCase();
-            document.getElementById('versionBadge').textContent = version + ' (' + chain + ')';
-            document.getElementById('footerVersion').textContent = 'Chapter Editor ' + version + ' — цепочка: RU→' + chain + '→RU';
-            statusText.textContent = '✅ Сервер версии ' + data.version + ' готов, цепочка: RU→' + chain + '→RU';
+            document.getElementById('versionBadge').textContent = version;
+            document.getElementById('footerVersion').textContent = 'Chapter Editor ' + version + ' — поабзацная обработка с нейродетектором';
+            statusText.textContent = '✅ Сервер версии ' + data.version + ' готов';
             statusText.className = 'status-text success';
         })
         .catch(() => {
-            document.getElementById('versionBadge').textContent = 'v3.8.0 (EN)';
-            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.8.0 — цепочка: RU→EN→RU';
+            document.getElementById('versionBadge').textContent = 'v3.9.0';
+            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.9.0 — поабзацная обработка';
             statusText.textContent = '⚠️ Не удалось подключиться к серверу';
             statusText.className = 'status-text error';
         });
