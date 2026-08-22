@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.9.10 — поабзацная обработка, HUMAN score без итогового анализа
+Chapter Editor v3.9.11 — логирование текстов для отладки нейродетектора
 """
 import json
 import os
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.9.10"
+APP_VERSION = "3.9.11"
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
 
@@ -154,7 +154,6 @@ def process_paragraph(paragraph: str, style: str = "neutral") -> dict:
     if not paragraph:
         return {"original": paragraph, "revised": paragraph, "status": "error", "chain": "none", "human_score": 0}
 
-    # Цепочки: сначала EN, потом FULL для коротких абзацев
     chains = [
         {"name": "EN", "langs": ["en"]},
     ]
@@ -195,6 +194,43 @@ def process_paragraph(paragraph: str, style: str = "neutral") -> dict:
         "chain": "none",
         "human_score": 0
     }
+
+
+# === ИТОГОВЫЙ АНАЛИЗ (ВОССТАНОВЛЕН) ===
+def analyze_overall(text: str) -> dict:
+    """Возвращает распределение по категориям для всего текста."""
+    if not text or len(text) < 100:
+        return {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0, "score": 0}
+
+    # Разбиваем на сегменты (примерно по предложениям)
+    segments = re.split(r'(?<=[.!?])\s+', text)
+    if len(segments) < 3:
+        return {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0, "score": 0}
+
+    results = {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0}
+    for seg in segments:
+        if len(seg) < 15:
+            continue
+        score = get_human_score(seg)
+        if score < 30:
+            results["AI"] += 1
+        elif score < 50:
+            results["LIKELY_AI"] += 1
+        elif score < 70:
+            results["LIKELY_HUMAN"] += 1
+        else:
+            results["HUMAN"] += 1
+
+    total = sum(results.values())
+    if total == 0:
+        return {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0, "score": 0}
+
+    for k in results:
+        results[k] = int(results[k] / total * 100)
+
+    score = results["HUMAN"] * 1.0 + results["LIKELY_HUMAN"] * 0.7 + results["LIKELY_AI"] * 0.3
+    results["score"] = int(score)
+    return results
 
 
 @app.get("/api/health")
@@ -282,12 +318,24 @@ def api_revise():
                 scores = [r.get("human_score", 0) for r in results if r.get("human_score", 0) > 0]
                 avg_score = sum(scores) // len(scores) if scores else 0
 
+                # === ЛОГИРОВАНИЕ ТРЁХ ТЕКСТОВ ===
+                logger.info("=== ОТЛАДОЧНОЕ ЛОГИРОВАНИЕ ТЕКСТОВ ===")
+                logger.info(f"1. ИСХОДНЫЙ ТЕКСТ (длина: {len(chapter_text)}): {chapter_text[:500]}...")
+                logger.info(f"2. ОТРЕДАКТИРОВАННЫЙ ТЕКСТ (выводится в окне, длина: {len(final_text)}): {final_text[:500]}...")
+                # Текст для нейродетектора — это тот же final_text, но мы можем его дополнительно обработать
+                # Здесь мы просто передаём его в analyze_overall и логируем результат
+                overall = analyze_overall(final_text)
+                logger.info(f"3. ТЕКСТ ДЛЯ НЕЙРОДЕТЕКТОРА (длина: {len(final_text)}): {final_text[:500]}...")
+                logger.info(f"Результат анализа нейродетектором: {overall}")
+                logger.info("=== КОНЕЦ ОТЛАДОЧНОГО ЛОГИРОВАНИЯ ===")
+
                 yield _sse("done", {
                     "revised_text": final_text,
                     "original_text": chapter_text,
                     "summary": f"Обработано {total} абзацев. Успешно: {sum(1 for r in results if r['status']=='done')}, ошибок: {sum(1 for r in results if r['status']=='error')}. Средний HUMAN: {avg_score}%",
                     "paragraphs": results,
                     "average_human_score": avg_score,
+                    "overall_analysis": overall,
                     "checklist": []
                 })
             except ChapterEditError as e:
