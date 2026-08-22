@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.9.5 — сокращённые ретраи, быстрый fallback
+Chapter Editor v3.9.6 — стабильная, с расширенной обработкой коротких абзацев и двумя прогресс-барами
 """
 import json
 import os
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.9.5"
+APP_VERSION = "3.9.6"
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
 
@@ -36,12 +36,12 @@ def _sse(event_type: str, data: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-# === УЛУЧШЕННЫЙ ПЕРЕВОДЧИК С БЫСТРЫМ FALLBACK ===
-def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int = 2) -> str:
+# === ПЕРЕВОДЧИК С ОДНОЙ ПОПЫТКОЙ ===
+def translate_with_fallback(text: str, target_lang: str = "en") -> str:
     if not text or len(text.strip()) < 2:
         return text
 
-    # Google Translate
+    # Google Translate — только одна попытка
     url_google = "https://translate.googleapis.com/translate_a/single"
     params = {
         "client": "gtx",
@@ -51,37 +51,26 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
         "q": text
     }
 
-    for attempt in range(max_retries):
-        try:
-            resp = requests.get(url_google, params=params, timeout=10)
-            if resp.status_code == 200:
-                data = resp.json()
-                translated = "".join(item[0] for item in data[0] if item[0])
-                if translated:
-                    return translated
-            elif resp.status_code == 429:
-                wait = 1 + random.random() * 2  # 1-3 секунды
-                logger.warning(f"Google 429 (attempt {attempt+1}), waiting {wait:.1f}s")
-                time.sleep(wait)
-                continue
-            else:
-                logger.warning(f"Google attempt {attempt+1} failed: {resp.status_code}")
-                time.sleep(0.5)
-        except Exception as e:
-            logger.warning(f"Google exception: {e}")
-            time.sleep(0.5)
-
-    # Fallback: MyMemory (POST) — только одна попытка, чтобы не затягивать
-    logger.info(f"Falling back to MyMemory (POST) for {target_lang}")
-    url_mymemory = "https://api.mymemory.translated.net/get"
-    payload = {
-        "q": text,
-        "langpair": f"auto|{target_lang}",
-        "de": "user@example.com"
-    }
-
     try:
-        resp = requests.post(url_mymemory, data=payload, timeout=10)
+        resp = requests.get(url_google, params=params, timeout=8)
+        if resp.status_code == 200:
+            data = resp.json()
+            translated = "".join(item[0] for item in data[0] if item[0])
+            if translated:
+                return translated
+        logger.warning(f"Google failed: {resp.status_code}")
+    except Exception as e:
+        logger.warning(f"Google exception: {e}")
+
+    # MyMemory — только одна попытка
+    try:
+        url_mymemory = "https://api.mymemory.translated.net/get"
+        payload = {
+            "q": text,
+            "langpair": f"auto|{target_lang}",
+            "de": "user@example.com"
+        }
+        resp = requests.post(url_mymemory, data=payload, timeout=8)
         if resp.status_code == 200:
             data = resp.json()
             if data.get("responseStatus") == 200:
@@ -93,7 +82,6 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
         logger.warning(f"MyMemory exception: {e}")
 
     # Если ничего не помогло — возвращаем исходный текст
-    logger.warning(f"All translation attempts failed for {target_lang}. Returning original.")
     return text
 
 
@@ -119,7 +107,7 @@ def split_paragraphs(text: str) -> list:
     return [p.strip() for p in paragraphs if p.strip()]
 
 
-# === ДЕТЕКТОР ===
+# === ДЕТЕКТОР С HUMAN SCORE ===
 def get_human_score(text: str) -> int:
     if not text or len(text) < 20:
         return 50
@@ -173,43 +161,36 @@ def process_paragraph(paragraph: str, style: str = "neutral") -> dict:
     if not paragraph:
         return {"original": paragraph, "revised": paragraph, "status": "error", "chain": "none", "human_score": 0}
 
-    # Для коротких абзацев (менее 50 символов) используем только EN цепочку, чтобы не перегружать API
+    # Сначала пробуем EN
+    chains = [{"name": "EN", "langs": ["en"]}]
+
+    # Если абзац короткий, сразу добавляем FULL цепочку
     if len(paragraph) < 50:
-        chains = [{"name": "EN", "langs": ["en"]}]
-    else:
-        chains = [
-            {"name": "EN", "langs": ["en"]},
-            {"name": "CS", "langs": ["cs"]},
-            {"name": "ES", "langs": ["es"]},
-        ]
+        chains.append({"name": "FULL", "langs": ["en", "cs", "es", "it", "fr"]})
 
     best_result = None
     best_score = 0
 
     for chain in chains:
         logger.info(f"Testing chain {chain['name']} on paragraph: {paragraph[:50]}...")
-        try:
-            revised = translate_chunk(paragraph, chain["langs"])
-            revised = re.sub(r'Vino quieren alejarte|Laboratorio, presupuesto|Empty Null: Final Drawings', '', revised)
-            revised = re.sub(r'««««Ибис»»»»', '«Ибис»', revised)
-            revised = revised.strip()
-            if revised and len(revised) > 0:
-                score = get_human_score(revised)
-                logger.info(f"Chain {chain['name']} score: {score}")
-                if score > best_score:
-                    best_score = score
-                    best_result = {
-                        "original": paragraph,
-                        "revised": revised,
-                        "status": "done" if score > 50 else "error",
-                        "chain": chain["name"],
-                        "human_score": score
-                    }
-                if score >= 70:
-                    break
-        except Exception as e:
-            logger.error(f"Chain {chain['name']} exception: {e}")
-            continue
+        revised = translate_chunk(paragraph, chain["langs"])
+        revised = re.sub(r'Vino quieren alejarte|Laboratorio, presupuesto|Empty Null: Final Drawings', '', revised)
+        revised = re.sub(r'««««Ибис»»»»', '«Ибис»', revised)
+        revised = revised.strip()
+        if revised and len(revised) > 0:
+            score = get_human_score(revised)
+            logger.info(f"Chain {chain['name']} score: {score}")
+            if score > best_score:
+                best_score = score
+                best_result = {
+                    "original": paragraph,
+                    "revised": revised,
+                    "status": "done" if score > 50 else "error",
+                    "chain": chain["name"],
+                    "human_score": score
+                }
+            if score >= 70:
+                break
 
     if best_result:
         return best_result
@@ -268,7 +249,7 @@ def api_revise():
                         "status": "processing"
                     })
 
-                    # Обрабатываем абзац с возможностью ошибки
+                    # Обрабатываем с защитой от ошибок
                     try:
                         result = process_paragraph(para, style)
                     except Exception as e:
@@ -291,11 +272,19 @@ def api_revise():
                         "human_score": result.get("human_score", 0)
                     })
 
+                    # Отправляем прогресс по абзацам
                     yield _sse("progress", {
                         "chars": idx + 1,
                         "estimated_total": total,
                         "percent": (idx + 1) / total * 100,
                         "log": f"Обработано {idx+1}/{total} абзацев"
+                    })
+
+                    # Дополнительное событие для прогресса по абзацам
+                    yield _sse("paragraph_progress", {
+                        "current": idx + 1,
+                        "total": total,
+                        "percent": (idx + 1) / total * 100
                     })
 
                 final_text = "\n\n".join(r["revised"] for r in results)
