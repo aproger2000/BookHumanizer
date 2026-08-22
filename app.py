@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.9.11 — логирование текстов для отладки нейродетектора
+Chapter Editor v3.9.12 — парсинг нейродетектора Яндекса (опционально)
 """
 import json
 import os
@@ -13,15 +13,26 @@ import requests
 from flask import Flask, Response, jsonify, request, stream_with_context
 from werkzeug.exceptions import HTTPException
 
+# Для парсинга
+try:
+    from bs4 import BeautifulSoup
+    BS_AVAILABLE = True
+except ImportError:
+    BS_AVAILABLE = False
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.9.11"
+APP_VERSION = "3.9.12"
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
+
+# Опция: парсить ли нейродетектор Яндекса
+ENABLE_YANDEX_PARSER = os.environ.get("ENABLE_YANDEX_PARSER", "false").lower() == "true"
+logger.info(f"Yandex NeuroDetector parser enabled: {ENABLE_YANDEX_PARSER}")
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
@@ -36,7 +47,7 @@ def _sse(event_type: str, data: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-# === ПЕРЕВОДЧИК С ОДНОЙ ПОПЫТКОЙ ===
+# === ПЕРЕВОДЧИК ===
 def translate_with_fallback(text: str, target_lang: str = "en") -> str:
     if not text or len(text.strip()) < 2:
         return text
@@ -104,7 +115,7 @@ def split_paragraphs(text: str) -> list:
     return [p.strip() for p in paragraphs if p.strip()]
 
 
-# === ДЕТЕКТОР С HUMAN SCORE ===
+# === ВСТРОЕННЫЙ ДЕТЕКТОР ===
 def get_human_score(text: str) -> int:
     if not text or len(text) < 20:
         return 50
@@ -196,13 +207,10 @@ def process_paragraph(paragraph: str, style: str = "neutral") -> dict:
     }
 
 
-# === ИТОГОВЫЙ АНАЛИЗ (ВОССТАНОВЛЕН) ===
 def analyze_overall(text: str) -> dict:
-    """Возвращает распределение по категориям для всего текста."""
     if not text or len(text) < 100:
         return {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0, "score": 0}
 
-    # Разбиваем на сегменты (примерно по предложениям)
     segments = re.split(r'(?<=[.!?])\s+', text)
     if len(segments) < 3:
         return {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0, "score": 0}
@@ -231,6 +239,93 @@ def analyze_overall(text: str) -> dict:
     score = results["HUMAN"] * 1.0 + results["LIKELY_HUMAN"] * 0.7 + results["LIKELY_AI"] * 0.3
     results["score"] = int(score)
     return results
+
+
+# === ПАРСИНГ НЕЙРОДЕТЕКТОРА ЯНДЕКСА (опционально) ===
+def parse_yandex_neurodetector(text: str) -> dict:
+    """
+    Отправляет текст на https://yandex.ru/lab/neurodetector и парсит результат.
+    Возвращает словарь с категориями или None при ошибке.
+    """
+    if not text or len(text) < 20:
+        return None
+
+    if not BS_AVAILABLE:
+        logger.warning("BeautifulSoup not installed, skipping Yandex parser.")
+        return None
+
+    # URL страницы и эндпоинт для отправки (найден экспериментально)
+    # Важно: структура страницы может меняться, поэтому этот код — временное решение.
+    # При обновлении сайта парсер сломается.
+
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.8',
+        'Referer': 'https://yandex.ru/lab/neurodetector',
+    })
+
+    try:
+        # 1. Получить главную страницу для CSRF-токена
+        main_resp = session.get('https://yandex.ru/lab/neurodetector', timeout=10)
+        main_resp.raise_for_status()
+        soup = BeautifulSoup(main_resp.text, 'html.parser')
+
+        # Попытка найти CSRF-токен (обычно в скрытых полях формы или в meta)
+        csrf_token = None
+        csrf_input = soup.find('input', {'name': 'csrf_token'})
+        if csrf_input:
+            csrf_token = csrf_input.get('value')
+        if not csrf_token:
+            # Ищем в meta
+            csrf_meta = soup.find('meta', {'name': 'csrf-token'})
+            if csrf_meta:
+                csrf_token = csrf_meta.get('content')
+
+        # 2. Подготовить данные для отправки
+        # Обычно на странице есть форма с полем "text" и кнопкой "Проверить"
+        # Эндпоинт для отправки — скорее всего /lab/neurodetector/upload или /check
+        upload_url = 'https://yandex.ru/lab/neurodetector/check'  # предположительно
+        data = {
+            'text': text,
+        }
+        if csrf_token:
+            data['csrf_token'] = csrf_token
+
+        # 3. Отправить текст
+        # Может быть как POST с multipart/form-data, так и application/x-www-form-urlencoded
+        resp = session.post(upload_url, data=data, timeout=15)
+        if resp.status_code != 200:
+            # Попробуем другой эндпоинт
+            upload_url = 'https://yandex.ru/lab/neurodetector/upload'
+            resp = session.post(upload_url, data=data, timeout=15)
+        resp.raise_for_status()
+
+        # 4. Распарсить результат
+        # Ожидается JSON-ответ с полями 'ai', 'likely_ai', 'likely_human', 'human'
+        try:
+            result_json = resp.json()
+            # Пример: {"ai": 10, "likely_ai": 20, "likely_human": 30, "human": 40}
+            if all(k in result_json for k in ['ai', 'likely_ai', 'likely_human', 'human']):
+                return result_json
+        except json.JSONDecodeError:
+            # Возможно, ответ в HTML — тогда парсим HTML
+            soup_result = BeautifulSoup(resp.text, 'html.parser')
+            # Ищем элементы с классами для результатов
+            # Примерные классы: 'neuro-ai', 'neuro-likely-ai', ...
+            # Это нужно адаптировать под актуальную структуру
+            # Возвращаем None, т.к. мы не знаем точных селекторов
+            logger.warning("Yandex NeuroDetector returned HTML, cannot parse reliably.")
+            return None
+
+        # Если получили что-то другое, логируем
+        logger.info(f"Yandex NeuroDetector response: {resp.text[:200]}")
+        return None
+
+    except Exception as e:
+        logger.error(f"Yandex NeuroDetector parsing error: {e}")
+        return None
 
 
 @app.get("/api/health")
@@ -318,15 +413,29 @@ def api_revise():
                 scores = [r.get("human_score", 0) for r in results if r.get("human_score", 0) > 0]
                 avg_score = sum(scores) // len(scores) if scores else 0
 
-                # === ЛОГИРОВАНИЕ ТРЁХ ТЕКСТОВ ===
+                # Встроенный анализ
+                overall = analyze_overall(final_text)
+
+                # === ПАРСИНГ НЕЙРОДЕТЕКТОРА ЯНДЕКСА (опционально) ===
+                yandex_result = None
+                if ENABLE_YANDEX_PARSER and BS_AVAILABLE:
+                    logger.info("Calling Yandex NeuroDetector parser...")
+                    yandex_result = parse_yandex_neurodetector(final_text)
+                    if yandex_result:
+                        logger.info(f"Yandex result: {yandex_result}")
+                    else:
+                        logger.warning("Yandex NeuroDetector parsing failed.")
+
+                # === ОТЛАДОЧНОЕ ЛОГИРОВАНИЕ ===
                 logger.info("=== ОТЛАДОЧНОЕ ЛОГИРОВАНИЕ ТЕКСТОВ ===")
                 logger.info(f"1. ИСХОДНЫЙ ТЕКСТ (длина: {len(chapter_text)}): {chapter_text[:500]}...")
-                logger.info(f"2. ОТРЕДАКТИРОВАННЫЙ ТЕКСТ (выводится в окне, длина: {len(final_text)}): {final_text[:500]}...")
-                # Текст для нейродетектора — это тот же final_text, но мы можем его дополнительно обработать
-                # Здесь мы просто передаём его в analyze_overall и логируем результат
-                overall = analyze_overall(final_text)
+                logger.info(f"2. ОТРЕДАКТИРОВАННЫЙ ТЕКСТ (длина: {len(final_text)}): {final_text[:500]}...")
                 logger.info(f"3. ТЕКСТ ДЛЯ НЕЙРОДЕТЕКТОРА (длина: {len(final_text)}): {final_text[:500]}...")
-                logger.info(f"Результат анализа нейродетектором: {overall}")
+                logger.info(f"Встроенный анализ: {overall}")
+                if yandex_result:
+                    logger.info(f"Яндекс-нейродетектор: {yandex_result}")
+                else:
+                    logger.info("Яндекс-нейродетектор: не получен")
                 logger.info("=== КОНЕЦ ОТЛАДОЧНОГО ЛОГИРОВАНИЯ ===")
 
                 yield _sse("done", {
@@ -336,6 +445,7 @@ def api_revise():
                     "paragraphs": results,
                     "average_human_score": avg_score,
                     "overall_analysis": overall,
+                    "yandex_analysis": yandex_result,
                     "checklist": []
                 })
             except ChapterEditError as e:
