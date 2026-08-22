@@ -13,8 +13,8 @@
         .logo h1 { font-size: 22px; font-weight: 600; color: #1a2634; letter-spacing: -0.3px; }
         .logo .sub { font-size: 13px; color: #6b7f94; font-weight: 400; }
         .version-badge { background: #e4eaf2; padding: 6px 14px; border-radius: 20px; font-size: 12px; color: #3d546a; font-weight: 500; }
-        .main-grid { display: grid; grid-template-columns: 1fr 1.5fr; gap: 24px; margin-top: 28px; flex: 1; height: calc(100vh - 180px); min-height: 500px; }
-        @media (max-width: 768px) { .main-grid { grid-template-columns: 1fr; height: auto; } body { padding: 16px; } }
+        .main-grid { display: grid; grid-template-columns: 1fr 1.5fr; gap: 24px; margin-top: 28px; flex: 1; max-height: calc(100vh - 250px); min-height: 500px; }
+        @media (max-width: 768px) { .main-grid { grid-template-columns: 1fr; max-height: none; } body { padding: 16px; } }
         .panel { background: #ffffff; border-radius: 16px; border: 1px solid #d0d9e4; padding: 24px; display: flex; flex-direction: column; box-shadow: 0 2px 8px rgba(0,0,0,0.04); min-height: 0; }
         .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-shrink: 0; }
         .panel-header h2 { font-size: 15px; font-weight: 500; color: #2c3e50; letter-spacing: 0.3px; }
@@ -33,6 +33,9 @@
         .progress-container { margin-top: 12px; background: #eef3f8; border-radius: 8px; height: 6px; overflow: hidden; opacity: 0; flex-shrink: 0; transition: opacity 0.3s; }
         .progress-container.active { opacity: 1; }
         .progress-bar { height: 100%; width: 0%; background: #2c3e50; border-radius: 8px; transition: width 0.2s ease; }
+        .progress-container-secondary { margin-top: 6px; background: #eef3f8; border-radius: 8px; height: 4px; overflow: hidden; opacity: 0; flex-shrink: 0; transition: opacity 0.3s; }
+        .progress-container-secondary.active { opacity: 1; }
+        .progress-bar-secondary { height: 100%; width: 0%; background: #6c8fc7; border-radius: 8px; transition: width 0.2s ease; }
         .status-text { font-size: 13px; color: #6b7f94; margin-top: 10px; min-height: 20px; flex-shrink: 0; }
         .status-text.success { color: #1e7e34; }
         .status-text.error { color: #b3362a; }
@@ -140,6 +143,9 @@
             <div class="progress-container" id="progressContainer">
                 <div class="progress-bar" id="progressBar"></div>
             </div>
+            <div class="progress-container-secondary" id="progressContainerSecondary">
+                <div class="progress-bar-secondary" id="progressBarSecondary"></div>
+            </div>
             <div class="step-indicator" id="stepIndicator">
                 <span>Шаги:</span>
                 <span class="step-dot" id="step1"></span>
@@ -192,6 +198,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const statusText = document.getElementById('statusText');
     const progressContainer = document.getElementById('progressContainer');
     const progressBar = document.getElementById('progressBar');
+    const progressContainerSecondary = document.getElementById('progressContainerSecondary');
+    const progressBarSecondary = document.getElementById('progressBarSecondary');
     const sourceCount = document.getElementById('sourceCount');
     const resultCount = document.getElementById('resultCount');
     const checklistDiv = document.getElementById('checklist');
@@ -394,7 +402,9 @@ document.addEventListener('DOMContentLoaded', function() {
         statusText.textContent = '⏳ Начинаем обработку по абзацам...';
         statusText.className = 'status-text';
         progressContainer.classList.add('active');
+        progressContainerSecondary.classList.add('active');
         progressBar.style.width = '0%';
+        progressBarSecondary.style.width = '0%';
         checklistDiv.classList.remove('visible');
         resultContainer.innerHTML = '';
         const placeholder = document.createElement('div');
@@ -441,18 +451,21 @@ document.addEventListener('DOMContentLoaded', function() {
                 checklistDiv.classList.add('visible');
             }
             hideSourceProgress();
+            progressContainerSecondary.classList.remove('active');
         })
         .catch(err => {
             statusText.textContent = '❌ ' + err.message;
             statusText.className = 'status-text error';
             setStep(-1, 'Ошибка');
             hideSourceProgress();
+            progressContainerSecondary.classList.remove('active');
         })
         .finally(() => {
             editBtn.disabled = false;
             editBtn.textContent = '✏️ Редактировать';
             progressContainer.classList.remove('active');
             progressBar.style.width = '0%';
+            progressBarSecondary.style.width = '0%';
         });
     });
 
@@ -497,6 +510,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 progressBar.style.width = pct + '%';
                 statusText.textContent = '⏳ ' + (event.log || 'Генерация... ' + Math.round(pct) + '%');
                 setStep(1, (event.log || 'Генерация... ' + Math.round(pct) + '%'));
+                break;
+            case 'paragraph_progress':
+                const current = event.current;
+                const totalParas = event.total;
+                const pctParas = Math.min(100, (current / totalParas) * 100);
+                progressBarSecondary.style.width = pctParas + '%';
                 break;
             case 'paragraph_start':
                 addResultParagraph(event.index, event.original, 'processing', null, 0);
@@ -571,8 +590,8 @@ document.addEventListener('DOMContentLoaded', function() {
             statusText.className = 'status-text success';
         })
         .catch(() => {
-            document.getElementById('versionBadge').textContent = 'v3.9.4';
-            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.9.4 — поабзацная обработка';
+            document.getElementById('versionBadge').textContent = 'v3.9.6';
+            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.9.6 — поабзацная обработка';
             statusText.textContent = '⚠️ Не удалось подключиться к серверу';
             statusText.className = 'status-text error';
         });
