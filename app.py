@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.9.0 — поабзацная обработка с эмуляцией нейродетектора
+Chapter Editor v3.9.1 — поабзацная обработка с реальным временем
 """
 import json
 import os
@@ -19,9 +19,9 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.9.0"
+APP_VERSION = "3.9.1"
 MAX_CHARS = 30_000
-CHUNK_SIZE = 3000  # для внутреннего разбиения при переводе
+CHUNK_SIZE = 3000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
@@ -89,14 +89,12 @@ def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int
 
 
 def translate_chunk(text: str, chain: list) -> str:
-    """Применяет цепочку переводов: [lang1, lang2, ...] -> RU."""
     if not text or len(text.strip()) < 2:
         return text
     try:
         current = text
         for lang in chain:
             current = translate_with_fallback(current, target_lang=lang)
-        # финальный перевод обратно на русский
         ru = translate_with_fallback(current, target_lang="ru")
         return ru
     except Exception as e:
@@ -105,27 +103,18 @@ def translate_chunk(text: str, chain: list) -> str:
 
 
 def split_paragraphs(text: str) -> list:
-    """Разбивает текст на абзацы по двойному переносу."""
     if not text:
         return []
-    # Нормализуем переносы
     text = text.replace('\r\n', '\n')
     paragraphs = text.split('\n\n')
-    # Удаляем пустые
     return [p.strip() for p in paragraphs if p.strip()]
 
 
 # === ЭМУЛЯТОР НЕЙРОДЕТЕКТОРА ===
-# В реальном проекте здесь был бы вызов внешнего API
 def is_ai_generated(text: str) -> bool:
-    """
-    Эмуляция детектора: возвращает True, если текст похож на ИИ.
-    Критерии: >30% латиницы, наличие маркеров, короткие повторяющиеся фразы.
-    """
     if not text or len(text) < 20:
         return False
 
-    # Доля латиницы
     letters = sum(1 for ch in text if ch.isalpha())
     if letters == 0:
         return False
@@ -134,7 +123,6 @@ def is_ai_generated(text: str) -> bool:
     if latin_ratio > 0.3:
         return True
 
-    # Маркеры ИИ-текста
     markers = [
         r'\bI thought so\b',
         r'\bNo bureaucracy\b',
@@ -164,16 +152,7 @@ def is_ai_generated(text: str) -> bool:
     return False
 
 
-# === ОСНОВНАЯ ЛОГИКА ОБРАБОТКИ ===
 def process_paragraph(paragraph: str, style: str = "neutral") -> dict:
-    """
-    Обрабатывает один абзац:
-    1. Пробует цепочку EN.
-    2. Проверяет через детектор.
-    3. Если плохо — пробует CS.
-    4. Если всё ещё плохо — пробует ES.
-    Возвращает словарь с результатом и статусом.
-    """
     if not paragraph:
         return {"original": paragraph, "revised": paragraph, "status": "error", "chain": "none"}
 
@@ -186,12 +165,10 @@ def process_paragraph(paragraph: str, style: str = "neutral") -> dict:
     for chain in chains:
         logger.info(f"Testing chain {chain['name']} on paragraph: {paragraph[:50]}...")
         revised = translate_chunk(paragraph, chain["langs"])
-        # Простая очистка (удаляем явный мусор)
         revised = re.sub(r'Vino quieren alejarte|Laboratorio, presupuesto|Empty Null: Final Drawings', '', revised)
         revised = re.sub(r'««««Ибис»»»»', '«Ибис»', revised)
         revised = revised.strip()
         if revised and len(revised) > 0:
-            # Проверяем через детектор
             if not is_ai_generated(revised):
                 logger.info(f"Chain {chain['name']} passed detector.")
                 return {
@@ -205,7 +182,6 @@ def process_paragraph(paragraph: str, style: str = "neutral") -> dict:
         else:
             logger.warning(f"Chain {chain['name']} produced empty result.")
 
-    # Если все цепочки не дали результат, возвращаем оригинал
     return {
         "original": paragraph,
         "revised": paragraph,
@@ -253,19 +229,15 @@ def api_revise():
 
                 results = []
                 for idx, para in enumerate(paragraphs):
-                    # Отправляем прогресс для текущего абзаца
-                    yield _sse("progress", {
-                        "chars": idx + 1,
-                        "estimated_total": total,
-                        "percent": (idx + 1) / total * 100,
-                        "log": f"Обработка абзаца {idx+1}/{total}",
-                        "paragraph_index": idx,
-                        "paragraph_original": para,
+                    yield _sse("paragraph_start", {
+                        "index": idx,
+                        "original": para,
                         "status": "processing"
                     })
+
                     result = process_paragraph(para, style)
                     results.append(result)
-                    # Отправляем статус абзаца после обработки
+
                     yield _sse("paragraph_status", {
                         "index": idx,
                         "original": result["original"],
@@ -274,7 +246,14 @@ def api_revise():
                         "chain": result["chain"]
                     })
 
-                # Собираем финальный текст
+                    # Прогресс по количеству обработанных абзацев
+                    yield _sse("progress", {
+                        "chars": idx + 1,
+                        "estimated_total": total,
+                        "percent": (idx + 1) / total * 100,
+                        "log": f"Обработано {idx+1}/{total} абзацев"
+                    })
+
                 final_text = "\n\n".join(r["revised"] for r in results)
 
                 yield _sse("done", {
