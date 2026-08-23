@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.9.12 — парсинг нейродетектора Яндекса (опционально)
+Chapter Editor v3.10.0 — улучшенная обработка ошибок и локальный синонимайзер
 """
 import json
 import os
@@ -13,26 +13,15 @@ import requests
 from flask import Flask, Response, jsonify, request, stream_with_context
 from werkzeug.exceptions import HTTPException
 
-# Для парсинга
-try:
-    from bs4 import BeautifulSoup
-    BS_AVAILABLE = True
-except ImportError:
-    BS_AVAILABLE = False
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.9.12"
+APP_VERSION = "3.10.0"
 MAX_CHARS = 30_000
 CHUNK_SIZE = 3000
-
-# Опция: парсить ли нейродетектор Яндекса
-ENABLE_YANDEX_PARSER = os.environ.get("ENABLE_YANDEX_PARSER", "false").lower() == "true"
-logger.info(f"Yandex NeuroDetector parser enabled: {ENABLE_YANDEX_PARSER}")
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
@@ -47,8 +36,48 @@ def _sse(event_type: str, data: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-# === ПЕРЕВОДЧИК ===
-def translate_with_fallback(text: str, target_lang: str = "en") -> str:
+# === ЛОКАЛЬНЫЙ СИНОНИМАЙЗЕР (без внешних API) ===
+def apply_local_synonyms(text: str) -> str:
+    """Заменяет некоторые слова на синонимы для «оживления» текста."""
+    synonyms = {
+        r'\bсказал\b': ['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал'],
+        r'\bсказала\b': ['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала'],
+        r'\bспросил\b': ['поинтересовался', 'осведомился', 'полюбопытствовал'],
+        r'\bспросила\b': ['поинтересовалась', 'осведомилась', 'полюбопытствовала'],
+        r'\bответил\b': ['откликнулся', 'парировал', 'возразил', 'подтвердил'],
+        r'\bответила\b': ['откликнулась', 'парировала', 'возразила', 'подтвердила'],
+        r'\bочень\b': ['весьма', 'крайне', 'чрезвычайно'],
+        r'\bхорошо\b': ['превосходно', 'отлично', 'замечательно'],
+        r'\bплохо\b': ['скверно', 'неважно'],
+        r'\bбыстро\b': ['стремительно', 'мгновенно'],
+        r'\bмедленно\b': ['неспешно', 'неторопливо'],
+        r'\bбольшой\b': ['огромный', 'громадный', 'колоссальный'],
+        r'\bмаленький\b': ['крошечный', 'миниатюрный', 'небольшой'],
+        r'\bсмотреть\b': ['вглядываться', 'всматриваться', 'наблюдать'],
+        r'\bувидел\b': ['заметил', 'приметил', 'углядел'],
+        r'\bпонял\b': ['осознал', 'сообразил', 'смекнул'],
+        r'\bдумать\b': ['размышлять', 'соображать', 'прикидывать'],
+        r'\bзнать\b': ['ведать', 'понимать', 'осознавать'],
+        r'\bидти\b': ['шагать', 'двигаться', 'направляться'],
+        r'\bстоять\b': ['выситься', 'возвышаться', 'находиться'],
+        r'\bсидеть\b': ['восседать', 'расположиться', 'устроиться'],
+        r'\bлежать\b': ['покоиться', 'валяться', 'возлежать'],
+        r'\bснова\b': ['опять', 'вновь', 'заново'],
+        r'\bтолько\b': ['лишь', 'едва', 'всего лишь'],
+        r'\bвдруг\b': ['неожиданно', 'внезапно', 'врасплох'],
+        r'\bконечно\b': ['разумеется', 'естественно', 'безусловно'],
+        r'\bвозможно\b': ['вероятно', 'похоже', 'должно быть'],
+        r'\bпоэтому\b': ['потому', 'оттого', 'следовательно'],
+    }
+    for pattern, variants in synonyms.items():
+        if random.random() < 0.3:  # 30% вероятность замены
+            new_word = random.choice(variants)
+            text = re.sub(pattern, new_word, text, flags=re.IGNORECASE)
+    return text
+
+
+# === ПЕРЕВОДЧИК С УЛУЧШЕННЫМИ РЕТРАЯМИ ===
+def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int = 5) -> str:
     if not text or len(text.strip()) < 2:
         return text
 
@@ -61,17 +90,27 @@ def translate_with_fallback(text: str, target_lang: str = "en") -> str:
         "q": text
     }
 
-    try:
-        resp = requests.get(url_google, params=params, timeout=8)
-        if resp.status_code == 200:
-            data = resp.json()
-            translated = "".join(item[0] for item in data[0] if item[0])
-            if translated:
-                return translated
-        logger.warning(f"Google failed: {resp.status_code}")
-    except Exception as e:
-        logger.warning(f"Google exception: {e}")
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(url_google, params=params, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                translated = "".join(item[0] for item in data[0] if item[0])
+                if translated:
+                    return translated
+            elif resp.status_code == 429:
+                wait = (2 ** attempt) + random.random() * 2
+                logger.warning(f"Google 429 (attempt {attempt+1}), waiting {wait:.1f}s")
+                time.sleep(wait)
+                continue
+            else:
+                logger.warning(f"Google attempt {attempt+1} failed: {resp.status_code}")
+                time.sleep(1 + random.random())
+        except Exception as e:
+            logger.warning(f"Google exception: {e}")
+            time.sleep(1 + random.random())
 
+    # MyMemory — только одна попытка после Google
     try:
         url_mymemory = "https://api.mymemory.translated.net/get"
         payload = {
@@ -79,7 +118,7 @@ def translate_with_fallback(text: str, target_lang: str = "en") -> str:
             "langpair": f"auto|{target_lang}",
             "de": "user@example.com"
         }
-        resp = requests.post(url_mymemory, data=payload, timeout=8)
+        resp = requests.post(url_mymemory, data=payload, timeout=10)
         if resp.status_code == 200:
             data = resp.json()
             if data.get("responseStatus") == 200:
@@ -90,6 +129,7 @@ def translate_with_fallback(text: str, target_lang: str = "en") -> str:
     except Exception as e:
         logger.warning(f"MyMemory exception: {e}")
 
+    logger.warning(f"All translation attempts failed for {target_lang}. Returning original.")
     return text
 
 
@@ -115,7 +155,7 @@ def split_paragraphs(text: str) -> list:
     return [p.strip() for p in paragraphs if p.strip()]
 
 
-# === ВСТРОЕННЫЙ ДЕТЕКТОР ===
+# === ВСТРОЕННЫЙ ДЕТЕКТОР HUMAN SCORE ===
 def get_human_score(text: str) -> int:
     if not text or len(text) < 20:
         return 50
@@ -177,27 +217,39 @@ def process_paragraph(paragraph: str, style: str = "neutral") -> dict:
     for chain in chains:
         logger.info(f"Testing chain {chain['name']} on paragraph: {paragraph[:50]}...")
         revised = translate_chunk(paragraph, chain["langs"])
-        revised = re.sub(r'Vino quieren alejarte|Laboratorio, presupuesto|Empty Null: Final Drawings', '', revised)
-        revised = re.sub(r'««««Ибис»»»»', '«Ибис»', revised)
-        revised = revised.strip()
-        if revised and len(revised) > 0:
-            score = get_human_score(revised)
-            logger.info(f"Chain {chain['name']} score: {score}")
-            if score > best_score:
-                best_score = score
-                best_result = {
-                    "original": paragraph,
-                    "revised": revised,
-                    "status": "done" if score > 50 else "error",
-                    "chain": chain["name"],
-                    "human_score": score
-                }
-            if score >= 70:
-                break
+        # Если перевод не удался (текст не изменился), применяем локальный синонимайзер
+        if revised == paragraph or len(revised) == 0:
+            logger.info(f"Chain {chain['name']} failed, applying local synonyms.")
+            revised = apply_local_synonyms(paragraph)
+            if revised == paragraph:
+                # Если синонимайзер тоже не дал изменений, оставляем как есть
+                revised = paragraph
+            # Считаем, что это частичный успех
+            status = "partial"
+        else:
+            # Удаляем артефакты
+            revised = re.sub(r'Vino quieren alejarte|Laboratorio, presupuesto|Empty Null: Final Drawings', '', revised)
+            revised = re.sub(r'««««Ибис»»»»', '«Ибис»', revised)
+            revised = revised.strip()
+            if revised and len(revised) > 0:
+                score = get_human_score(revised)
+                logger.info(f"Chain {chain['name']} score: {score}")
+                if score > best_score:
+                    best_score = score
+                    best_result = {
+                        "original": paragraph,
+                        "revised": revised,
+                        "status": "done" if score > 50 else "partial",
+                        "chain": chain["name"],
+                        "human_score": score
+                    }
+                if score >= 70:
+                    break
 
     if best_result:
         return best_result
 
+    # Если ничего не сработало — возвращаем оригинал с пометкой ошибки
     return {
         "original": paragraph,
         "revised": paragraph,
@@ -241,93 +293,6 @@ def analyze_overall(text: str) -> dict:
     return results
 
 
-# === ПАРСИНГ НЕЙРОДЕТЕКТОРА ЯНДЕКСА (опционально) ===
-def parse_yandex_neurodetector(text: str) -> dict:
-    """
-    Отправляет текст на https://yandex.ru/lab/neurodetector и парсит результат.
-    Возвращает словарь с категориями или None при ошибке.
-    """
-    if not text or len(text) < 20:
-        return None
-
-    if not BS_AVAILABLE:
-        logger.warning("BeautifulSoup not installed, skipping Yandex parser.")
-        return None
-
-    # URL страницы и эндпоинт для отправки (найден экспериментально)
-    # Важно: структура страницы может меняться, поэтому этот код — временное решение.
-    # При обновлении сайта парсер сломается.
-
-    session = requests.Session()
-    session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.8',
-        'Referer': 'https://yandex.ru/lab/neurodetector',
-    })
-
-    try:
-        # 1. Получить главную страницу для CSRF-токена
-        main_resp = session.get('https://yandex.ru/lab/neurodetector', timeout=10)
-        main_resp.raise_for_status()
-        soup = BeautifulSoup(main_resp.text, 'html.parser')
-
-        # Попытка найти CSRF-токен (обычно в скрытых полях формы или в meta)
-        csrf_token = None
-        csrf_input = soup.find('input', {'name': 'csrf_token'})
-        if csrf_input:
-            csrf_token = csrf_input.get('value')
-        if not csrf_token:
-            # Ищем в meta
-            csrf_meta = soup.find('meta', {'name': 'csrf-token'})
-            if csrf_meta:
-                csrf_token = csrf_meta.get('content')
-
-        # 2. Подготовить данные для отправки
-        # Обычно на странице есть форма с полем "text" и кнопкой "Проверить"
-        # Эндпоинт для отправки — скорее всего /lab/neurodetector/upload или /check
-        upload_url = 'https://yandex.ru/lab/neurodetector/check'  # предположительно
-        data = {
-            'text': text,
-        }
-        if csrf_token:
-            data['csrf_token'] = csrf_token
-
-        # 3. Отправить текст
-        # Может быть как POST с multipart/form-data, так и application/x-www-form-urlencoded
-        resp = session.post(upload_url, data=data, timeout=15)
-        if resp.status_code != 200:
-            # Попробуем другой эндпоинт
-            upload_url = 'https://yandex.ru/lab/neurodetector/upload'
-            resp = session.post(upload_url, data=data, timeout=15)
-        resp.raise_for_status()
-
-        # 4. Распарсить результат
-        # Ожидается JSON-ответ с полями 'ai', 'likely_ai', 'likely_human', 'human'
-        try:
-            result_json = resp.json()
-            # Пример: {"ai": 10, "likely_ai": 20, "likely_human": 30, "human": 40}
-            if all(k in result_json for k in ['ai', 'likely_ai', 'likely_human', 'human']):
-                return result_json
-        except json.JSONDecodeError:
-            # Возможно, ответ в HTML — тогда парсим HTML
-            soup_result = BeautifulSoup(resp.text, 'html.parser')
-            # Ищем элементы с классами для результатов
-            # Примерные классы: 'neuro-ai', 'neuro-likely-ai', ...
-            # Это нужно адаптировать под актуальную структуру
-            # Возвращаем None, т.к. мы не знаем точных селекторов
-            logger.warning("Yandex NeuroDetector returned HTML, cannot parse reliably.")
-            return None
-
-        # Если получили что-то другое, логируем
-        logger.info(f"Yandex NeuroDetector response: {resp.text[:200]}")
-        return None
-
-    except Exception as e:
-        logger.error(f"Yandex NeuroDetector parsing error: {e}")
-        return None
-
-
 @app.get("/api/health")
 def health():
     return jsonify(status="ok", version=APP_VERSION)
@@ -335,7 +300,7 @@ def health():
 
 @app.post("/api/revise")
 def api_revise():
-    logger.info("=== api_revise: START (paragraph-by-paragraph) ===")
+    logger.info("=== api_revise: START (v3.10.0) ===")
     try:
         file_storage = request.files.get("file")
         text = request.form.get("text", "")
@@ -416,36 +381,21 @@ def api_revise():
                 # Встроенный анализ
                 overall = analyze_overall(final_text)
 
-                # === ПАРСИНГ НЕЙРОДЕТЕКТОРА ЯНДЕКСА (опционально) ===
-                yandex_result = None
-                if ENABLE_YANDEX_PARSER and BS_AVAILABLE:
-                    logger.info("Calling Yandex NeuroDetector parser...")
-                    yandex_result = parse_yandex_neurodetector(final_text)
-                    if yandex_result:
-                        logger.info(f"Yandex result: {yandex_result}")
-                    else:
-                        logger.warning("Yandex NeuroDetector parsing failed.")
+                # Подсчёт статусов
+                status_counts = {"done": 0, "partial": 0, "error": 0}
+                for r in results:
+                    status_counts[r.get("status", "error")] += 1
 
-                # === ОТЛАДОЧНОЕ ЛОГИРОВАНИЕ ===
-                logger.info("=== ОТЛАДОЧНОЕ ЛОГИРОВАНИЕ ТЕКСТОВ ===")
-                logger.info(f"1. ИСХОДНЫЙ ТЕКСТ (длина: {len(chapter_text)}): {chapter_text[:500]}...")
-                logger.info(f"2. ОТРЕДАКТИРОВАННЫЙ ТЕКСТ (длина: {len(final_text)}): {final_text[:500]}...")
-                logger.info(f"3. ТЕКСТ ДЛЯ НЕЙРОДЕТЕКТОРА (длина: {len(final_text)}): {final_text[:500]}...")
-                logger.info(f"Встроенный анализ: {overall}")
-                if yandex_result:
-                    logger.info(f"Яндекс-нейродетектор: {yandex_result}")
-                else:
-                    logger.info("Яндекс-нейродетектор: не получен")
-                logger.info("=== КОНЕЦ ОТЛАДОЧНОГО ЛОГИРОВАНИЯ ===")
+                logger.info(f"Статусы абзацев: {status_counts}")
 
                 yield _sse("done", {
                     "revised_text": final_text,
                     "original_text": chapter_text,
-                    "summary": f"Обработано {total} абзацев. Успешно: {sum(1 for r in results if r['status']=='done')}, ошибок: {sum(1 for r in results if r['status']=='error')}. Средний HUMAN: {avg_score}%",
+                    "summary": f"Обработано {total} абзацев. Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
                     "paragraphs": results,
                     "average_human_score": avg_score,
                     "overall_analysis": overall,
-                    "yandex_analysis": yandex_result,
+                    "status_counts": status_counts,
                     "checklist": []
                 })
             except ChapterEditError as e:
