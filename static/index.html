@@ -331,7 +331,9 @@ document.addEventListener('DOMContentLoaded', function() {
         const scoreText = humanScore !== undefined ? `<span class="score">${humanScore}%</span>` : '';
         const chainBadge = chain ? `<span class="chain">${chain}</span>` : '';
         const statusIcon = status === 'done' ? '✅' : (status === 'partial' ? '⚠️' : '❌');
-        el.innerHTML = `<span class="text">${text}</span><span class="meta"><span class="status-icon">${statusIcon}</span>${chainBadge} ${scoreText}</span>`;
+        // В функции addResultParagraph
+        const chainDisplay = chain === 'LOCAL' ? '🔧 Локально' : chain;
+        el.innerHTML = `<span class="text">${text}</span><span class="meta"><span class="status-icon">${statusIcon}</span>${chainDisplay} ${scoreText}</span>`;
         updateResultCount();
         el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
