@@ -6,6 +6,7 @@
     <title>Chapter Editor</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
     <style>
+        /* (все стили без изменений, оставляем как в предыдущей версии) */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { background: #f0f4fa; color: #1a2634; font-family: 'Inter', sans-serif; min-height: 100vh; display: flex; flex-direction: column; padding: 24px; }
         .container { max-width: 1400px; margin: 0 auto; width: 100%; flex: 1; display: flex; flex-direction: column; }
@@ -64,11 +65,13 @@
             align-items: flex-start;
         }
         .result-paragraph .text { flex: 1; }
-        .result-paragraph .meta { font-size: 11px; color: #6b7f94; white-space: nowrap; margin-left: 12px; padding-top: 2px; }
-        .result-paragraph .meta .chain { background: #e4eaf2; padding: 0 6px; border-radius: 4px; margin-right: 4px; }
+        .result-paragraph .meta { font-size: 11px; color: #6b7f94; white-space: nowrap; margin-left: 12px; padding-top: 2px; display: flex; align-items: center; gap: 6px; }
+        .result-paragraph .meta .chain { background: #e4eaf2; padding: 0 6px; border-radius: 4px; }
         .result-paragraph .meta .score { font-weight: 600; }
+        .result-paragraph .meta .status-icon { font-size: 14px; }
         .result-paragraph.processing { background-color: #fff3cd; }
         .result-paragraph.done { background-color: #d4edda; }
+        .result-paragraph.partial { background-color: #fff3cd; border-left: 4px solid #e6a700; }
         .result-paragraph.error { background-color: #f8d7da; }
         .source-progress-container {
             display: none;
@@ -90,6 +93,7 @@
         }
         .source-paragraph.processing { background-color: #fff3cd; }
         .source-paragraph.done { background-color: #d4edda; }
+        .source-paragraph.partial { background-color: #fff3cd; border-left: 4px solid #e6a700; }
         .source-paragraph.error { background-color: #f8d7da; }
         .checklist { margin-top: 12px; padding: 12px 16px; background: #f7fafc; border-radius: 10px; border: 1px solid #d0d9e4; display: none; flex-shrink: 0; }
         .checklist.visible { display: block; }
@@ -141,24 +145,6 @@
         .overall-status.success { background: #d4edda; color: #1e7e34; }
         .overall-status.warning { background: #fff3cd; color: #b38600; }
         .overall-status.error { background: #f8d7da; color: #b3362a; }
-        .yandex-analysis {
-            margin-top: 12px;
-            padding: 12px 16px;
-            background: #e8f0fe;
-            border-radius: 10px;
-            border: 1px solid #b8d0e8;
-            flex-shrink: 0;
-            display: none;
-        }
-        .yandex-analysis.visible { display: block; }
-        .yandex-analysis .title { font-weight: 600; font-size: 13px; color: #1a3d6b; margin-bottom: 6px; }
-        .yandex-analysis .stats { display: flex; gap: 16px; flex-wrap: wrap; }
-        .yandex-analysis .stat { font-size: 13px; }
-        .yandex-analysis .stat .label { color: #4a6a8a; }
-        .yandex-analysis .stat .value { font-weight: 600; }
-        .yandex-analysis .stat .value.green { color: #1e7e34; }
-        .yandex-analysis .stat .value.yellow { color: #b38600; }
-        .yandex-analysis .stat .value.red { color: #b3362a; }
         .progress-container-secondary {
             margin-top: 8px;
             background: #eef3f8;
@@ -178,6 +164,26 @@
             display: flex;
             justify-content: space-between;
         }
+        .status-summary {
+            font-size: 13px;
+            color: #2c3e50;
+            margin-top: 8px;
+            padding: 8px 12px;
+            background: #eef3f8;
+            border-radius: 8px;
+            display: none;
+        }
+        .status-summary.visible { display: block; }
+        .status-summary .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 500;
+            margin-right: 4px;
+        }
+        .status-summary .badge.success { background: #d4edda; color: #1e7e34; }
+        .status-summary .badge.partial { background: #fff3cd; color: #b38600; }
+        .status-summary .badge.error { background: #f8d7da; color: #b3362a; }
     </style>
 </head>
 <body>
@@ -188,7 +194,6 @@
     </header>
 
     <div class="main-grid">
-        <!-- Левая панель -->
         <div class="panel">
             <div class="panel-header">
                 <h2>📄 Исходный текст</h2>
@@ -222,7 +227,6 @@
             <input type="file" id="fileInput" accept=".txt,.md,.docx" style="display:none">
         </div>
 
-        <!-- Правая панель -->
         <div class="panel result-panel">
             <div class="panel-header">
                 <h2>✨ Отредактированный текст <span class="avg-score-badge" id="avgScoreBadge" style="display:none;">Средний HUMAN: 0%</span></h2>
@@ -231,10 +235,16 @@
                     <button class="copy-btn" id="copyBtn">📋 Копировать</button>
                 </div>
             </div>
+            <!-- Сводка статусов -->
+            <div class="status-summary" id="statusSummary">
+                <span>Статус:</span>
+                <span class="badge success" id="statusDone">✅ 0</span>
+                <span class="badge partial" id="statusPartial">⚠️ 0</span>
+                <span class="badge error" id="statusError">❌ 0</span>
+            </div>
             <div class="panel-body" id="resultContainer">
                 <div class="result-placeholder" id="resultPlaceholder">Результат будет появляться здесь по мере обработки абзацев...</div>
             </div>
-            <!-- Второй прогресс-бар (по абзацам) -->
             <div class="progress-container-secondary" id="progressContainerSecondary">
                 <div class="progress-bar-secondary" id="progressBarSecondary"></div>
                 <div class="progress-label">
@@ -242,18 +252,12 @@
                     <span id="progressPercentText">0%</span>
                 </div>
             </div>
-            <!-- Блок итоговой проверки (встроенный эмулятор) -->
             <div class="overall-analysis" id="overallAnalysis">
                 <div class="title">🔍 Итоговая проверка (встроенный детектор)</div>
                 <div class="stats" id="overallStats"></div>
                 <div style="margin-top:6px;">
                     <span class="overall-status" id="overallStatus"></span>
                 </div>
-            </div>
-            <!-- Блок Яндекс.Нейродетектора -->
-            <div class="yandex-analysis" id="yandexAnalysis">
-                <div class="title">🔬 Яндекс.Нейродетектор</div>
-                <div class="stats" id="yandexStats"></div>
             </div>
             <div class="checklist" id="checklist">
                 <div id="checklistItems"></div>
@@ -294,12 +298,22 @@ document.addEventListener('DOMContentLoaded', function() {
     const overallAnalysis = document.getElementById('overallAnalysis');
     const overallStats = document.getElementById('overallStats');
     const overallStatus = document.getElementById('overallStatus');
-    const yandexAnalysis = document.getElementById('yandexAnalysis');
-    const yandexStats = document.getElementById('yandexStats');
+    const statusSummary = document.getElementById('statusSummary');
+    const statusDone = document.getElementById('statusDone');
+    const statusPartial = document.getElementById('statusPartial');
+    const statusError = document.getElementById('statusError');
 
     // === СОСТОЯНИЕ ===
     let resultText = '';
     let totalParagraphs = 0;
+    let statusCounts = { done: 0, partial: 0, error: 0 };
+
+    function updateStatusSummary(counts) {
+        statusDone.textContent = '✅ ' + (counts.done || 0);
+        statusPartial.textContent = '⚠️ ' + (counts.partial || 0);
+        statusError.textContent = '❌ ' + (counts.error || 0);
+        statusSummary.classList.add('visible');
+    }
 
     // === ФУНКЦИЯ ДОБАВЛЕНИЯ АБЗАЦА ===
     function addResultParagraph(index, text, status, chain, humanScore) {
@@ -311,10 +325,13 @@ document.addEventListener('DOMContentLoaded', function() {
             el.className = 'result-paragraph';
             resultContainer.appendChild(el);
         }
-        el.className = 'result-paragraph ' + status;
+        // Маппинг статусов для CSS
+        const statusClass = status === 'done' ? 'done' : (status === 'partial' ? 'partial' : 'error');
+        el.className = 'result-paragraph ' + statusClass;
         const scoreText = humanScore !== undefined ? `<span class="score">${humanScore}%</span>` : '';
         const chainBadge = chain ? `<span class="chain">${chain}</span>` : '';
-        el.innerHTML = `<span class="text">${text}</span><span class="meta">${chainBadge} ${scoreText}</span>`;
+        const statusIcon = status === 'done' ? '✅' : (status === 'partial' ? '⚠️' : '❌');
+        el.innerHTML = `<span class="text">${text}</span><span class="meta"><span class="status-icon">${statusIcon}</span>${chainBadge} ${scoreText}</span>`;
         updateResultCount();
         el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
@@ -358,24 +375,6 @@ document.addEventListener('DOMContentLoaded', function() {
         overallStatus.className = 'overall-status ' + (score >= 70 ? 'success' : (score >= 50 ? 'warning' : 'error'));
     }
 
-    function updateYandexAnalysis(data) {
-        if (!data) {
-            yandexAnalysis.classList.remove('visible');
-            return;
-        }
-        yandexAnalysis.classList.add('visible');
-        const categories = ['ai', 'likely_ai', 'likely_human', 'human'];
-        const labels = ['AI', 'LIKELY_AI', 'LIKELY_HUMAN', 'HUMAN'];
-        const colors = ['red', 'red', 'yellow', 'green'];
-        let html = '';
-        for (let i = 0; i < categories.length; i++) {
-            const val = data[categories[i]] || 0;
-            const color = colors[i];
-            html += `<div class="stat"><span class="label">${labels[i]}:</span> <span class="value ${color}">${val}%</span></div>`;
-        }
-        yandexStats.innerHTML = html;
-    }
-
     function updateParagraphProgress(current, total) {
         totalParagraphs = total;
         const pct = total > 0 ? Math.min(100, (current / total) * 100) : 0;
@@ -401,7 +400,8 @@ document.addEventListener('DOMContentLoaded', function() {
     function updateSourceParagraph(index, status) {
         const el = document.getElementById('source-para-' + index);
         if (el) {
-            el.className = 'source-paragraph ' + status;
+            const statusClass = status === 'done' ? 'done' : (status === 'partial' ? 'partial' : 'error');
+            el.className = 'source-paragraph ' + statusClass;
             el.scrollIntoView({ block: 'center', behavior: 'smooth' });
         }
     }
@@ -547,7 +547,7 @@ document.addEventListener('DOMContentLoaded', function() {
         progressPercentText.textContent = '0%';
         checklistDiv.classList.remove('visible');
         overallAnalysis.classList.remove('visible');
-        yandexAnalysis.classList.remove('visible');
+        statusSummary.classList.remove('visible');
         resultContainer.innerHTML = '';
         const placeholder = document.createElement('div');
         placeholder.className = 'result-placeholder';
@@ -558,6 +558,7 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('resultCount').textContent = '0 симв.';
         avgScoreBadge.style.display = 'none';
         resetSteps();
+        statusCounts = { done: 0, partial: 0, error: 0 };
 
         const paragraphs = splitIntoParagraphsSafe(text).split('\n\n').filter(p => p.trim());
         initSourceProgress(paragraphs);
@@ -591,8 +592,9 @@ document.addEventListener('DOMContentLoaded', function() {
             if (data.overall_analysis) {
                 updateOverallAnalysis(data.overall_analysis);
             }
-            if (data.yandex_analysis) {
-                updateYandexAnalysis(data.yandex_analysis);
+            if (data.status_counts) {
+                statusCounts = data.status_counts;
+                updateStatusSummary(statusCounts);
             }
             if (data.checklist && data.checklist.length) {
                 renderChecklist(data.checklist);
@@ -671,8 +673,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 updateSourceParagraph(event.index, 'processing');
                 break;
             case 'paragraph_status':
-                addResultParagraph(event.index, event.revised, event.status, event.chain, event.human_score);
-                updateSourceParagraph(event.index, event.status);
+                // Обновляем статусы
+                const status = event.status || 'error';
+                if (status === 'done') statusCounts.done++;
+                else if (status === 'partial') statusCounts.partial++;
+                else statusCounts.error++;
+                updateStatusSummary(statusCounts);
+                addResultParagraph(event.index, event.revised, status, event.chain, event.human_score);
+                updateSourceParagraph(event.index, status);
                 break;
             case 'done':
                 markResolved();
@@ -739,8 +747,8 @@ document.addEventListener('DOMContentLoaded', function() {
             statusText.className = 'status-text success';
         })
         .catch(() => {
-            document.getElementById('versionBadge').textContent = 'v3.9.12';
-            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.9.12 — поабзацная обработка';
+            document.getElementById('versionBadge').textContent = 'v3.10.0';
+            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.10.0 — поабзацная обработка';
             statusText.textContent = '⚠️ Не удалось подключиться к серверу';
             statusText.className = 'status-text error';
         });
