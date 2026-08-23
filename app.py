@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.11.0 — полностью автономное локальное перефразирование (без внешних API)
+Chapter Editor v3.9.8 — возврат к стабильной версии (RU→EN→RU, минимальная очистка)
 """
 import json
 import os
@@ -9,6 +9,7 @@ import logging
 import random
 from pathlib import Path
 
+import requests
 from flask import Flask, Response, jsonify, request, stream_with_context
 from werkzeug.exceptions import HTTPException
 
@@ -18,11 +19,15 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.11.0"
+APP_VERSION = "3.9.8"
 MAX_CHARS = 30_000
+CHUNK_SIZE = 3000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
+
+# Кеш для переводов (чтобы не переводить повторяющиеся абзацы)
+translation_cache = {}
 
 
 class ChapterEditError(RuntimeError):
@@ -34,114 +39,100 @@ def _sse(event_type: str, data: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+# === ПЕРЕВОДЧИК С УЛУЧШЕННОЙ СТРАТЕГИЕЙ ===
+def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int = 3) -> str:
+    if not text or len(text.strip()) < 2:
+        return text
+
+    # Проверка кеша
+    cache_key = f"{text[:50]}_{target_lang}"
+    if cache_key in translation_cache:
+        logger.info(f"Using cached translation for {target_lang}")
+        return translation_cache[cache_key]
+
+    # Случайный User-Agent для обхода ограничений
+    user_agents = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
+    ]
+
+    url_google = "https://translate.googleapis.com/translate_a/single"
+    params = {
+        "client": "gtx",
+        "sl": "auto",
+        "tl": target_lang,
+        "dt": "t",
+        "q": text
+    }
+
+    for attempt in range(max_retries):
+        try:
+            headers = {'User-Agent': random.choice(user_agents)}
+            resp = requests.get(url_google, params=params, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                translated = "".join(item[0] for item in data[0] if item[0])
+                if translated:
+                    translation_cache[cache_key] = translated
+                    return translated
+            elif resp.status_code == 429:
+                wait = (2 ** attempt) + random.random() * 2
+                logger.warning(f"Google 429 (attempt {attempt+1}), waiting {wait:.1f}s")
+                time.sleep(wait)
+                continue
+            else:
+                logger.warning(f"Google attempt {attempt+1} failed: {resp.status_code}")
+                time.sleep(1 + random.random())
+        except Exception as e:
+            logger.warning(f"Google exception: {e}")
+            time.sleep(1 + random.random())
+
+    # Fallback: MyMemory
+    try:
+        url_mymemory = "https://api.mymemory.translated.net/get"
+        payload = {
+            "q": text,
+            "langpair": f"auto|{target_lang}",
+            "de": "user@example.com"
+        }
+        resp = requests.post(url_mymemory, data=payload, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("responseStatus") == 200:
+                translated = data.get("responseData", {}).get("translatedText")
+                if translated:
+                    translation_cache[cache_key] = translated
+                    return translated
+        logger.warning(f"MyMemory failed: {resp.status_code}")
+    except Exception as e:
+        logger.warning(f"MyMemory exception: {e}")
+
+    # Если ничего не помогло — возвращаем исходный текст
+    logger.warning(f"All translation attempts failed for {target_lang}. Returning original.")
+    return text
+
+
+def translate_chunk(text: str, chain: list) -> str:
+    if not text or len(text.strip()) < 2:
+        return text
+    try:
+        current = text
+        for lang in chain:
+            current = translate_with_fallback(current, target_lang=lang)
+        ru = translate_with_fallback(current, target_lang="ru")
+        return ru
+    except Exception as e:
+        logger.error(f"Chain {chain} error: {e}")
+        return text
+
+
 def split_paragraphs(text: str) -> list:
     if not text:
         return []
     text = text.replace('\r\n', '\n')
     paragraphs = text.split('\n\n')
     return [p.strip() for p in paragraphs if p.strip()]
-
-
-# === РАСШИРЕННЫЙ ЛОКАЛЬНЫЙ СИНОНИМАЙЗЕР ===
-def apply_local_humanization(text: str) -> str:
-    """Полное локальное «очеловечивание» текста без внешних API."""
-    if not text or len(text) < 5:
-        return text
-
-    # 1. Замена устойчивых фраз
-    phrase_synonyms = {
-        r'в конце концов': ['в итоге', 'в конечном счёте', 'в результате'],
-        r'с самого начала': ['изначально', 'сразу же', 'с первых шагов'],
-        r'в одно мгновение': ['мгновенно', 'вмиг', 'в один миг'],
-        r'время от времени': ['иногда', 'изредка', 'временами'],
-        r'так или иначе': ['в любом случае', 'как бы там ни было'],
-        r'как правило': ['обычно', 'чаще всего'],
-        r'в целом': ['в общем', 'в основном'],
-        r'на самом деле': ['фактически', 'по сути', 'в действительности'],
-        r'всё равно': ['тем не менее', 'однако', 'всё же'],
-        r'к тому же': ['кроме того', 'более того', 'вдобавок'],
-    }
-    for pattern, variants in phrase_synonyms.items():
-        if random.random() < 0.5:
-            text = re.sub(pattern, random.choice(variants), text, flags=re.IGNORECASE)
-
-    # 2. Замена отдельных слов
-    word_synonyms = {
-        r'\bсказал\b': ['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал', 'отозвался'],
-        r'\bсказала\b': ['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала', 'отозвалась'],
-        r'\bспросил\b': ['поинтересовался', 'осведомился', 'полюбопытствовал', 'задал вопрос'],
-        r'\bспросила\b': ['поинтересовалась', 'осведомилась', 'полюбопытствовала', 'задала вопрос'],
-        r'\bответил\b': ['откликнулся', 'парировал', 'возразил', 'подтвердил'],
-        r'\bответила\b': ['откликнулась', 'парировала', 'возразила', 'подтвердила'],
-        r'\bочень\b': ['весьма', 'крайне', 'чрезвычайно', 'невероятно'],
-        r'\bхорошо\b': ['превосходно', 'отлично', 'замечательно', 'классно'],
-        r'\bплохо\b': ['скверно', 'неважно', 'так себе'],
-        r'\bбыстро\b': ['стремительно', 'мгновенно', 'рывком'],
-        r'\bмедленно\b': ['неспешно', 'неторопливо', 'вяло'],
-        r'\bбольшой\b': ['огромный', 'громадный', 'колоссальный', 'грандиозный'],
-        r'\bмаленький\b': ['крошечный', 'миниатюрный', 'небольшой', 'малюсенький'],
-        r'\bсмотреть\b': ['вглядываться', 'всматриваться', 'наблюдать', 'глазеть'],
-        r'\bувидел\b': ['заметил', 'приметил', 'углядел', 'узрел'],
-        r'\bпонял\b': ['осознал', 'сообразил', 'смекнул', 'догадался'],
-        r'\bдумать\b': ['размышлять', 'соображать', 'прикидывать', 'считать'],
-        r'\bзнать\b': ['ведать', 'понимать', 'осознавать', 'догадываться'],
-        r'\bидти\b': ['шагать', 'двигаться', 'направляться', 'топать'],
-        r'\bстоять\b': ['выситься', 'возвышаться', 'торчать', 'находиться'],
-        r'\bсидеть\b': ['восседать', 'расположиться', 'устроиться', 'плюхнуться'],
-        r'\bлежать\b': ['покоиться', 'валяться', 'возлежать', 'растянуться'],
-        r'\bснова\b': ['опять', 'вновь', 'заново', 'сызнова'],
-        r'\bтолько\b': ['лишь', 'едва', 'всего лишь', 'только что'],
-        r'\bвдруг\b': ['неожиданно', 'внезапно', 'врасплох', 'как гром среди ясного неба'],
-        r'\bконечно\b': ['разумеется', 'естественно', 'безусловно', 'ясное дело'],
-        r'\bвозможно\b': ['вероятно', 'похоже', 'должно быть', 'наверное'],
-        r'\bпоэтому\b': ['потому', 'оттого', 'следовательно', 'стало быть'],
-        r'\bпросто\b': ['всего-навсего', 'элементарно', 'банально'],
-        r'\bсовсем\b': ['вовсе', 'абсолютно', 'совершенно'],
-        r'\bпочти\b': ['едва ли не', 'практически', 'без малого'],
-    }
-    words = text.split(' ')
-    new_words = []
-    for word in words:
-        clean_word = re.sub(r'[^a-zA-Zа-яА-Я]', '', word)
-        if clean_word.lower() in word_synonyms and random.random() < 0.4:
-            syn = random.choice(word_synonyms[clean_word.lower()])
-            if clean_word[0].isupper():
-                syn = syn.capitalize()
-            suffix = word[len(clean_word):]
-            new_words.append(syn + suffix)
-        else:
-            new_words.append(word)
-    text = ' '.join(new_words)
-
-    # 3. Добавление вводных слов (в 30% предложений)
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    insertions = ['впрочем', 'кстати', 'разумеется', 'пожалуй', 'кажется', 'несомненно', 'в общем']
-    new_sentences = []
-    for sent in sentences:
-        if len(sent.split()) > 5 and random.random() < 0.3:
-            words = sent.split()
-            pos = random.randint(1, min(3, len(words)-1))
-            ins = random.choice(insertions)
-            words.insert(pos, ins + ',')
-            sent = ' '.join(words)
-        new_sentences.append(sent)
-    text = '. '.join(new_sentences)
-
-    # 4. Перестановка слов в некоторых предложениях (для разнообразия)
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    new_sentences = []
-    for sent in sentences:
-        if len(sent.split()) > 4 and random.random() < 0.15:
-            words = sent.split()
-            if len(words) >= 3:
-                # Меняем местами первое и второе слово (если это не диалог)
-                if not words[0].startswith(('—', '"', '«')):
-                    words[0], words[1] = words[1], words[0]
-                    sent = ' '.join(words)
-        new_sentences.append(sent)
-    text = '. '.join(new_sentences)
-
-    return text
 
 
 # === ВСТРОЕННЫЙ ДЕТЕКТОР HUMAN SCORE ===
@@ -190,33 +181,48 @@ def get_human_score(text: str) -> int:
     return max(0, min(100, int(score)))
 
 
-def process_paragraph(paragraph: str) -> dict:
-    """Обрабатывает один абзац локально (без внешних API)."""
+def process_paragraph(paragraph: str, style: str = "neutral") -> dict:
     if not paragraph:
-        return {"original": paragraph, "revised": paragraph, "status": "error", "chain": "LOCAL", "human_score": 0}
+        return {"original": paragraph, "revised": paragraph, "status": "error", "chain": "none", "human_score": 0}
 
-    # Применяем локальное перефразирование
-    revised = apply_local_humanization(paragraph)
+    # Цепочки: сначала EN
+    chains = [
+        {"name": "EN", "langs": ["en"]},
+    ]
 
-    # Если текст не изменился (редкий случай), делаем принудительную замену
-    if revised == paragraph:
-        # Меняем местами первые два слова в первом предложении
-        parts = revised.split('. ', 1)
-        if len(parts) > 0:
-            words = parts[0].split()
-            if len(words) >= 2:
-                words[0], words[1] = words[1], words[0]
-                parts[0] = ' '.join(words)
-                revised = '. '.join(parts)
+    best_result = None
+    best_score = 0
 
-    score = get_human_score(revised)
+    for chain in chains:
+        logger.info(f"Testing chain {chain['name']} on paragraph: {paragraph[:50]}...")
+        revised = translate_chunk(paragraph, chain["langs"])
+        revised = re.sub(r'Vino quieren alejarte|Laboratorio, presupuesto|Empty Null: Final Drawings', '', revised)
+        revised = re.sub(r'««««Ибис»»»»', '«Ибис»', revised)
+        revised = revised.strip()
+        if revised and len(revised) > 0:
+            score = get_human_score(revised)
+            logger.info(f"Chain {chain['name']} score: {score}")
+            if score > best_score:
+                best_score = score
+                best_result = {
+                    "original": paragraph,
+                    "revised": revised,
+                    "status": "done" if score > 50 else "error",
+                    "chain": chain["name"],
+                    "human_score": score
+                }
+            if score >= 70:
+                break
+
+    if best_result:
+        return best_result
 
     return {
         "original": paragraph,
-        "revised": revised,
-        "status": "partial",  # всегда partial, т.к. это локальное перефразирование
-        "chain": "LOCAL",
-        "human_score": score
+        "revised": paragraph,
+        "status": "error",
+        "chain": "none",
+        "human_score": 0
     }
 
 
@@ -261,11 +267,11 @@ def health():
 
 @app.post("/api/revise")
 def api_revise():
-    logger.info("=== api_revise: START (v3.11.0, fully local) ===")
+    logger.info("=== api_revise: START (v3.9.8) ===")
     try:
         file_storage = request.files.get("file")
         text = request.form.get("text", "")
-        style = request.form.get("style", "neutral")  # style не используется, но оставляем для совместимости
+        style = request.form.get("style", "neutral")
 
         if file_storage and file_storage.filename:
             raw = file_storage.read()
@@ -289,7 +295,7 @@ def api_revise():
 
         def generate():
             try:
-                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев..."})
+                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем обработку {total} абзацев..."})
 
                 results = []
                 for idx, para in enumerate(paragraphs):
@@ -300,14 +306,14 @@ def api_revise():
                     })
 
                     try:
-                        result = process_paragraph(para)
+                        result = process_paragraph(para, style)
                     except Exception as e:
                         logger.error(f"Paragraph {idx} processing error: {e}")
                         result = {
                             "original": para,
                             "revised": para,
                             "status": "error",
-                            "chain": "LOCAL",
+                            "chain": "none",
                             "human_score": 0
                         }
                     results.append(result)
@@ -350,7 +356,7 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": final_text,
                     "original_text": chapter_text,
-                    "summary": f"Обработано {total} абзацев локально. Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
+                    "summary": f"Обработано {total} абзацев. Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
                     "paragraphs": results,
                     "average_human_score": avg_score,
                     "overall_analysis": overall,
