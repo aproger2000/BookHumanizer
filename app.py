@@ -35,7 +35,7 @@ _model = None
 _tokenizer = None
 _MODEL_LOADED = False
 
-# Расширенный словарь синонимов (для пост-обработки)
+# Расширенный словарь синонимов для пост-обработки
 SYNONYMS = {
     r'\bсказал\b': ['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал', 'отозвался'],
     r'\bсказала\b': ['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала', 'отозвалась'],
@@ -219,16 +219,15 @@ def paraphrase_with_model(text: str, attempts: int = 2) -> str:
                 outputs = _model.generate(
                     **inputs,
                     max_length=256,
-                    temperature=0.9,          # больше случайности
+                    temperature=0.9,
                     do_sample=True,
-                    top_p=0.95,               # выше разнообразие
-                    repetition_penalty=1.2,   # штраф за повторы
+                    top_p=0.95,
+                    repetition_penalty=1.2,
                     num_beams=1
                 )
             paraphrased = _tokenizer.decode(outputs[0], skip_special_tokens=True)
 
             if paraphrased and len(paraphrased) > 5:
-                # Применяем пост-обработку
                 paraphrased = post_process(paraphrased)
                 score = get_human_score(paraphrased)
                 if score > best_score:
@@ -255,7 +254,6 @@ def process_paragraph(paragraph: str) -> dict:
 
     revised = paraphrase_with_model(paragraph)
 
-    # Если модель не изменила текст, применяем пост-обработку вручную
     if revised == paragraph:
         revised = post_process(paragraph)
 
