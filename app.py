@@ -1,5 +1,5 @@
 """
-Chapter Editor v4.2.0 — улучшенная пост-обработка с вариативностью
+Chapter Editor v4.2.1 — минимальная пост-обработка (синонимы, вставки, перестановки)
 """
 import json
 import os
@@ -17,53 +17,53 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "4.2.0"
+APP_VERSION = "4.2.1"
 MAX_CHARS = 30_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 
-# Расширенный словарь синонимов
+# Базовый словарь синонимов (достаточный)
 SYNONYMS = {
-    r'\bсказал\b': ['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал', 'отозвался', 'вымолвил', 'проговорил', 'процедил', 'буркнул'],
-    r'\bсказала\b': ['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала', 'отозвалась', 'вымолвила', 'проговорила', 'процедила', 'буркнула'],
-    r'\bспросил\b': ['поинтересовался', 'осведомился', 'полюбопытствовал', 'задал вопрос', 'переспросил', 'допытывался'],
-    r'\bспросила\b': ['поинтересовалась', 'осведомилась', 'полюбопытствовала', 'задала вопрос', 'переспросила', 'допытывалась'],
-    r'\bответил\b': ['откликнулся', 'парировал', 'возразил', 'подтвердил', 'отвечал', 'возразил'],
-    r'\bответила\b': ['откликнулась', 'парировала', 'возразила', 'подтвердила', 'отвечала', 'возразила'],
-    r'\bочень\b': ['весьма', 'крайне', 'чрезвычайно', 'невероятно', 'до крайности', 'безмерно'],
-    r'\bхорошо\b': ['превосходно', 'отлично', 'замечательно', 'классно', 'великолепно', 'блестяще'],
-    r'\bплохо\b': ['скверно', 'неважно', 'так себе', 'дурно', 'отвратительно'],
-    r'\bбыстро\b': ['стремительно', 'мгновенно', 'рывком', 'проворно', 'бегом'],
-    r'\bмедленно\b': ['неспешно', 'неторопливо', 'вяло', 'лениво', 'черепашьим шагом'],
-    r'\bбольшой\b': ['огромный', 'громадный', 'колоссальный', 'грандиозный', 'необъятный', 'гигантский'],
-    r'\bмаленький\b': ['крошечный', 'миниатюрный', 'небольшой', 'малюсенький', 'крохотный', 'микроскопический'],
-    r'\bсмотреть\b': ['вглядываться', 'всматриваться', 'наблюдать', 'глазеть', 'рассматривать', 'созерцать'],
-    r'\bувидел\b': ['заметил', 'приметил', 'углядел', 'узрел', 'увидал', 'разглядел'],
-    r'\bпонял\b': ['осознал', 'сообразил', 'смекнул', 'догадался', 'уразумел', 'вник'],
-    r'\bдумать\b': ['размышлять', 'соображать', 'прикидывать', 'считать', 'полагать', 'думать'],
-    r'\bзнать\b': ['ведать', 'понимать', 'осознавать', 'догадываться', 'представлять', 'знать'],
-    r'\bидти\b': ['шагать', 'двигаться', 'направляться', 'топать', 'брести', 'шествовать'],
-    r'\bстоять\b': ['выситься', 'возвышаться', 'торчать', 'находиться', 'располагаться', 'стоять'],
-    r'\bсидеть\b': ['восседать', 'расположиться', 'устроиться', 'плюхнуться', 'примоститься', 'сидеть'],
-    r'\bлежать\b': ['покоиться', 'валяться', 'возлежать', 'растянуться', 'простираться', 'лежать'],
-    r'\bснова\b': ['опять', 'вновь', 'заново', 'сызнова', 'повторно', 'опять-таки'],
-    r'\bтолько\b': ['лишь', 'едва', 'всего лишь', 'только что', 'единственно', 'исключительно'],
-    r'\bвдруг\b': ['неожиданно', 'внезапно', 'врасплох', 'как гром среди ясного неба', 'отчего-то', 'вдруг'],
-    r'\bконечно\b': ['разумеется', 'естественно', 'безусловно', 'ясное дело', 'само собой', 'без сомнения'],
-    r'\bвозможно\b': ['вероятно', 'похоже', 'должно быть', 'наверное', 'пожалуй', 'может быть'],
-    r'\bпоэтому\b': ['потому', 'оттого', 'следовательно', 'стало быть', 'значит', 'следовательно'],
-    r'\bпросто\b': ['всего-навсего', 'элементарно', 'банально', 'обыкновенно', 'попросту'],
-    r'\bсовсем\b': ['вовсе', 'абсолютно', 'совершенно', 'полностью', 'целиком'],
-    r'\bпочти\b': ['едва ли не', 'практически', 'без малого', 'чуть ли не', 'почти что'],
+    r'\bсказал\b': ['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал', 'отозвался'],
+    r'\bсказала\b': ['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала', 'отозвалась'],
+    r'\bспросил\b': ['поинтересовался', 'осведомился', 'полюбопытствовал', 'задал вопрос'],
+    r'\bспросила\b': ['поинтересовалась', 'осведомилась', 'полюбопытствовала', 'задала вопрос'],
+    r'\bответил\b': ['откликнулся', 'парировал', 'возразил', 'подтвердил'],
+    r'\bответила\b': ['откликнулась', 'парировала', 'возразила', 'подтвердила'],
+    r'\bочень\b': ['весьма', 'крайне', 'чрезвычайно', 'невероятно'],
+    r'\bхорошо\b': ['превосходно', 'отлично', 'замечательно', 'классно'],
+    r'\bплохо\b': ['скверно', 'неважно', 'так себе'],
+    r'\bбыстро\b': ['стремительно', 'мгновенно', 'рывком'],
+    r'\bмедленно\b': ['неспешно', 'неторопливо', 'вяло'],
+    r'\bбольшой\b': ['огромный', 'громадный', 'колоссальный', 'грандиозный'],
+    r'\bмаленький\b': ['крошечный', 'миниатюрный', 'небольшой', 'малюсенький'],
+    r'\bсмотреть\b': ['вглядываться', 'всматриваться', 'наблюдать', 'глазеть'],
+    r'\bувидел\b': ['заметил', 'приметил', 'углядел', 'узрел'],
+    r'\bпонял\b': ['осознал', 'сообразил', 'смекнул', 'догадался'],
+    r'\bдумать\b': ['размышлять', 'соображать', 'прикидывать', 'считать'],
+    r'\bзнать\b': ['ведать', 'понимать', 'осознавать', 'догадываться'],
+    r'\bидти\b': ['шагать', 'двигаться', 'направляться', 'топать'],
+    r'\bстоять\b': ['выситься', 'возвышаться', 'торчать', 'находиться'],
+    r'\bсидеть\b': ['восседать', 'расположиться', 'устроиться', 'плюхнуться'],
+    r'\bлежать\b': ['покоиться', 'валяться', 'возлежать', 'растянуться'],
+    r'\bснова\b': ['опять', 'вновь', 'заново', 'сызнова'],
+    r'\bтолько\b': ['лишь', 'едва', 'всего лишь', 'только что'],
+    r'\bвдруг\b': ['неожиданно', 'внезапно', 'врасплох', 'как гром среди ясного неба'],
+    r'\bконечно\b': ['разумеется', 'естественно', 'безусловно', 'ясное дело'],
+    r'\bвозможно\b': ['вероятно', 'похоже', 'должно быть', 'наверное'],
+    r'\bпоэтому\b': ['потому', 'оттого', 'следовательно', 'стало быть'],
+    r'\bпросто\b': ['всего-навсего', 'элементарно', 'банально'],
+    r'\bсовсем\b': ['вовсе', 'абсолютно', 'совершенно'],
+    r'\bпочти\b': ['едва ли не', 'практически', 'без малого'],
 }
 
-INSERTIONS = ['впрочем', 'кстати', 'разумеется', 'пожалуй', 'кажется', 'несомненно', 'в общем', 'между прочим', 'надо сказать', 'честно говоря', 'к слову']
-INTERJECTIONS = ['ах', 'ой', 'ну', 'вот', 'эй', 'увы', 'о', 'ага', 'ух']
+INSERTIONS = ['впрочем', 'кстати', 'разумеется', 'пожалуй', 'кажется', 'несомненно', 'в общем']
 
 def _sse(event_type: str, data: dict) -> str:
     payload = {"type": event_type, **data}
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
 
 def get_human_score(text: str) -> int:
     if not text or len(text) < 20:
@@ -109,16 +109,13 @@ def get_human_score(text: str) -> int:
 
     return max(0, min(100, int(score)))
 
+
 def post_process(text: str, logs: list = None) -> str:
     """
-    Улучшенная пост-обработка с вариативностью:
-    - синонимы: 50% слов
-    - вводные: 25% предложений
-    - перестановки: 30% предложений
-    - междометия: 15% диалогов
-    - перестановка частей: 20% предложений с 'когда'
-    - замена прямой/косвенной речи: 20% диалогов (экспериментально)
-    Для каждого абзаца выбирается случайный набор операций.
+    Только три операции:
+    - синонимы (50%)
+    - вставка вводных слов (20%)
+    - перестановка первых двух слов (20%)
     """
     if not text or len(text) < 20:
         return text
@@ -126,131 +123,57 @@ def post_process(text: str, logs: list = None) -> str:
     if logs is None:
         logs = []
 
-    ops = []
-    if random.random() < 0.9:
-        ops.append('synonyms')
-    if random.random() < 0.5:
-        ops.append('insertions')
-    if random.random() < 0.6:
-        ops.append('swap_first_words')
-    if random.random() < 0.3:
-        ops.append('interjections')
-    if random.random() < 0.4:
-        ops.append('swap_clauses')
-    if random.random() < 0.3:
-        ops.append('direct_indirect')
+    # 1. Синонимы (50%)
+    words = text.split(' ')
+    new_words = []
+    replacements = 0
+    for word in words:
+        clean = re.sub(r'[^a-zA-Zа-яА-Я]', '', word)
+        if clean.lower() in SYNONYMS and random.random() < 0.5:
+            syn = random.choice(SYNONYMS[clean.lower()])
+            if clean[0].isupper():
+                syn = syn.capitalize()
+            suffix = word[len(clean):]
+            new_words.append(syn + suffix)
+            replacements += 1
+        else:
+            new_words.append(word)
+    text = ' '.join(new_words)
+    if replacements:
+        logs.append(f"  - заменено синонимов: {replacements}")
 
-    if not ops:
-        ops.append('synonyms')
+    # 2. Вставка вводных слов (20%)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    new_sentences = []
+    inserted = 0
+    for sent in sentences:
+        if len(sent.split()) > 5 and random.random() < 0.2:
+            words = sent.split()
+            pos = random.randint(1, min(3, len(words)-1))
+            ins = random.choice(INSERTIONS)
+            words.insert(pos, ins + ',')
+            sent = ' '.join(words)
+            inserted += 1
+        new_sentences.append(sent)
+    text = '. '.join(new_sentences)
+    if inserted:
+        logs.append(f"  - вставлено вводных слов: {inserted}")
 
-    for op in ops:
-        if op == 'synonyms':
-            words = text.split(' ')
-            new_words = []
-            replacements = 0
-            for word in words:
-                clean = re.sub(r'[^a-zA-Zа-яА-Я]', '', word)
-                if clean.lower() in SYNONYMS and random.random() < 0.5:
-                    syn = random.choice(SYNONYMS[clean.lower()])
-                    if clean[0].isupper():
-                        syn = syn.capitalize()
-                    suffix = word[len(clean):]
-                    new_words.append(syn + suffix)
-                    replacements += 1
-                else:
-                    new_words.append(word)
-            text = ' '.join(new_words)
-            if replacements:
-                logs.append(f"  - заменено синонимов: {replacements}")
-
-        elif op == 'insertions':
-            sentences = re.split(r'(?<=[.!?])\s+', text)
-            new_sentences = []
-            inserted = 0
-            for sent in sentences:
-                if len(sent.split()) > 5 and random.random() < 0.25:
-                    words = sent.split()
-                    pos = random.randint(1, min(3, len(words)-1))
-                    ins = random.choice(INSERTIONS)
-                    words.insert(pos, ins + ',')
-                    sent = ' '.join(words)
-                    inserted += 1
-                new_sentences.append(sent)
-            text = '. '.join(new_sentences)
-            if inserted:
-                logs.append(f"  - вставлено вводных слов: {inserted}")
-
-        elif op == 'swap_first_words':
-            sentences = re.split(r'(?<=[.!?])\s+', text)
-            new_sentences = []
-            swapped = 0
-            for sent in sentences:
-                if len(sent.split()) > 4 and random.random() < 0.3:
-                    words = sent.split()
-                    if len(words) >= 3 and not words[0].startswith(('—', '"', '«')):
-                        words[0], words[1] = words[1], words[0]
-                        sent = ' '.join(words)
-                        swapped += 1
-                new_sentences.append(sent)
-            text = '. '.join(new_sentences)
-            if swapped:
-                logs.append(f"  - перестановок первых слов: {swapped}")
-
-        elif op == 'interjections':
-            sentences = re.split(r'(?<=[.!?])\s+', text)
-            new_sentences = []
-            inserted_interj = 0
-            for sent in sentences:
-                if re.match(r'^[—"«]', sent) and random.random() < 0.15:
-                    ins = random.choice(INTERJECTIONS)
-                    match = re.search(r'^([—"«])\s*', sent)
-                    if match:
-                        prefix = match.group(0)
-                        rest = sent[len(prefix):]
-                        sent = prefix + ins + ', ' + rest[0].lower() + rest[1:] if rest else prefix + ins
-                        inserted_interj += 1
-                new_sentences.append(sent)
-            text = '. '.join(new_sentences)
-            if inserted_interj:
-                logs.append(f"  - вставлено междометий: {inserted_interj}")
-
-        elif op == 'swap_clauses':
-            # Перестановка частей с 'когда'
-            def swap_clauses(text):
-                pattern = re.compile(r'(.+?)\s+когда\s+(.+?)([.!?])', re.DOTALL)
-                def repl(m):
-                    first = m.group(1).strip()
-                    second = m.group(2).strip()
-                    punct = m.group(3)
-                    if first.startswith(('—', '"', '«')):
-                        return m.group(0)
-                    return f"Когда {second}, {first}{punct}"
-                return pattern.sub(repl, text)
-            new_text = swap_clauses(text)
-            if new_text != text:
-                logs.append("  - перестановка частей (когда)")
-                text = new_text
-
-        elif op == 'direct_indirect':
-            # Замена прямой речи на косвенную (упрощённо)
-            def replace_direct_indirect(text):
-                pattern = re.compile(r'—\s*(.+?)\s*,\s*—\s*(сказал|сказала|произнёс|произнесла|ответил|ответила|спросил|спросила)\s+([а-яА-ЯёЁ]+)\.?')
-                def repl(m):
-                    text_part = m.group(1).strip()
-                    verb = m.group(2)
-                    who = m.group(3)
-                    if verb.endswith('а'):
-                        who_form = who
-                        if who in ('он', 'Алексей', 'Масарик', 'Кросс'):
-                            who_form = 'она'
-                    else:
-                        who_form = who
-                    return f"{who_form} {verb}, что {text_part.lower()}."
-                return pattern.sub(repl, text)
-            new_text = replace_direct_indirect(text)
-            if new_text != text:
-                logs.append("  - замена прямой речи на косвенную")
-                text = new_text
+    # 3. Перестановка первых двух слов (20%)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    new_sentences = []
+    swapped = 0
+    for sent in sentences:
+        if len(sent.split()) > 4 and random.random() < 0.2:
+            words = sent.split()
+            if len(words) >= 3 and not words[0].startswith(('—', '"', '«')):
+                words[0], words[1] = words[1], words[0]
+                sent = ' '.join(words)
+                swapped += 1
+        new_sentences.append(sent)
+    text = '. '.join(new_sentences)
+    if swapped:
+        logs.append(f"  - перестановок первых слов: {swapped}")
 
     return text
 
@@ -283,7 +206,7 @@ def process_paragraph(paragraph: str) -> dict:
         "original": paragraph,
         "revised": revised,
         "status": "done" if score > 50 else "partial",
-        "chain": "LOCAL (v4.2.0)",
+        "chain": "LOCAL (v4.2.1)",
         "human_score": score,
         "logs": logs
     }
@@ -358,7 +281,7 @@ def api_revise():
 
         def generate():
             try:
-                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем обработку {total} абзацев (v4.2.0)..."})
+                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем обработку {total} абзацев (v4.2.1)..."})
 
                 results = []
                 for idx, para in enumerate(paragraphs):
@@ -421,7 +344,7 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": final_text,
                     "original_text": chapter_text,
-                    "summary": f"Обработано {total} абзацев (v4.2.0). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
+                    "summary": f"Обработано {total} абзацев (v4.2.1). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
                     "paragraphs": results,
                     "average_human_score": avg_score,
                     "overall_analysis": overall,
@@ -456,7 +379,7 @@ def handle_http_exception(exc):
 @app.errorhandler(Exception)
 def handle_exception(exc):
     logger.exception("Unhandled exception")
-    return jsonify(detail=f"Server error: {str(exc)}"), 500
+    return jsonify(detail=f"Server error: {str(e)}"), 500
 
 
 if __name__ == "__main__":
