@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "4.0.1"
+APP_VERSION = "4.1.0"  # обновим версию
 MAX_CHARS = 30_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
@@ -35,7 +35,7 @@ _model = None
 _tokenizer = None
 _MODEL_LOADED = False
 
-# Расширенный словарь синонимов для пост-обработки
+# Расширенный словарь синонимов (оставляем как есть)
 SYNONYMS = {
     r'\bсказал\b': ['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал', 'отозвался'],
     r'\bсказала\b': ['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала', 'отозвалась'],
@@ -149,14 +149,18 @@ def get_human_score(text: str) -> int:
     return max(0, min(100, int(score)))
 
 
-def post_process(text: str) -> str:
-    """Пост-обработка: случайные синонимы, вставки, перестановки (без порчи смысла)."""
+def post_process(text: str, logs: list = None) -> str:
+    """Пост-обработка с логированием изменений."""
     if not text or len(text) < 20:
         return text
+
+    if logs is None:
+        logs = []
 
     # 1. Замена синонимов (с вероятностью 30%)
     words = text.split(' ')
     new_words = []
+    replacements = 0
     for word in words:
         clean = re.sub(r'[^a-zA-Zа-яА-Я]', '', word)
         if clean.lower() in SYNONYMS and random.random() < 0.3:
@@ -165,13 +169,17 @@ def post_process(text: str) -> str:
                 syn = syn.capitalize()
             suffix = word[len(clean):]
             new_words.append(syn + suffix)
+            replacements += 1
         else:
             new_words.append(word)
     text = ' '.join(new_words)
+    if replacements:
+        logs.append(f"  - заменено синонимов: {replacements}")
 
     # 2. Вставка вводных слов (в 15% предложений)
     sentences = re.split(r'(?<=[.!?])\s+', text)
     new_sentences = []
+    inserted = 0
     for sent in sentences:
         if len(sent.split()) > 5 and random.random() < 0.15:
             words = sent.split()
@@ -179,33 +187,41 @@ def post_process(text: str) -> str:
             ins = random.choice(INSERTIONS)
             words.insert(pos, ins + ',')
             sent = ' '.join(words)
+            inserted += 1
         new_sentences.append(sent)
     text = '. '.join(new_sentences)
+    if inserted:
+        logs.append(f"  - вставлено вводных слов: {inserted}")
 
     # 3. Перестановка слов (в 10% предложений)
     sentences = re.split(r'(?<=[.!?])\s+', text)
     new_sentences = []
+    swapped = 0
     for sent in sentences:
         if len(sent.split()) > 4 and random.random() < 0.1:
             words = sent.split()
             if len(words) >= 3 and not words[0].startswith(('—', '"', '«')):
                 words[0], words[1] = words[1], words[0]
                 sent = ' '.join(words)
+                swapped += 1
         new_sentences.append(sent)
     text = '. '.join(new_sentences)
+    if swapped:
+        logs.append(f"  - перестановок первых слов: {swapped}")
 
     return text
 
 
-def paraphrase_with_model(text: str, attempts: int = 2) -> str:
-    """Перефразирует текст с ruT5-small, возвращая лучший вариант."""
+def paraphrase_with_model(text: str, attempts: int = 2):
+    """Перефразирует текст, возвращает (лучший_текст, список_логов)."""
+    logs = []
     if not text or len(text) < 10:
-        return text
+        return text, logs
 
     if not _MODEL_LOADED:
         load_model()
         if not _MODEL_LOADED:
-            return text
+            return text, logs
 
     best_text = text
     best_score = 0
@@ -228,16 +244,21 @@ def paraphrase_with_model(text: str, attempts: int = 2) -> str:
             paraphrased = _tokenizer.decode(outputs[0], skip_special_tokens=True)
 
             if paraphrased and len(paraphrased) > 5:
-                paraphrased = post_process(paraphrased)
+                # Сначала пост-обработка с логированием
+                post_logs = []
+                paraphrased = post_process(paraphrased, logs=post_logs)
                 score = get_human_score(paraphrased)
+                logs.append(f"Попытка {attempt+1}: вариант '{paraphrased[:50]}...' (HUMAN={score}%)")
+                logs.extend([f"  {log}" for log in post_logs])
                 if score > best_score:
                     best_score = score
                     best_text = paraphrased
         except Exception as e:
             logger.warning(f"Paraphrasing attempt {attempt+1} error: {e}")
+            logs.append(f"Попытка {attempt+1}: ошибка - {str(e)}")
             continue
 
-    return best_text
+    return best_text, logs
 
 
 def split_paragraphs(text: str) -> list:
@@ -250,25 +271,38 @@ def split_paragraphs(text: str) -> list:
 
 def process_paragraph(paragraph: str) -> dict:
     if not paragraph:
-        return {"original": paragraph, "revised": paragraph, "status": "error", "chain": "LOCAL", "human_score": 0}
+        return {
+            "original": paragraph,
+            "revised": paragraph,
+            "status": "error",
+            "chain": "LOCAL",
+            "human_score": 0,
+            "logs": ["Пустой абзац"]
+        }
 
-    revised = paraphrase_with_model(paragraph)
+    revised, logs = paraphrase_with_model(paragraph)
 
     if revised == paragraph:
-        revised = post_process(paragraph)
+        # Если модель не изменила, применяем только пост-обработку
+        post_logs = []
+        revised = post_process(paragraph, logs=post_logs)
+        logs.extend(post_logs)
 
     score = get_human_score(revised)
+    logs.append(f"Итоговый HUMAN score: {score}%")
 
     return {
         "original": paragraph,
         "revised": revised,
         "status": "done" if score > 50 else "partial",
         "chain": "LOCAL",
-        "human_score": score
+        "human_score": score,
+        "logs": logs
     }
 
 
 def analyze_overall(text: str) -> dict:
+    # (без изменений)
     if not text or len(text) < 100:
         return {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0, "score": 0}
 
@@ -356,7 +390,8 @@ def api_revise():
                             "revised": para,
                             "status": "error",
                             "chain": "LOCAL",
-                            "human_score": 0
+                            "human_score": 0,
+                            "logs": [f"Ошибка: {str(e)}"]
                         }
                     results.append(result)
 
@@ -366,7 +401,8 @@ def api_revise():
                         "revised": result["revised"],
                         "status": result["status"],
                         "chain": result["chain"],
-                        "human_score": result.get("human_score", 0)
+                        "human_score": result.get("human_score", 0),
+                        "logs": result.get("logs", [])
                     })
 
                     yield _sse("progress", {
