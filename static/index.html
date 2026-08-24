@@ -6,7 +6,6 @@
     <title>Chapter Editor</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
     <style>
-        /* (все стили без изменений, оставляем как в предыдущей версии) */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { background: #f0f4fa; color: #1a2634; font-family: 'Inter', sans-serif; min-height: 100vh; display: flex; flex-direction: column; padding: 24px; }
         .container { max-width: 1400px; margin: 0 auto; width: 100%; flex: 1; display: flex; flex-direction: column; }
@@ -235,7 +234,6 @@
                     <button class="copy-btn" id="copyBtn">📋 Копировать</button>
                 </div>
             </div>
-            <!-- Сводка статусов -->
             <div class="status-summary" id="statusSummary">
                 <span>Статус:</span>
                 <span class="badge success" id="statusDone">✅ 0</span>
@@ -266,14 +264,13 @@
     </div>
 
     <div class="footer">
-        <span id="footerVersion">Chapter Editor — поабзацная обработка с HUMAN score</span>
+        <span id="footerVersion">Chapter Editor — локальное перефразирование с HUMAN score</span>
         <span><a href="#" onclick="location.reload()">Перезагрузить</a></span>
     </div>
 </div>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // === ЭЛЕМЕНТЫ ===
     const sourceText = document.getElementById('sourceText');
     const sourceProgress = document.getElementById('sourceProgress');
     const resultContainer = document.getElementById('resultContainer');
@@ -303,7 +300,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const statusPartial = document.getElementById('statusPartial');
     const statusError = document.getElementById('statusError');
 
-    // === СОСТОЯНИЕ ===
     let resultText = '';
     let totalParagraphs = 0;
     let statusCounts = { done: 0, partial: 0, error: 0 };
@@ -315,7 +311,6 @@ document.addEventListener('DOMContentLoaded', function() {
         statusSummary.classList.add('visible');
     }
 
-    // === ФУНКЦИЯ ДОБАВЛЕНИЯ АБЗАЦА ===
     function addResultParagraph(index, text, status, chain, humanScore) {
         if (resultPlaceholder) resultPlaceholder.style.display = 'none';
         let el = document.getElementById('para-' + index);
@@ -325,15 +320,12 @@ document.addEventListener('DOMContentLoaded', function() {
             el.className = 'result-paragraph';
             resultContainer.appendChild(el);
         }
-        // Маппинг статусов для CSS
         const statusClass = status === 'done' ? 'done' : (status === 'partial' ? 'partial' : 'error');
         el.className = 'result-paragraph ' + statusClass;
         const scoreText = humanScore !== undefined ? `<span class="score">${humanScore}%</span>` : '';
         const chainBadge = chain ? `<span class="chain">${chain}</span>` : '';
         const statusIcon = status === 'done' ? '✅' : (status === 'partial' ? '⚠️' : '❌');
-        // В функции addResultParagraph
-        const chainDisplay = chain === 'LOCAL' ? '🔧 Локально' : chain;
-        el.innerHTML = `<span class="text">${text}</span><span class="meta"><span class="status-icon">${statusIcon}</span>${chainDisplay} ${scoreText}</span>`;
+        el.innerHTML = `<span class="text">${text}</span><span class="meta"><span class="status-icon">${statusIcon}</span>${chainBadge} ${scoreText}</span>`;
         updateResultCount();
         el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
@@ -385,7 +377,6 @@ document.addEventListener('DOMContentLoaded', function() {
         progressPercentText.textContent = Math.round(pct) + '%';
     }
 
-    // === ХАЙЛАЙТЕР ИСХОДНОГО ТЕКСТА ===
     function initSourceProgress(paragraphs) {
         sourceProgress.innerHTML = '';
         paragraphs.forEach((p, i) => {
@@ -413,7 +404,6 @@ document.addEventListener('DOMContentLoaded', function() {
         sourceText.style.display = 'block';
     }
 
-    // === БЕЗОПАСНОЕ РАЗБИЕНИЕ ===
     function splitIntoParagraphsSafe(text) {
         if (!text) return text;
         if (text.includes('\n\n')) return text;
@@ -462,7 +452,6 @@ document.addEventListener('DOMContentLoaded', function() {
         return result.join('\n\n');
     }
 
-    // === ШАГИ ===
     const stepDots = {
         step1: document.getElementById('step1'),
         step2: document.getElementById('step2'),
@@ -675,7 +664,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 updateSourceParagraph(event.index, 'processing');
                 break;
             case 'paragraph_status':
-                // Обновляем статусы
                 const status = event.status || 'error';
                 if (status === 'done') statusCounts.done++;
                 else if (status === 'partial') statusCounts.partial++;
@@ -744,13 +732,13 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(data => {
             const version = 'v' + data.version;
             document.getElementById('versionBadge').textContent = version;
-            document.getElementById('footerVersion').textContent = 'Chapter Editor ' + version + ' — поабзацная обработка с HUMAN score';
+            document.getElementById('footerVersion').textContent = 'Chapter Editor ' + version + ' — локальное перефразирование';
             statusText.textContent = '✅ Сервер версии ' + data.version + ' готов';
             statusText.className = 'status-text success';
         })
         .catch(() => {
-            document.getElementById('versionBadge').textContent = 'v3.10.0';
-            document.getElementById('footerVersion').textContent = 'Chapter Editor v3.10.0 — поабзацная обработка';
+            document.getElementById('versionBadge').textContent = 'v4.0.1';
+            document.getElementById('footerVersion').textContent = 'Chapter Editor v4.0.1 — локальное перефразирование';
             statusText.textContent = '⚠️ Не удалось подключиться к серверу';
             statusText.className = 'status-text error';
         });
