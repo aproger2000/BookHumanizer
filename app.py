@@ -1,5 +1,5 @@
 """
-Chapter Editor v4.0.0 — локальное перефразирование с ruT5-small (без внешних API)
+Chapter Editor v4.0.1 — ruT5-small с улучшенной генерацией и пост-обработкой
 """
 import json
 import os
@@ -12,7 +12,6 @@ from pathlib import Path
 from flask import Flask, Response, jsonify, request, stream_with_context
 from werkzeug.exceptions import HTTPException
 
-# Импорт transformers (установить отдельно)
 try:
     from transformers import T5ForConditionalGeneration, T5Tokenizer
     import torch
@@ -26,16 +25,52 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "4.0.0"
+APP_VERSION = "4.0.1"
 MAX_CHARS = 30_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 
-# Глобальные переменные для модели
 _model = None
 _tokenizer = None
 _MODEL_LOADED = False
+
+# Расширенный словарь синонимов (для пост-обработки)
+SYNONYMS = {
+    r'\bсказал\b': ['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал', 'отозвался'],
+    r'\bсказала\b': ['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала', 'отозвалась'],
+    r'\bспросил\b': ['поинтересовался', 'осведомился', 'полюбопытствовал', 'задал вопрос'],
+    r'\bспросила\b': ['поинтересовалась', 'осведомилась', 'полюбопытствовала', 'задала вопрос'],
+    r'\bответил\b': ['откликнулся', 'парировал', 'возразил', 'подтвердил'],
+    r'\bответила\b': ['откликнулась', 'парировала', 'возразила', 'подтвердила'],
+    r'\bочень\b': ['весьма', 'крайне', 'чрезвычайно', 'невероятно'],
+    r'\bхорошо\b': ['превосходно', 'отлично', 'замечательно', 'классно'],
+    r'\bплохо\b': ['скверно', 'неважно', 'так себе'],
+    r'\bбыстро\b': ['стремительно', 'мгновенно', 'рывком'],
+    r'\bмедленно\b': ['неспешно', 'неторопливо', 'вяло'],
+    r'\bбольшой\b': ['огромный', 'громадный', 'колоссальный', 'грандиозный'],
+    r'\bмаленький\b': ['крошечный', 'миниатюрный', 'небольшой', 'малюсенький'],
+    r'\bсмотреть\b': ['вглядываться', 'всматриваться', 'наблюдать', 'глазеть'],
+    r'\bувидел\b': ['заметил', 'приметил', 'углядел', 'узрел'],
+    r'\bпонял\b': ['осознал', 'сообразил', 'смекнул', 'догадался'],
+    r'\bдумать\b': ['размышлять', 'соображать', 'прикидывать', 'считать'],
+    r'\bзнать\b': ['ведать', 'понимать', 'осознавать', 'догадываться'],
+    r'\bидти\b': ['шагать', 'двигаться', 'направляться', 'топать'],
+    r'\bстоять\b': ['выситься', 'возвышаться', 'торчать', 'находиться'],
+    r'\bсидеть\b': ['восседать', 'расположиться', 'устроиться', 'плюхнуться'],
+    r'\bлежать\b': ['покоиться', 'валяться', 'возлежать', 'растянуться'],
+    r'\bснова\b': ['опять', 'вновь', 'заново', 'сызнова'],
+    r'\bтолько\b': ['лишь', 'едва', 'всего лишь', 'только что'],
+    r'\bвдруг\b': ['неожиданно', 'внезапно', 'врасплох', 'как гром среди ясного неба'],
+    r'\bконечно\b': ['разумеется', 'естественно', 'безусловно', 'ясное дело'],
+    r'\bвозможно\b': ['вероятно', 'похоже', 'должно быть', 'наверное'],
+    r'\bпоэтому\b': ['потому', 'оттого', 'следовательно', 'стало быть'],
+    r'\bпросто\b': ['всего-навсего', 'элементарно', 'банально'],
+    r'\bсовсем\b': ['вовсе', 'абсолютно', 'совершенно'],
+    r'\bпочти\b': ['едва ли не', 'практически', 'без малого'],
+}
+
+INSERTIONS = ['впрочем', 'кстати', 'разумеется', 'пожалуй', 'кажется', 'несомненно', 'в общем']
 
 
 class ChapterEditError(RuntimeError):
@@ -48,13 +83,12 @@ def _sse(event_type: str, data: dict) -> str:
 
 
 def load_model():
-    """Ленивая загрузка модели ruT5-small."""
     global _model, _tokenizer, _MODEL_LOADED
     if _MODEL_LOADED:
         return
 
     if not TRANSFORMERS_AVAILABLE:
-        logger.error("transformers not installed. Please install: transformers torch sentencepiece")
+        logger.error("transformers not installed.")
         return
 
     try:
@@ -70,52 +104,7 @@ def load_model():
         _MODEL_LOADED = False
 
 
-def paraphrase_with_model(text: str) -> str:
-    """Перефразирует текст с помощью ruT5-small."""
-    if not text or len(text) < 10:
-        return text
-
-    if not _MODEL_LOADED:
-        load_model()
-        if not _MODEL_LOADED:
-            return text
-
-    try:
-        # Формируем промпт для T5
-        input_text = f"paraphrase: {text}"
-        inputs = _tokenizer(input_text, return_tensors="pt", truncation=True, max_length=256)
-
-        with torch.no_grad():
-            outputs = _model.generate(
-                **inputs,
-                max_length=256,
-                temperature=0.7,
-                do_sample=True,
-                top_p=0.9,
-                repetition_penalty=1.1,
-                num_beams=1
-            )
-        paraphrased = _tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-        # Если перефразирование не удалось, возвращаем исходный текст
-        if paraphrased and len(paraphrased) > 5:
-            return paraphrased
-        return text
-    except Exception as e:
-        logger.warning(f"Paraphrasing error: {e}")
-        return text
-
-
-def split_paragraphs(text: str) -> list:
-    if not text:
-        return []
-    text = text.replace('\r\n', '\n')
-    paragraphs = text.split('\n\n')
-    return [p.strip() for p in paragraphs if p.strip()]
-
-
 def get_human_score(text: str) -> int:
-    """Встроенный детектор HUMAN (для обратной связи)."""
     if not text or len(text) < 20:
         return 50
 
@@ -160,25 +149,115 @@ def get_human_score(text: str) -> int:
     return max(0, min(100, int(score)))
 
 
+def post_process(text: str) -> str:
+    """Пост-обработка: случайные синонимы, вставки, перестановки (без порчи смысла)."""
+    if not text or len(text) < 20:
+        return text
+
+    # 1. Замена синонимов (с вероятностью 30%)
+    words = text.split(' ')
+    new_words = []
+    for word in words:
+        clean = re.sub(r'[^a-zA-Zа-яА-Я]', '', word)
+        if clean.lower() in SYNONYMS and random.random() < 0.3:
+            syn = random.choice(SYNONYMS[clean.lower()])
+            if clean[0].isupper():
+                syn = syn.capitalize()
+            suffix = word[len(clean):]
+            new_words.append(syn + suffix)
+        else:
+            new_words.append(word)
+    text = ' '.join(new_words)
+
+    # 2. Вставка вводных слов (в 15% предложений)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    new_sentences = []
+    for sent in sentences:
+        if len(sent.split()) > 5 and random.random() < 0.15:
+            words = sent.split()
+            pos = random.randint(1, min(3, len(words)-1))
+            ins = random.choice(INSERTIONS)
+            words.insert(pos, ins + ',')
+            sent = ' '.join(words)
+        new_sentences.append(sent)
+    text = '. '.join(new_sentences)
+
+    # 3. Перестановка слов (в 10% предложений)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    new_sentences = []
+    for sent in sentences:
+        if len(sent.split()) > 4 and random.random() < 0.1:
+            words = sent.split()
+            if len(words) >= 3 and not words[0].startswith(('—', '"', '«')):
+                words[0], words[1] = words[1], words[0]
+                sent = ' '.join(words)
+        new_sentences.append(sent)
+    text = '. '.join(new_sentences)
+
+    return text
+
+
+def paraphrase_with_model(text: str, attempts: int = 2) -> str:
+    """Перефразирует текст с ruT5-small, возвращая лучший вариант."""
+    if not text or len(text) < 10:
+        return text
+
+    if not _MODEL_LOADED:
+        load_model()
+        if not _MODEL_LOADED:
+            return text
+
+    best_text = text
+    best_score = 0
+
+    for attempt in range(attempts):
+        try:
+            input_text = f"paraphrase: {text}"
+            inputs = _tokenizer(input_text, return_tensors="pt", truncation=True, max_length=256)
+
+            with torch.no_grad():
+                outputs = _model.generate(
+                    **inputs,
+                    max_length=256,
+                    temperature=0.9,          # больше случайности
+                    do_sample=True,
+                    top_p=0.95,               # выше разнообразие
+                    repetition_penalty=1.2,   # штраф за повторы
+                    num_beams=1
+                )
+            paraphrased = _tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+            if paraphrased and len(paraphrased) > 5:
+                # Применяем пост-обработку
+                paraphrased = post_process(paraphrased)
+                score = get_human_score(paraphrased)
+                if score > best_score:
+                    best_score = score
+                    best_text = paraphrased
+        except Exception as e:
+            logger.warning(f"Paraphrasing attempt {attempt+1} error: {e}")
+            continue
+
+    return best_text
+
+
+def split_paragraphs(text: str) -> list:
+    if not text:
+        return []
+    text = text.replace('\r\n', '\n')
+    paragraphs = text.split('\n\n')
+    return [p.strip() for p in paragraphs if p.strip()]
+
+
 def process_paragraph(paragraph: str) -> dict:
-    """Обрабатывает один абзац локальной моделью."""
     if not paragraph:
         return {"original": paragraph, "revised": paragraph, "status": "error", "chain": "LOCAL", "human_score": 0}
 
-    # Применяем перефразирование
     revised = paraphrase_with_model(paragraph)
 
-    # Если модель не изменила текст, применяем минимальные замены (резерв)
+    # Если модель не изменила текст, применяем пост-обработку вручную
     if revised == paragraph:
-        # Простые синонимы для диалоговых тегов
-        replacements = {
-            r'\bсказал\b': random.choice(['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал']),
-            r'\bсказала\b': random.choice(['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала']),
-            r'\bспросил\b': random.choice(['поинтересовался', 'осведомился', 'полюбопытствовал']),
-            r'\bспросила\b': random.choice(['поинтересовалась', 'осведомилась', 'полюбопытствовала']),
-        }
-        for pattern, replacement in replacements.items():
-            revised = re.sub(pattern, replacement, revised, flags=re.IGNORECASE)
+        revised = post_process(paragraph)
 
     score = get_human_score(revised)
 
@@ -260,7 +339,7 @@ def api_revise():
 
         def generate():
             try:
-                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев..."})
+                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев (ruT5 с пост-обработкой)..."})
 
                 results = []
                 for idx, para in enumerate(paragraphs):
@@ -321,7 +400,7 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": final_text,
                     "original_text": chapter_text,
-                    "summary": f"Обработано {total} абзацев локально (ruT5). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
+                    "summary": f"Обработано {total} абзацев локально (ruT5+постобработка). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
                     "paragraphs": results,
                     "average_human_score": avg_score,
                     "overall_analysis": overall,
