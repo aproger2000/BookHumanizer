@@ -1,12 +1,12 @@
 """
-Chapter Editor v4.0.1 — ruT5-small с улучшенной генерацией и пост-обработкой
+Chapter Editor v4.1.0 — ruT5-small с float16 и фоновой загрузкой
 """
 import json
 import os
 import re
-import time
 import logging
 import random
+import threading
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, stream_with_context
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "4.1.0"  # обновим версию
+APP_VERSION = "4.1.0"
 MAX_CHARS = 30_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
@@ -35,7 +35,7 @@ _model = None
 _tokenizer = None
 _MODEL_LOADED = False
 
-# Расширенный словарь синонимов (оставляем как есть)
+# Расширенный словарь синонимов
 SYNONYMS = {
     r'\bсказал\b': ['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал', 'отозвался'],
     r'\bсказала\b': ['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала', 'отозвалась'],
@@ -95,7 +95,11 @@ def load_model():
         model_name = "cointegrated/ruT5-small"
         logger.info(f"Loading model: {model_name}...")
         _tokenizer = T5Tokenizer.from_pretrained(model_name)
-        _model = T5ForConditionalGeneration.from_pretrained(model_name)
+        _model = T5ForConditionalGeneration.from_pretrained(
+            model_name,
+            torch_dtype=torch.float16,          # экономия памяти
+            low_cpu_mem_usage=True
+        )
         _model.eval()
         _MODEL_LOADED = True
         logger.info("Model loaded successfully.")
@@ -150,14 +154,13 @@ def get_human_score(text: str) -> int:
 
 
 def post_process(text: str, logs: list = None) -> str:
-    """Пост-обработка с логированием изменений."""
     if not text or len(text) < 20:
         return text
 
     if logs is None:
         logs = []
 
-    # 1. Замена синонимов (с вероятностью 30%)
+    # 1. Замена синонимов (30%)
     words = text.split(' ')
     new_words = []
     replacements = 0
@@ -176,7 +179,7 @@ def post_process(text: str, logs: list = None) -> str:
     if replacements:
         logs.append(f"  - заменено синонимов: {replacements}")
 
-    # 2. Вставка вводных слов (в 15% предложений)
+    # 2. Вставка вводных слов (15%)
     sentences = re.split(r'(?<=[.!?])\s+', text)
     new_sentences = []
     inserted = 0
@@ -193,7 +196,7 @@ def post_process(text: str, logs: list = None) -> str:
     if inserted:
         logs.append(f"  - вставлено вводных слов: {inserted}")
 
-    # 3. Перестановка слов (в 10% предложений)
+    # 3. Перестановка первых двух слов (10%)
     sentences = re.split(r'(?<=[.!?])\s+', text)
     new_sentences = []
     swapped = 0
@@ -213,7 +216,6 @@ def post_process(text: str, logs: list = None) -> str:
 
 
 def paraphrase_with_model(text: str, attempts: int = 2):
-    """Перефразирует текст, возвращает (лучший_текст, список_логов)."""
     logs = []
     if not text or len(text) < 10:
         return text, logs
@@ -244,7 +246,6 @@ def paraphrase_with_model(text: str, attempts: int = 2):
             paraphrased = _tokenizer.decode(outputs[0], skip_special_tokens=True)
 
             if paraphrased and len(paraphrased) > 5:
-                # Сначала пост-обработка с логированием
                 post_logs = []
                 paraphrased = post_process(paraphrased, logs=post_logs)
                 score = get_human_score(paraphrased)
@@ -283,7 +284,6 @@ def process_paragraph(paragraph: str) -> dict:
     revised, logs = paraphrase_with_model(paragraph)
 
     if revised == paragraph:
-        # Если модель не изменила, применяем только пост-обработку
         post_logs = []
         revised = post_process(paragraph, logs=post_logs)
         logs.extend(post_logs)
@@ -302,7 +302,6 @@ def process_paragraph(paragraph: str) -> dict:
 
 
 def analyze_overall(text: str) -> dict:
-    # (без изменений)
     if not text or len(text) < 100:
         return {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0, "score": 0}
 
@@ -475,6 +474,12 @@ def handle_exception(exc):
     return jsonify(detail=f"Server error: {str(exc)}"), 500
 
 
+# Фоновая загрузка модели при старте Gunicorn (если не в режиме debug)
+if __name__ != "__main__":
+    threading.Thread(target=load_model, daemon=True).start()
+
+
 if __name__ == "__main__":
+    # для локального запуска
     port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port, debug=False)
