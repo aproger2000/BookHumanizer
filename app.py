@@ -1,5 +1,5 @@
 """
-Chapter Editor v4.1.0 — режим только пост-обработки (без модели)
+Chapter Editor v4.2.0 — улучшенная пост-обработка с вариативностью
 """
 import json
 import os
@@ -17,13 +17,13 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "4.1.0-no-model"
+APP_VERSION = "4.2.0"
 MAX_CHARS = 30_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 
-# Расширенный словарь синонимов (ещё больше вариантов)
+# Расширенный словарь синонимов (оставляем)
 SYNONYMS = {
     r'\bсказал\b': ['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал', 'отозвался', 'вымолвил', 'проговорил', 'процедил', 'буркнул'],
     r'\bсказала\b': ['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала', 'отозвалась', 'вымолвила', 'проговорила', 'процедила', 'буркнула'],
@@ -56,7 +56,6 @@ SYNONYMS = {
     r'\bпросто\b': ['всего-навсего', 'элементарно', 'банально', 'обыкновенно', 'попросту'],
     r'\bсовсем\b': ['вовсе', 'абсолютно', 'совершенно', 'полностью', 'целиком'],
     r'\bпочти\b': ['едва ли не', 'практически', 'без малого', 'чуть ли не', 'почти что'],
-    r'\bочень\b': ['весьма', 'крайне', 'чрезвычайно', 'невероятно', 'до крайности', 'безмерно'],
 }
 
 INSERTIONS = ['впрочем', 'кстати', 'разумеется', 'пожалуй', 'кажется', 'несомненно', 'в общем', 'между прочим', 'надо сказать', 'честно говоря', 'к слову']
@@ -67,6 +66,7 @@ def _sse(event_type: str, data: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 def get_human_score(text: str) -> int:
+    # оставляем без изменений (эвристический)
     if not text or len(text) < 20:
         return 50
 
@@ -111,14 +111,62 @@ def get_human_score(text: str) -> int:
     return max(0, min(100, int(score)))
 
 
+def swap_clauses(text: str) -> str:
+    """Меняет местами главную и придаточную части в предложениях с союзами."""
+    # Простой вариант: ищем предложения с союзами 'когда', 'если', 'потому что', 'хотя'
+    # И меняем местами части (придаточную и главную)
+    # Это сложно сделать качественно без парсинга, поэтому делаем упрощённо:
+    # Ищем паттерн: (.*?)\s*(когда|если|потому что|хотя)\s*(.*?)\. 
+    # и меняем местами.
+    # Для простоты ограничимся заменой порядка для союза 'когда'.
+    pattern = re.compile(r'(.+?)\s+когда\s+(.+?)([.!?])', re.DOTALL)
+    def repl(m):
+        first = m.group(1).strip()
+        second = m.group(2).strip()
+        punct = m.group(3)
+        # Если первая часть начинается с тире или кавычек, не трогаем (чтобы не испортить диалог)
+        if first.startswith(('—', '"', '«')):
+            return m.group(0)
+        return f"Когда {second}, {first}{punct}"
+    return pattern.sub(repl, text)
+
+
+def replace_direct_indirect(text: str) -> str:
+    """
+    Экспериментальная замена прямой речи на косвенную.
+    Ищем диалоги вида: «— Текст, — сказал он.» → «Он сказал, что текст.»
+    Это сложно, сделаем упрощённо: заменим только самые простые случаи.
+    """
+    # Ищем: — (.*?) , — сказал (он|она|Алексей|Анна|Масарик|Кросс)
+    # Заменяем на: Он/Она сказал(а), что ...
+    # Это очень грубо, но для эксперимента сойдёт.
+    pattern = re.compile(r'—\s*(.+?)\s*,\s*—\s*(сказал|сказала|произнёс|произнесла|ответил|ответила|спросил|спросила)\s+([а-яА-ЯёЁ]+)\.?')
+    def repl(m):
+        text_part = m.group(1).strip()
+        verb = m.group(2)
+        who = m.group(3)
+        # Определяем род для "сказал/сказала"
+        if verb.endswith('а'):  # женский род
+            who_form = who
+            if who in ('он', 'Алексей', 'Масарик', 'Кросс'):
+                who_form = 'она'  # упрощённо
+        else:
+            who_form = who
+        # Если who_form – имя, оставляем как есть.
+        return f"{who_form} {verb}, что {text_part.lower()}."
+    return pattern.sub(repl, text)
+
+
 def post_process(text: str, logs: list = None) -> str:
     """
-    Усиленная пост-обработка без модели:
-    - синонимы: 60% слов
-    - вставки: 40% предложений
+    Улучшенная пост-обработка с вариативностью:
+    - синонимы: 50% слов
+    - вводные: 25% предложений
     - перестановки: 30% предложений
-    - замена прямой речи на косвенную (экспериментально) – 20% диалогов
-    - вставка междометий в диалоги – 30%
+    - междометия: 15% диалогов
+    - перестановка частей: 20% предложений с 'когда'
+    - замена прямой/косвенной речи: 20% диалогов (экспериментально)
+    Для каждого абзаца выбирается случайный набор операций.
     """
     if not text or len(text) < 20:
         return text
@@ -126,76 +174,115 @@ def post_process(text: str, logs: list = None) -> str:
     if logs is None:
         logs = []
 
-    # 1. Замена синонимов (60%)
-    words = text.split(' ')
-    new_words = []
-    replacements = 0
-    for word in words:
-        clean = re.sub(r'[^a-zA-Zа-яА-Я]', '', word)
-        if clean.lower() in SYNONYMS and random.random() < 0.6:
-            syn = random.choice(SYNONYMS[clean.lower()])
-            if clean[0].isupper():
-                syn = syn.capitalize()
-            suffix = word[len(clean):]
-            new_words.append(syn + suffix)
-            replacements += 1
-        else:
-            new_words.append(word)
-    text = ' '.join(new_words)
-    if replacements:
-        logs.append(f"  - заменено синонимов: {replacements}")
+    # Определяем, какие операции применить (каждая с вероятностью)
+    ops = []
+    if random.random() < 0.9:   # почти всегда
+        ops.append('synonyms')
+    if random.random() < 0.5:   # 50%
+        ops.append('insertions')
+    if random.random() < 0.6:   # 60%
+        ops.append('swap_first_words')
+    if random.random() < 0.3:   # 30%
+        ops.append('interjections')
+    if random.random() < 0.4:   # 40%
+        ops.append('swap_clauses')
+    if random.random() < 0.3:   # 30%
+        ops.append('direct_indirect')
 
-    # 2. Вставка вводных слов (40%)
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    new_sentences = []
-    inserted = 0
-    for sent in sentences:
-        if len(sent.split()) > 5 and random.random() < 0.4:
-            words = sent.split()
-            pos = random.randint(1, min(3, len(words)-1))
-            ins = random.choice(INSERTIONS)
-            words.insert(pos, ins + ',')
-            sent = ' '.join(words)
-            inserted += 1
-        new_sentences.append(sent)
-    text = '. '.join(new_sentences)
-    if inserted:
-        logs.append(f"  - вставлено вводных слов: {inserted}")
+    # Если ничего не выбрано, добавляем синонимы для гарантии
+    if not ops:
+        ops.append('synonyms')
 
-    # 3. Перестановка первых двух слов (30%)
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    new_sentences = []
-    swapped = 0
-    for sent in sentences:
-        if len(sent.split()) > 4 and random.random() < 0.3:
-            words = sent.split()
-            if len(words) >= 3 and not words[0].startswith(('—', '"', '«')):
-                words[0], words[1] = words[1], words[0]
-                sent = ' '.join(words)
-                swapped += 1
-        new_sentences.append(sent)
-    text = '. '.join(new_sentences)
-    if swapped:
-        logs.append(f"  - перестановок первых слов: {swapped}")
+    # Применяем операции в порядке
+    for op in ops:
+        if op == 'synonyms':
+            # Замена синонимов (50%)
+            words = text.split(' ')
+            new_words = []
+            replacements = 0
+            for word in words:
+                clean = re.sub(r'[^a-zA-Zа-яА-Я]', '', word)
+                if clean.lower() in SYNONYMS and random.random() < 0.5:
+                    syn = random.choice(SYNONYMS[clean.lower()])
+                    if clean[0].isupper():
+                        syn = syn.capitalize()
+                    suffix = word[len(clean):]
+                    new_words.append(syn + suffix)
+                    replacements += 1
+                else:
+                    new_words.append(word)
+            text = ' '.join(new_words)
+            if replacements:
+                logs.append(f"  - заменено синонимов: {replacements}")
 
-    # 4. Вставка междометий в диалоги (30%)
-    # Ищем предложения с прямой речью (начинаются с — или « или " )
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    new_sentences = []
-    for sent in sentences:
-        if re.match(r'^[—"«]', sent) and random.random() < 0.3:
-            # Вставляем междометие после тире или кавычек
-            ins = random.choice(INTERJECTIONS)
-            # Находим первое слово после кавычек/тире и вставляем перед ним
-            match = re.search(r'^([—"«])\s*', sent)
-            if match:
-                prefix = match.group(0)
-                rest = sent[len(prefix):]
-                # Вставляем междометие в начало реплики с запятой
-                sent = prefix + ins + ', ' + rest[0].lower() + rest[1:] if rest else prefix + ins
-                logs.append("  - вставлено междометие в диалог")
-        new_sentences.append(sent)
-    text = '. '.join(new_sentences)
+        elif op == 'insertions':
+            # Вставка вводных слов (25%)
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            inserted = 0
+            for sent in sentences:
+                if len(sent.split()) > 5 and random.random() < 0.25:
+                    words = sent.split()
+                    pos = random.randint(1, min(3, len(words)-1))
+                    ins = random.choice(INSERTIONS)
+                    words.insert(pos, ins + ',')
+                    sent = ' '.join(words)
+                    inserted += 1
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if inserted:
+                logs.append(f"  - вставлено вводных слов: {inserted}")
+
+        elif op == 'swap_first_words':
+            # Перестановка первых двух слов (30%)
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            swapped = 0
+            for sent in sentences:
+                if len(sent.split()) > 4 and random.random() < 0.3:
+                    words = sent.split()
+                    if len(words) >= 3 and not words[0].startswith(('—', '"', '«')):
+                        words[0], words[1] = words[1], words[0]
+                        sent = ' '.join(words)
+                        swapped += 1
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if swapped:
+                logs.append(f"  - перестановок первых слов: {swapped}")
+
+        elif op == 'interjections':
+            # Вставка междометий в диалоги (15%)
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            inserted_interj = 0
+            for sent in sentences:
+                if re.match(r'^[—"«]', sent) and random.random() < 0.15:
+                    ins = random.choice(INTERJECTIONS)
+                    match = re.search(r'^([—"«])\s*', sent)
+                    if match:
+                        prefix = match.group(0)
+                        rest = sent[len(prefix):]
+                        # Вставляем междометие в начало реплики с запятой
+                        sent = prefix + ins + ', ' + rest[0].lower() + rest[1:] if rest else prefix + ins
+                        inserted_interj += 1
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if inserted_interj:
+                logs.append(f"  - вставлено междометий: {inserted_interj}")
+
+        elif op == 'swap_clauses':
+            # Перестановка частей с 'когда'
+            new_text = swap_clauses(text)
+            if new_text != text:
+                logs.append("  - перестановка частей (когда)")
+                text = new_text
+
+        elif op == 'direct_indirect':
+            # Замена прямой речи на косвенную
+            new_text = replace_direct_indirect(text)
+            if new_text != text:
+                logs.append("  - замена прямой речи на косвенную")
+                text = new_text
 
     return text
 
@@ -220,7 +307,7 @@ def process_paragraph(paragraph: str) -> dict:
         }
 
     logs = []
-    # Применяем только пост-обработку
+    # Применяем пост-обработку
     revised = post_process(paragraph, logs=logs)
     score = get_human_score(revised)
     logs.append(f"Итоговый HUMAN score: {score}%")
@@ -229,7 +316,7 @@ def process_paragraph(paragraph: str) -> dict:
         "original": paragraph,
         "revised": revised,
         "status": "done" if score > 50 else "partial",
-        "chain": "LOCAL (no model)",
+        "chain": "LOCAL (enhanced)",
         "human_score": score,
         "logs": logs
     }
@@ -304,7 +391,7 @@ def api_revise():
 
         def generate():
             try:
-                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем обработку {total} абзацев (только пост-обработка, без модели)..."})
+                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем обработку {total} абзацев (улучшенная пост-обработка)..."})
 
                 results = []
                 for idx, para in enumerate(paragraphs):
@@ -367,7 +454,7 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": final_text,
                     "original_text": chapter_text,
-                    "summary": f"Обработано {total} абзацев локально (без модели, только пост-обработка). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
+                    "summary": f"Обработано {total} абзацев (улучшенная пост-обработка). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
                     "paragraphs": results,
                     "average_human_score": avg_score,
                     "overall_analysis": overall,
