@@ -1,26 +1,15 @@
 """
-Chapter Editor v4.1.0 — ruT5-small с зеркалом HF, float16 и усиленной пост-обработкой
+Chapter Editor v4.1.0 — режим только пост-обработки (без модели)
 """
 import json
 import os
 import re
 import logging
 import random
-import threading
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 from werkzeug.exceptions import HTTPException
-
-# Использовать зеркало Hugging Face (обход блокировки)
-os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-
-try:
-    from transformers import T5ForConditionalGeneration, T5Tokenizer
-    import torch
-    TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    TRANSFORMERS_AVAILABLE = False
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,88 +17,54 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "4.1.0"
+APP_VERSION = "4.1.0-no-model"
 MAX_CHARS = 30_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 
-_model = None
-_tokenizer = None
-_MODEL_LOADED = False
-
-# Расширенный словарь синонимов (добавлено больше вариантов)
+# Расширенный словарь синонимов (ещё больше вариантов)
 SYNONYMS = {
-    r'\bсказал\b': ['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал', 'отозвался', 'вымолвил', 'проговорил'],
-    r'\bсказала\b': ['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала', 'отозвалась', 'вымолвила', 'проговорила'],
-    r'\bспросил\b': ['поинтересовался', 'осведомился', 'полюбопытствовал', 'задал вопрос', 'переспросил'],
-    r'\bспросила\b': ['поинтересовалась', 'осведомилась', 'полюбопытствовала', 'задала вопрос', 'переспросила'],
-    r'\bответил\b': ['откликнулся', 'парировал', 'возразил', 'подтвердил', 'отвечал'],
-    r'\bответила\b': ['откликнулась', 'парировала', 'возразила', 'подтвердила', 'отвечала'],
-    r'\bочень\b': ['весьма', 'крайне', 'чрезвычайно', 'невероятно', 'до крайности'],
-    r'\bхорошо\b': ['превосходно', 'отлично', 'замечательно', 'классно', 'великолепно'],
-    r'\bплохо\b': ['скверно', 'неважно', 'так себе', 'дурно'],
-    r'\bбыстро\b': ['стремительно', 'мгновенно', 'рывком', 'проворно'],
-    r'\bмедленно\b': ['неспешно', 'неторопливо', 'вяло', 'лениво'],
-    r'\bбольшой\b': ['огромный', 'громадный', 'колоссальный', 'грандиозный', 'необъятный'],
-    r'\bмаленький\b': ['крошечный', 'миниатюрный', 'небольшой', 'малюсенький', 'крохотный'],
-    r'\bсмотреть\b': ['вглядываться', 'всматриваться', 'наблюдать', 'глазеть', 'рассматривать'],
-    r'\bувидел\b': ['заметил', 'приметил', 'углядел', 'узрел', 'увидал'],
-    r'\bпонял\b': ['осознал', 'сообразил', 'смекнул', 'догадался', 'уразумел'],
-    r'\bдумать\b': ['размышлять', 'соображать', 'прикидывать', 'считать', 'полагать'],
-    r'\bзнать\b': ['ведать', 'понимать', 'осознавать', 'догадываться', 'представлять'],
-    r'\bидти\b': ['шагать', 'двигаться', 'направляться', 'топать', 'брести'],
-    r'\bстоять\b': ['выситься', 'возвышаться', 'торчать', 'находиться', 'располагаться'],
-    r'\bсидеть\b': ['восседать', 'расположиться', 'устроиться', 'плюхнуться', 'примоститься'],
-    r'\bлежать\b': ['покоиться', 'валяться', 'возлежать', 'растянуться', 'простираться'],
-    r'\bснова\b': ['опять', 'вновь', 'заново', 'сызнова', 'повторно'],
-    r'\bтолько\b': ['лишь', 'едва', 'всего лишь', 'только что', 'единственно'],
-    r'\bвдруг\b': ['неожиданно', 'внезапно', 'врасплох', 'как гром среди ясного неба', 'отчего-то'],
-    r'\bконечно\b': ['разумеется', 'естественно', 'безусловно', 'ясное дело', 'само собой'],
-    r'\bвозможно\b': ['вероятно', 'похоже', 'должно быть', 'наверное', 'пожалуй'],
-    r'\bпоэтому\b': ['потому', 'оттого', 'следовательно', 'стало быть', 'значит'],
-    r'\bпросто\b': ['всего-навсего', 'элементарно', 'банально', 'обыкновенно'],
-    r'\bсовсем\b': ['вовсе', 'абсолютно', 'совершенно', 'полностью'],
-    r'\bпочти\b': ['едва ли не', 'практически', 'без малого', 'чуть ли не'],
+    r'\bсказал\b': ['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал', 'отозвался', 'вымолвил', 'проговорил', 'процедил', 'буркнул'],
+    r'\bсказала\b': ['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала', 'отозвалась', 'вымолвила', 'проговорила', 'процедила', 'буркнула'],
+    r'\bспросил\b': ['поинтересовался', 'осведомился', 'полюбопытствовал', 'задал вопрос', 'переспросил', 'допытывался'],
+    r'\bспросила\b': ['поинтересовалась', 'осведомилась', 'полюбопытствовала', 'задала вопрос', 'переспросила', 'допытывалась'],
+    r'\bответил\b': ['откликнулся', 'парировал', 'возразил', 'подтвердил', 'отвечал', 'возразил'],
+    r'\bответила\b': ['откликнулась', 'парировала', 'возразила', 'подтвердила', 'отвечала', 'возразила'],
+    r'\bочень\b': ['весьма', 'крайне', 'чрезвычайно', 'невероятно', 'до крайности', 'безмерно'],
+    r'\bхорошо\b': ['превосходно', 'отлично', 'замечательно', 'классно', 'великолепно', 'блестяще'],
+    r'\bплохо\b': ['скверно', 'неважно', 'так себе', 'дурно', 'отвратительно'],
+    r'\bбыстро\b': ['стремительно', 'мгновенно', 'рывком', 'проворно', 'бегом'],
+    r'\bмедленно\b': ['неспешно', 'неторопливо', 'вяло', 'лениво', 'черепашьим шагом'],
+    r'\bбольшой\b': ['огромный', 'громадный', 'колоссальный', 'грандиозный', 'необъятный', 'гигантский'],
+    r'\bмаленький\b': ['крошечный', 'миниатюрный', 'небольшой', 'малюсенький', 'крохотный', 'микроскопический'],
+    r'\bсмотреть\b': ['вглядываться', 'всматриваться', 'наблюдать', 'глазеть', 'рассматривать', 'созерцать'],
+    r'\bувидел\b': ['заметил', 'приметил', 'углядел', 'узрел', 'увидал', 'разглядел'],
+    r'\bпонял\b': ['осознал', 'сообразил', 'смекнул', 'догадался', 'уразумел', 'вник'],
+    r'\bдумать\b': ['размышлять', 'соображать', 'прикидывать', 'считать', 'полагать', 'думать'],
+    r'\bзнать\b': ['ведать', 'понимать', 'осознавать', 'догадываться', 'представлять', 'знать'],
+    r'\bидти\b': ['шагать', 'двигаться', 'направляться', 'топать', 'брести', 'шествовать'],
+    r'\bстоять\b': ['выситься', 'возвышаться', 'торчать', 'находиться', 'располагаться', 'стоять'],
+    r'\bсидеть\b': ['восседать', 'расположиться', 'устроиться', 'плюхнуться', 'примоститься', 'сидеть'],
+    r'\bлежать\b': ['покоиться', 'валяться', 'возлежать', 'растянуться', 'простираться', 'лежать'],
+    r'\bснова\b': ['опять', 'вновь', 'заново', 'сызнова', 'повторно', 'опять-таки'],
+    r'\bтолько\b': ['лишь', 'едва', 'всего лишь', 'только что', 'единственно', 'исключительно'],
+    r'\bвдруг\b': ['неожиданно', 'внезапно', 'врасплох', 'как гром среди ясного неба', 'отчего-то', 'вдруг'],
+    r'\bконечно\b': ['разумеется', 'естественно', 'безусловно', 'ясное дело', 'само собой', 'без сомнения'],
+    r'\bвозможно\b': ['вероятно', 'похоже', 'должно быть', 'наверное', 'пожалуй', 'может быть'],
+    r'\bпоэтому\b': ['потому', 'оттого', 'следовательно', 'стало быть', 'значит', 'следовательно'],
+    r'\bпросто\b': ['всего-навсего', 'элементарно', 'банально', 'обыкновенно', 'попросту'],
+    r'\bсовсем\b': ['вовсе', 'абсолютно', 'совершенно', 'полностью', 'целиком'],
+    r'\bпочти\b': ['едва ли не', 'практически', 'без малого', 'чуть ли не', 'почти что'],
+    r'\bочень\b': ['весьма', 'крайне', 'чрезвычайно', 'невероятно', 'до крайности', 'безмерно'],
 }
 
-INSERTIONS = ['впрочем', 'кстати', 'разумеется', 'пожалуй', 'кажется', 'несомненно', 'в общем', 'между прочим', 'надо сказать']
-
-
-class ChapterEditError(RuntimeError):
-    pass
-
+INSERTIONS = ['впрочем', 'кстати', 'разумеется', 'пожалуй', 'кажется', 'несомненно', 'в общем', 'между прочим', 'надо сказать', 'честно говоря', 'к слову']
+INTERJECTIONS = ['ах', 'ой', 'ну', 'вот', 'эй', 'увы', 'о', 'ага', 'ух']
 
 def _sse(event_type: str, data: dict) -> str:
     payload = {"type": event_type, **data}
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
-
-def load_model():
-    global _model, _tokenizer, _MODEL_LOADED
-    if _MODEL_LOADED:
-        return
-
-    if not TRANSFORMERS_AVAILABLE:
-        logger.error("transformers not installed.")
-        return
-
-    try:
-        model_name = "cointegrated/ruT5-small"
-        logger.info(f"Loading model: {model_name}...")
-        _tokenizer = T5Tokenizer.from_pretrained(model_name)
-        _model = T5ForConditionalGeneration.from_pretrained(
-            model_name,
-            torch_dtype=torch.float16,
-            low_cpu_mem_usage=True
-        )
-        _model.eval()
-        _MODEL_LOADED = True
-        logger.info("Model loaded successfully.")
-    except Exception as e:
-        logger.error(f"Failed to load model: {e}")
-        _MODEL_LOADED = False
-
 
 def get_human_score(text: str) -> int:
     if not text or len(text) < 20:
@@ -158,10 +113,12 @@ def get_human_score(text: str) -> int:
 
 def post_process(text: str, logs: list = None) -> str:
     """
-    Усиленная пост-обработка:
-    - синонимы: 50% слов
-    - вставки: 30% предложений
-    - перестановки: 20% предложений
+    Усиленная пост-обработка без модели:
+    - синонимы: 60% слов
+    - вставки: 40% предложений
+    - перестановки: 30% предложений
+    - замена прямой речи на косвенную (экспериментально) – 20% диалогов
+    - вставка междометий в диалоги – 30%
     """
     if not text or len(text) < 20:
         return text
@@ -169,13 +126,13 @@ def post_process(text: str, logs: list = None) -> str:
     if logs is None:
         logs = []
 
-    # 1. Замена синонимов (50%)
+    # 1. Замена синонимов (60%)
     words = text.split(' ')
     new_words = []
     replacements = 0
     for word in words:
         clean = re.sub(r'[^a-zA-Zа-яА-Я]', '', word)
-        if clean.lower() in SYNONYMS and random.random() < 0.5:  # 0.3 -> 0.5
+        if clean.lower() in SYNONYMS and random.random() < 0.6:
             syn = random.choice(SYNONYMS[clean.lower()])
             if clean[0].isupper():
                 syn = syn.capitalize()
@@ -188,12 +145,12 @@ def post_process(text: str, logs: list = None) -> str:
     if replacements:
         logs.append(f"  - заменено синонимов: {replacements}")
 
-    # 2. Вставка вводных слов (30%)
+    # 2. Вставка вводных слов (40%)
     sentences = re.split(r'(?<=[.!?])\s+', text)
     new_sentences = []
     inserted = 0
     for sent in sentences:
-        if len(sent.split()) > 5 and random.random() < 0.3:  # 0.15 -> 0.3
+        if len(sent.split()) > 5 and random.random() < 0.4:
             words = sent.split()
             pos = random.randint(1, min(3, len(words)-1))
             ins = random.choice(INSERTIONS)
@@ -205,12 +162,12 @@ def post_process(text: str, logs: list = None) -> str:
     if inserted:
         logs.append(f"  - вставлено вводных слов: {inserted}")
 
-    # 3. Перестановка первых двух слов (20%)
+    # 3. Перестановка первых двух слов (30%)
     sentences = re.split(r'(?<=[.!?])\s+', text)
     new_sentences = []
     swapped = 0
     for sent in sentences:
-        if len(sent.split()) > 4 and random.random() < 0.2:  # 0.1 -> 0.2
+        if len(sent.split()) > 4 and random.random() < 0.3:
             words = sent.split()
             if len(words) >= 3 and not words[0].startswith(('—', '"', '«')):
                 words[0], words[1] = words[1], words[0]
@@ -221,70 +178,26 @@ def post_process(text: str, logs: list = None) -> str:
     if swapped:
         logs.append(f"  - перестановок первых слов: {swapped}")
 
-    # 4. Новая фича: замена прямой речи на косвенную (экспериментально)
-    # Пока оставим закомментированным для стабильности
+    # 4. Вставка междометий в диалоги (30%)
+    # Ищем предложения с прямой речью (начинаются с — или « или " )
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    new_sentences = []
+    for sent in sentences:
+        if re.match(r'^[—"«]', sent) and random.random() < 0.3:
+            # Вставляем междометие после тире или кавычек
+            ins = random.choice(INTERJECTIONS)
+            # Находим первое слово после кавычек/тире и вставляем перед ним
+            match = re.search(r'^([—"«])\s*', sent)
+            if match:
+                prefix = match.group(0)
+                rest = sent[len(prefix):]
+                # Вставляем междометие в начало реплики с запятой
+                sent = prefix + ins + ', ' + rest[0].lower() + rest[1:] if rest else prefix + ins
+                logs.append("  - вставлено междометие в диалог")
+        new_sentences.append(sent)
+    text = '. '.join(new_sentences)
 
     return text
-
-
-def paraphrase_with_model(text: str, attempts: int = 2):
-    logs = []
-    if not text or len(text) < 10:
-        return text, logs
-
-    if not _MODEL_LOADED:
-        load_model()
-        if not _MODEL_LOADED:
-            # Если модель не загружена, используем только пост-обработку
-            post_logs = []
-            processed = post_process(text, logs=post_logs)
-            logs.append("Модель не загружена, применена только пост-обработка")
-            logs.extend([f"  {log}" for log in post_logs])
-            return processed, logs
-
-    best_text = text
-    best_score = 0
-
-    for attempt in range(attempts):
-        try:
-            input_text = f"paraphrase: {text}"
-            inputs = _tokenizer(input_text, return_tensors="pt", truncation=True, max_length=256)
-
-            with torch.no_grad():
-                outputs = _model.generate(
-                    **inputs,
-                    max_length=256,
-                    temperature=1.0,          # повысили для разнообразия
-                    do_sample=True,
-                    top_p=0.95,
-                    repetition_penalty=1.2,
-                    num_beams=1
-                )
-            paraphrased = _tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-            if paraphrased and len(paraphrased) > 5:
-                post_logs = []
-                paraphrased = post_process(paraphrased, logs=post_logs)
-                score = get_human_score(paraphrased)
-                logs.append(f"Попытка {attempt+1}: вариант '{paraphrased[:50]}...' (HUMAN={score}%)")
-                logs.extend([f"  {log}" for log in post_logs])
-                if score > best_score:
-                    best_score = score
-                    best_text = paraphrased
-        except Exception as e:
-            logger.warning(f"Paraphrasing attempt {attempt+1} error: {e}")
-            logs.append(f"Попытка {attempt+1}: ошибка - {str(e)}")
-            continue
-
-    # Если все попытки не дали результата, применяем пост-обработку к оригиналу
-    if best_text == text:
-        post_logs = []
-        best_text = post_process(text, logs=post_logs)
-        logs.append("Использована только пост-обработка (модель не изменила текст)")
-        logs.extend([f"  {log}" for log in post_logs])
-
-    logs.append(f"Итоговый HUMAN score: {get_human_score(best_text)}%")
-    return best_text, logs
 
 
 def split_paragraphs(text: str) -> list:
@@ -306,16 +219,17 @@ def process_paragraph(paragraph: str) -> dict:
             "logs": ["Пустой абзац"]
         }
 
-    revised, logs = paraphrase_with_model(paragraph)
-
+    logs = []
+    # Применяем только пост-обработку
+    revised = post_process(paragraph, logs=logs)
     score = get_human_score(revised)
-    logs.append(f"Финальный HUMAN score: {score}%")
+    logs.append(f"Итоговый HUMAN score: {score}%")
 
     return {
         "original": paragraph,
         "revised": revised,
         "status": "done" if score > 50 else "partial",
-        "chain": "LOCAL",
+        "chain": "LOCAL (no model)",
         "human_score": score,
         "logs": logs
     }
@@ -390,7 +304,7 @@ def api_revise():
 
         def generate():
             try:
-                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев (ruT5 с пост-обработкой)..."})
+                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем обработку {total} абзацев (только пост-обработка, без модели)..."})
 
                 results = []
                 for idx, para in enumerate(paragraphs):
@@ -453,16 +367,13 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": final_text,
                     "original_text": chapter_text,
-                    "summary": f"Обработано {total} абзацев локально (ruT5+постобработка). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
+                    "summary": f"Обработано {total} абзацев локально (без модели, только пост-обработка). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
                     "paragraphs": results,
                     "average_human_score": avg_score,
                     "overall_analysis": overall,
                     "status_counts": status_counts,
                     "checklist": []
                 })
-            except ChapterEditError as e:
-                logger.exception("ChapterEditError")
-                yield _sse("error", {"detail": str(e)})
             except Exception as e:
                 logger.exception("Unexpected error in generate")
                 yield _sse("error", {"detail": f"Unexpected error: {str(e)}"})
@@ -492,11 +403,6 @@ def handle_http_exception(exc):
 def handle_exception(exc):
     logger.exception("Unhandled exception")
     return jsonify(detail=f"Server error: {str(exc)}"), 500
-
-
-# Фоновая загрузка модели при старте Gunicorn
-if __name__ != "__main__":
-    threading.Thread(target=load_model, daemon=True).start()
 
 
 if __name__ == "__main__":
