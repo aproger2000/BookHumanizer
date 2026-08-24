@@ -1,5 +1,5 @@
 """
-Chapter Editor v3.12.0 — гибридный подход: перевод (RU→EN→RU) с fallback на локальные замены (без порчи текста)
+Chapter Editor v4.0.0 — локальное перефразирование с ruT5-small (без внешних API)
 """
 import json
 import os
@@ -9,9 +9,16 @@ import logging
 import random
 from pathlib import Path
 
-import requests
 from flask import Flask, Response, jsonify, request, stream_with_context
 from werkzeug.exceptions import HTTPException
+
+# Импорт transformers (установить отдельно)
+try:
+    from transformers import T5ForConditionalGeneration, T5Tokenizer
+    import torch
+    TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    TRANSFORMERS_AVAILABLE = False
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -19,15 +26,16 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "3.12.0"
+APP_VERSION = "4.0.0"
 MAX_CHARS = 30_000
-CHUNK_SIZE = 3000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 
-# Кеш для переводов
-translation_cache = {}
+# Глобальные переменные для модели
+_model = None
+_tokenizer = None
+_MODEL_LOADED = False
 
 
 class ChapterEditError(RuntimeError):
@@ -39,97 +47,62 @@ def _sse(event_type: str, data: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-# === ЛОКАЛЬНЫЕ ЗАМЕНЫ (МИНИМАЛЬНЫЕ, БЕЗ ПОРЧИ ТЕКСТА) ===
-def apply_minimal_local_changes(text: str) -> str:
-    """
-    Минимальные локальные замены: только диалоговые теги и частотные слова.
-    НЕ добавляет вводные слова, НЕ меняет структуру предложений.
-    """
+def load_model():
+    """Ленивая загрузка модели ruT5-small."""
+    global _model, _tokenizer, _MODEL_LOADED
+    if _MODEL_LOADED:
+        return
+
+    if not TRANSFORMERS_AVAILABLE:
+        logger.error("transformers not installed. Please install: transformers torch sentencepiece")
+        return
+
+    try:
+        model_name = "cointegrated/ruT5-small"
+        logger.info(f"Loading model: {model_name}...")
+        _tokenizer = T5Tokenizer.from_pretrained(model_name)
+        _model = T5ForConditionalGeneration.from_pretrained(model_name)
+        _model.eval()
+        _MODEL_LOADED = True
+        logger.info("Model loaded successfully.")
+    except Exception as e:
+        logger.error(f"Failed to load model: {e}")
+        _MODEL_LOADED = False
+
+
+def paraphrase_with_model(text: str) -> str:
+    """Перефразирует текст с помощью ruT5-small."""
     if not text or len(text) < 10:
         return text
 
-    # Замены только для диалоговых тегов и частотных слов
-    replacements = {
-        r'\bсказал\b': random.choice(['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал']),
-        r'\bсказала\b': random.choice(['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала']),
-        r'\bспросил\b': random.choice(['поинтересовался', 'осведомился', 'полюбопытствовал']),
-        r'\bспросила\b': random.choice(['поинтересовалась', 'осведомилась', 'полюбопытствовала']),
-        r'\bответил\b': random.choice(['откликнулся', 'парировал', 'возразил']),
-        r'\bответила\b': random.choice(['откликнулась', 'парировала', 'возразила']),
-        r'\bочень\b': random.choice(['весьма', 'крайне', 'чрезвычайно']),
-        r'\bхорошо\b': random.choice(['превосходно', 'отлично', 'замечательно']),
-        r'\bбыстро\b': random.choice(['стремительно', 'мгновенно']),
-        r'\bмедленно\b': random.choice(['неспешно', 'неторопливо']),
-    }
+    if not _MODEL_LOADED:
+        load_model()
+        if not _MODEL_LOADED:
+            return text
 
-    for pattern, replacement in replacements.items():
-        # С вероятностью 30% заменяем (чтобы не было слишком однообразно)
-        if random.random() < 0.3:
-            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
-
-    return text
-
-
-# === ПЕРЕВОДЧИК С FALLBACK ===
-def translate_with_fallback(text: str, target_lang: str = "en", max_retries: int = 2) -> str:
-    if not text or len(text.strip()) < 2:
-        return text
-
-    # Проверка кеша
-    cache_key = f"{text[:50]}_{target_lang}"
-    if cache_key in translation_cache:
-        logger.info(f"Using cached translation for {target_lang}")
-        return translation_cache[cache_key]
-
-    # Попытка Google Translate (с сокращёнными ретраями)
-    url_google = "https://translate.googleapis.com/translate_a/single"
-    params = {
-        "client": "gtx",
-        "sl": "auto",
-        "tl": target_lang,
-        "dt": "t",
-        "q": text
-    }
-
-    for attempt in range(max_retries):
-        try:
-            resp = requests.get(url_google, params=params, timeout=8)
-            if resp.status_code == 200:
-                data = resp.json()
-                translated = "".join(item[0] for item in data[0] if item[0])
-                if translated:
-                    translation_cache[cache_key] = translated
-                    return translated
-            elif resp.status_code == 429:
-                wait = 1 + random.random()
-                logger.warning(f"Google 429 (attempt {attempt+1}), waiting {wait:.1f}s")
-                time.sleep(wait)
-                continue
-            else:
-                logger.warning(f"Google attempt {attempt+1} failed: {resp.status_code}")
-                time.sleep(0.5 + random.random())
-        except Exception as e:
-            logger.warning(f"Google exception: {e}")
-            time.sleep(0.5 + random.random())
-
-    # Fallback: минимальные локальные замены
-    logger.info(f"Translation failed for {target_lang}, applying minimal local changes.")
-    result = apply_minimal_local_changes(text)
-    translation_cache[cache_key] = result
-    return result
-
-
-def translate_chunk(text: str, chain: list) -> str:
-    if not text or len(text.strip()) < 2:
-        return text
     try:
-        current = text
-        for lang in chain:
-            current = translate_with_fallback(current, target_lang=lang)
-        ru = translate_with_fallback(current, target_lang="ru")
-        return ru
+        # Формируем промпт для T5
+        input_text = f"paraphrase: {text}"
+        inputs = _tokenizer(input_text, return_tensors="pt", truncation=True, max_length=256)
+
+        with torch.no_grad():
+            outputs = _model.generate(
+                **inputs,
+                max_length=256,
+                temperature=0.7,
+                do_sample=True,
+                top_p=0.9,
+                repetition_penalty=1.1,
+                num_beams=1
+            )
+        paraphrased = _tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+        # Если перефразирование не удалось, возвращаем исходный текст
+        if paraphrased and len(paraphrased) > 5:
+            return paraphrased
+        return text
     except Exception as e:
-        logger.error(f"Chain {chain} error: {e}")
+        logger.warning(f"Paraphrasing error: {e}")
         return text
 
 
@@ -141,8 +114,8 @@ def split_paragraphs(text: str) -> list:
     return [p.strip() for p in paragraphs if p.strip()]
 
 
-# === ВСТРОЕННЫЙ ДЕТЕКТОР HUMAN SCORE ===
 def get_human_score(text: str) -> int:
+    """Встроенный детектор HUMAN (для обратной связи)."""
     if not text or len(text) < 20:
         return 50
 
@@ -187,54 +160,34 @@ def get_human_score(text: str) -> int:
     return max(0, min(100, int(score)))
 
 
-def process_paragraph(paragraph: str, style: str = "neutral") -> dict:
+def process_paragraph(paragraph: str) -> dict:
+    """Обрабатывает один абзац локальной моделью."""
     if not paragraph:
-        return {"original": paragraph, "revised": paragraph, "status": "error", "chain": "none", "human_score": 0}
+        return {"original": paragraph, "revised": paragraph, "status": "error", "chain": "LOCAL", "human_score": 0}
 
-    # Только цепочка EN (RU→EN→RU)
-    chain = {"name": "EN", "langs": ["en"]}
+    # Применяем перефразирование
+    revised = paraphrase_with_model(paragraph)
 
-    logger.info(f"Processing paragraph: {paragraph[:50]}...")
-    revised = translate_chunk(paragraph, chain["langs"])
-    revised = re.sub(r'Vino quieren alejarte|Laboratorio, presupuesto|Empty Null: Final Drawings', '', revised)
-    revised = re.sub(r'««««Ибис»»»»', '«Ибис»', revised)
-    revised = revised.strip()
-
-    if revised and len(revised) > 0:
-        score = get_human_score(revised)
-        logger.info(f"Chain EN score: {score}")
-
-        # Определяем статус: если текст изменился — partial, если нет — error
-        if revised != paragraph:
-            status = "partial" if score < 50 else "done"
-        else:
-            status = "error"
-
-        return {
-            "original": paragraph,
-            "revised": revised,
-            "status": status,
-            "chain": chain["name"],
-            "human_score": score
+    # Если модель не изменила текст, применяем минимальные замены (резерв)
+    if revised == paragraph:
+        # Простые синонимы для диалоговых тегов
+        replacements = {
+            r'\bсказал\b': random.choice(['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал']),
+            r'\bсказала\b': random.choice(['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала']),
+            r'\bспросил\b': random.choice(['поинтересовался', 'осведомился', 'полюбопытствовал']),
+            r'\bспросила\b': random.choice(['поинтересовалась', 'осведомилась', 'полюбопытствовала']),
         }
+        for pattern, replacement in replacements.items():
+            revised = re.sub(pattern, replacement, revised, flags=re.IGNORECASE)
 
-    # Если перевод не удался, применяем минимальные локальные замены
-    revised = apply_minimal_local_changes(paragraph)
-    if revised != paragraph:
-        return {
-            "original": paragraph,
-            "revised": revised,
-            "status": "partial",
-            "chain": "LOCAL",
-            "human_score": get_human_score(revised)
-        }
+    score = get_human_score(revised)
 
     return {
         "original": paragraph,
-        "revised": paragraph,
-        "status": "error",
-        "chain": "none",
-        "human_score": 0
+        "revised": revised,
+        "status": "done" if score > 50 else "partial",
+        "chain": "LOCAL",
+        "human_score": score
     }
 
 
@@ -307,7 +260,7 @@ def api_revise():
 
         def generate():
             try:
-                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем обработку {total} абзацев..."})
+                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев..."})
 
                 results = []
                 for idx, para in enumerate(paragraphs):
@@ -318,14 +271,14 @@ def api_revise():
                     })
 
                     try:
-                        result = process_paragraph(para, style)
+                        result = process_paragraph(para)
                     except Exception as e:
                         logger.error(f"Paragraph {idx} processing error: {e}")
                         result = {
                             "original": para,
                             "revised": para,
                             "status": "error",
-                            "chain": "none",
+                            "chain": "LOCAL",
                             "human_score": 0
                         }
                     results.append(result)
@@ -368,7 +321,7 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": final_text,
                     "original_text": chapter_text,
-                    "summary": f"Обработано {total} абзацев. Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
+                    "summary": f"Обработано {total} абзацев локально (ruT5). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
                     "paragraphs": results,
                     "average_human_score": avg_score,
                     "overall_analysis": overall,
