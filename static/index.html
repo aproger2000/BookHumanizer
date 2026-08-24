@@ -30,6 +30,8 @@
         .btn-primary:disabled { background: #8fa2b8; cursor: not-allowed; transform: none; box-shadow: none; }
         .btn-secondary { background: #e4eaf2; color: #2c3e50; }
         .btn-secondary:hover { background: #d0d9e4; }
+        .btn-log { background: #d4e0f0; color: #1a2634; }
+        .btn-log:hover { background: #b8cce0; }
         .progress-container { margin-top: 12px; background: #eef3f8; border-radius: 8px; height: 6px; overflow: hidden; opacity: 0; flex-shrink: 0; transition: opacity 0.3s; }
         .progress-container.active { opacity: 1; }
         .progress-bar { height: 100%; width: 0%; background: #2c3e50; border-radius: 8px; transition: width 0.2s ease; }
@@ -104,8 +106,8 @@
         .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #d0d9e4; display: flex; justify-content: space-between; font-size: 12px; color: #8fa2b8; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
         .footer a { color: #6b7f94; text-decoration: none; }
         .footer a:hover { color: #2c3e50; }
-        .copy-btn { background: #eef3f8; border: 1px solid #d0d9e4; color: #2c3e50; padding: 4px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; transition: all 0.2s; }
-        .copy-btn:hover { background: #d0d9e4; }
+        .copy-btn, .copy-log-btn { background: #eef3f8; border: 1px solid #d0d9e4; color: #2c3e50; padding: 4px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; transition: all 0.2s; }
+        .copy-btn:hover, .copy-log-btn:hover { background: #d0d9e4; }
         .result-placeholder { color: #8fa2b8; font-style: italic; text-align: center; padding: 20px; }
         .avg-score-badge {
             background: #2c3e50;
@@ -232,6 +234,7 @@
                 <div style="display:flex; gap:8px; align-items:center;">
                     <span class="count" id="resultCount">0 симв.</span>
                     <button class="copy-btn" id="copyBtn">📋 Копировать</button>
+                    <button class="copy-log-btn" id="copyLogBtn">📋 Копировать LOG</button>
                 </div>
             </div>
             <div class="status-summary" id="statusSummary">
@@ -291,6 +294,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const checklistDiv = document.getElementById('checklist');
     const checklistItems = document.getElementById('checklistItems');
     const copyBtn = document.getElementById('copyBtn');
+    const copyLogBtn = document.getElementById('copyLogBtn');
     const avgScoreBadge = document.getElementById('avgScoreBadge');
     const overallAnalysis = document.getElementById('overallAnalysis');
     const overallStats = document.getElementById('overallStats');
@@ -301,6 +305,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const statusError = document.getElementById('statusError');
 
     let resultText = '';
+    let logText = '';
     let totalParagraphs = 0;
     let statusCounts = { done: 0, partial: 0, error: 0 };
 
@@ -311,7 +316,7 @@ document.addEventListener('DOMContentLoaded', function() {
         statusSummary.classList.add('visible');
     }
 
-    function addResultParagraph(index, text, status, chain, humanScore) {
+    function addResultParagraph(index, text, status, chain, humanScore, logs) {
         if (resultPlaceholder) resultPlaceholder.style.display = 'none';
         let el = document.getElementById('para-' + index);
         if (!el) {
@@ -328,6 +333,13 @@ document.addEventListener('DOMContentLoaded', function() {
         el.innerHTML = `<span class="text">${text}</span><span class="meta"><span class="status-icon">${statusIcon}</span>${chainBadge} ${scoreText}</span>`;
         updateResultCount();
         el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+
+        if (logs && logs.length) {
+            logText += `\n--- Абзац ${index+1} ---\n`;
+            logs.forEach(line => {
+                logText += line + '\n';
+            });
+        }
     }
 
     function updateResultCount() {
@@ -517,6 +529,27 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
+    copyLogBtn.addEventListener('click', function() {
+        if (!logText) {
+            statusText.textContent = '⚠️ Нет логов для копирования';
+            statusText.className = 'status-text error';
+            return;
+        }
+        navigator.clipboard.writeText(logText).then(() => {
+            statusText.textContent = '✅ Лог скопирован в буфер обмена';
+            statusText.className = 'status-text success';
+        }).catch(() => {
+            const textarea = document.createElement('textarea');
+            textarea.value = logText;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            statusText.textContent = '✅ Лог скопирован';
+            statusText.className = 'status-text success';
+        });
+    });
+
     editBtn.addEventListener('click', function() {
         const text = sourceText.value.trim();
         if (!text) {
@@ -546,6 +579,7 @@ document.addEventListener('DOMContentLoaded', function() {
         placeholder.textContent = 'Результат будет появляться здесь по мере обработки абзацев...';
         resultContainer.appendChild(placeholder);
         resultText = '';
+        logText = '';
         document.getElementById('resultCount').textContent = '0 симв.';
         avgScoreBadge.style.display = 'none';
         resetSteps();
@@ -660,7 +694,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 updateParagraphProgress(current, totalParas);
                 break;
             case 'paragraph_start':
-                addResultParagraph(event.index, event.original, 'processing', null, 0);
+                addResultParagraph(event.index, event.original, 'processing', null, 0, null);
                 updateSourceParagraph(event.index, 'processing');
                 break;
             case 'paragraph_status':
@@ -669,7 +703,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 else if (status === 'partial') statusCounts.partial++;
                 else statusCounts.error++;
                 updateStatusSummary(statusCounts);
-                addResultParagraph(event.index, event.revised, status, event.chain, event.human_score);
+                addResultParagraph(event.index, event.revised, status, event.chain, event.human_score, event.logs || []);
                 updateSourceParagraph(event.index, status);
                 break;
             case 'done':
@@ -737,8 +771,8 @@ document.addEventListener('DOMContentLoaded', function() {
             statusText.className = 'status-text success';
         })
         .catch(() => {
-            document.getElementById('versionBadge').textContent = 'v4.0.1';
-            document.getElementById('footerVersion').textContent = 'Chapter Editor v4.0.1 — локальное перефразирование';
+            document.getElementById('versionBadge').textContent = 'v4.1.0';
+            document.getElementById('footerVersion').textContent = 'Chapter Editor v4.1.0 — локальное перефразирование';
             statusText.textContent = '⚠️ Не удалось подключиться к серверу';
             statusText.className = 'status-text error';
         });
