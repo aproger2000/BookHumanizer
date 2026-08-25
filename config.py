@@ -4,7 +4,7 @@ config.py — настройки пост-обработки для Chapter Edit
 
 RANDOM_SEED = 42
 
-PROB_SYNONYMS = 0.6
+PROB_SYNONYMS = 0.7
 PROB_INSERTIONS = 0.3
 PROB_SWAP_FIRST_WORDS = 0.25
 PROB_SWAP_CLAUSES = 0.6
