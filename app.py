@@ -206,7 +206,7 @@ def post_process(text: str, logs: list = None) -> str:
     replacements = 0
     for word in words:
         clean = re.sub(r'[^a-zA-Zа-яА-Я]', '', word)
-        if clean.lower() in SYNONYMS and random.random() < 0.3:
+        if clean.lower() in SYNONYMS and random.random() < 0.45:
             syn = random.choice(SYNONYMS[clean.lower()])
             if clean[0].isupper():
                 syn = syn.capitalize()
