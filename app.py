@@ -83,7 +83,7 @@ def _sse(event_type: str, data: dict) -> str:
 
 
 def extract_features(text: str) -> dict:
-    """Извлекает признаки для модели (те же, что использовались при обучении)."""
+    """Извлекает признаки для модели."""
     features = {}
     letters = sum(1 for ch in text if ch.isalpha())
     if letters == 0:
@@ -141,14 +141,10 @@ def extract_features(text: str) -> dict:
 
 
 def get_human_score(text: str) -> int:
-    """
-    Использует обученную модель для предсказания HUMAN (в процентах).
-    Если модель не загружена, использует эвристический fallback.
-    """
+    """Использует обученную модель или эвристику."""
     if not text or len(text) < 20:
         return 50
 
-    # Если модель загружена – используем её
     if MODEL_LOADED and human_model is not None and feature_cols:
         try:
             features = extract_features(text)
@@ -156,10 +152,9 @@ def get_human_score(text: str) -> int:
             pred = human_model.predict(X)[0]
             return max(0, min(100, int(round(pred))))
         except Exception as e:
-            logger.warning(f"Ошибка при предсказании модели: {e}. Использую эвристику.")
-            # fallback на эвристику
+            logger.warning(f"Ошибка предсказания: {e}. Использую эвристику.")
 
-    # ======== Эвристический fallback (старый код) ========
+    # эвристический fallback (старый код)
     letters = sum(1 for ch in text if ch.isalpha())
     if letters == 0:
         return 80
@@ -189,7 +184,6 @@ def get_human_score(text: str) -> int:
         avg_len = sum(len(w) for w in words) / len(words)
         if avg_len < 3 or avg_len > 12:
             score -= 10
-
     word_counts = {}
     for w in words:
         w_lower = w.lower()
@@ -197,18 +191,16 @@ def get_human_score(text: str) -> int:
     max_repeat = max(word_counts.values()) if word_counts else 0
     if max_repeat > len(words) * 0.15:
         score -= 15
-
     return max(0, min(100, int(score)))
 
 
 def post_process(text: str, logs: list = None) -> str:
-    """Пост-обработка (синонимы, вставки, перестановки) — без изменений."""
     if not text or len(text) < 20:
         return text
     if logs is None:
         logs = []
 
-    # Синонимы (30%)
+    # синонимы 30%
     words = text.split(' ')
     new_words = []
     replacements = 0
@@ -227,7 +219,7 @@ def post_process(text: str, logs: list = None) -> str:
     if replacements:
         logs.append(f"  - заменено синонимов: {replacements}")
 
-    # Вставки (15%)
+    # вставки 15%
     sentences = re.split(r'(?<=[.!?])\s+', text)
     new_sentences = []
     inserted = 0
@@ -244,7 +236,7 @@ def post_process(text: str, logs: list = None) -> str:
     if inserted:
         logs.append(f"  - вставлено вводных слов: {inserted}")
 
-    # Перестановки (10%)
+    # перестановки 10%
     sentences = re.split(r'(?<=[.!?])\s+', text)
     new_sentences = []
     swapped = 0
@@ -263,7 +255,6 @@ def post_process(text: str, logs: list = None) -> str:
     return text
 
 
-# ========== Остальные функции без изменений ==========
 def split_paragraphs(text: str) -> list:
     if not text:
         return []
@@ -332,10 +323,117 @@ def health():
 
 @app.post("/api/revise")
 def api_revise():
-    # ... (код без изменений, как в v4.2.1)
-    # Если вы не хотите копировать весь огромный код, можете оставить старую функцию api_revise,
-    # но с обновлённым get_human_score.
-    pass
+    logger.info(f"=== api_revise: START (v{APP_VERSION}) ===")
+    try:
+        file_storage = request.files.get("file")
+        text = request.form.get("text", "")
+        style = request.form.get("style", "neutral")
+
+        if file_storage and file_storage.filename:
+            raw = file_storage.read()
+            chapter_text = raw.decode("utf-8", errors="replace")
+        elif text.strip():
+            chapter_text = text
+        else:
+            return jsonify(detail="Provide chapter text or upload a file."), 400
+
+        chapter_text = chapter_text.strip()
+        if not chapter_text:
+            return jsonify(detail="Chapter text is empty."), 400
+
+        if len(chapter_text) > MAX_CHARS:
+            chapter_text = chapter_text[:MAX_CHARS]
+            logger.warning(f"Truncated text to {MAX_CHARS} chars")
+
+        paragraphs = split_paragraphs(chapter_text)
+        total = len(paragraphs)
+        logger.info(f"Split into {total} paragraphs")
+
+        def generate():
+            try:
+                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев..."})
+
+                results = []
+                for idx, para in enumerate(paragraphs):
+                    yield _sse("paragraph_start", {
+                        "index": idx,
+                        "original": para,
+                        "status": "processing"
+                    })
+
+                    try:
+                        result = process_paragraph(para)
+                    except Exception as e:
+                        logger.error(f"Paragraph {idx} processing error: {e}")
+                        result = {
+                            "original": para,
+                            "revised": para,
+                            "status": "error",
+                            "chain": "LOCAL",
+                            "human_score": 0,
+                            "logs": [f"Ошибка: {str(e)}"]
+                        }
+                    results.append(result)
+
+                    yield _sse("paragraph_status", {
+                        "index": idx,
+                        "original": result["original"],
+                        "revised": result["revised"],
+                        "status": result["status"],
+                        "chain": result["chain"],
+                        "human_score": result.get("human_score", 0),
+                        "logs": result.get("logs", [])
+                    })
+
+                    yield _sse("progress", {
+                        "chars": idx + 1,
+                        "estimated_total": total,
+                        "percent": (idx + 1) / total * 100,
+                        "log": f"Обработано {idx+1}/{total} абзацев"
+                    })
+
+                    yield _sse("paragraph_progress", {
+                        "current": idx + 1,
+                        "total": total,
+                        "percent": (idx + 1) / total * 100
+                    })
+
+                final_text = "\n\n".join(r["revised"] for r in results)
+
+                scores = [r.get("human_score", 0) for r in results if r.get("human_score", 0) > 0]
+                avg_score = sum(scores) // len(scores) if scores else 0
+
+                overall = analyze_overall(final_text)
+
+                status_counts = {"done": 0, "partial": 0, "error": 0}
+                for r in results:
+                    status_counts[r.get("status", "error")] += 1
+
+                logger.info(f"Статусы абзацев: {status_counts}")
+
+                yield _sse("done", {
+                    "revised_text": final_text,
+                    "original_text": chapter_text,
+                    "summary": f"Обработано {total} абзацев. Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
+                    "paragraphs": results,
+                    "average_human_score": avg_score,
+                    "overall_analysis": overall,
+                    "status_counts": status_counts,
+                    "checklist": []
+                })
+            except Exception as e:
+                logger.exception("Unexpected error in generate")
+                yield _sse("error", {"detail": f"Unexpected error: {str(e)}"})
+
+        return Response(
+            stream_with_context(generate()),
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+        )
+
+    except Exception as e:
+        logger.exception("api_revise: Unexpected error")
+        return jsonify(detail=f"Server error: {str(e)}"), 500
 
 
 @app.get("/")
