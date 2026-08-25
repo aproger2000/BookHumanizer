@@ -1,5 +1,5 @@
 """
-Chapter Editor v4.4.0 — с вынесенными параметрами в config.py
+Chapter Editor v4.5.0 — с вынесенными параметрами в config.py
 """
 import json
 import os
@@ -506,6 +506,7 @@ def api_revise():
                 avg_score = sum(scores) // len(scores) if scores else 0
 
                 overall = analyze_overall(final_text)
+                logger.info(f"Overall analysis: {overall}")
 
                 status_counts = {"done": 0, "partial": 0, "error": 0}
                 for r in results:
