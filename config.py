@@ -5,15 +5,15 @@ config.py — настройки пост-обработки для Chapter Edit
 RANDOM_SEED = 42
 
 # Вероятности операций
-PROB_SYNONYMS = 0.6          # <-- меняйте здесь
-PROB_INSERTIONS = 0.3
-PROB_SWAP_FIRST_WORDS = 0.25
-PROB_SWAP_CLAUSES = 0.6
+PROB_SYNONYMS = 0.7          # <-- меняйте здесь
+PROB_INSERTIONS = 0.7
+PROB_SWAP_FIRST_WORDS = 0.7
+PROB_SWAP_CLAUSES = 0.7
 PROB_DIRECT_INDIRECT = 0.7
-PROB_INVERSION = 0.25
-PROB_INTERJECTIONS = 0.2
-PROB_PARTICLES = 0.15
-PROB_SWAP_SUBJECT_PREDICATE = 0.15
+PROB_INVERSION = 0.7
+PROB_INTERJECTIONS = 0.7
+PROB_PARTICLES = 0.7
+PROB_SWAP_SUBJECT_PREDICATE = 0.7
 
 # ===== ВАЖНО: СПИСОК КОРТЕЖЕЙ (паттерн, список синонимов) =====
 SYNONYMS_DICT = [
