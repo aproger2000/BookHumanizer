@@ -709,6 +709,16 @@ document.addEventListener('DOMContentLoaded', function() {
             case 'done':
                 markResolved();
                 setStep(2, 'Пост-обработка...');
+                // Добавляем общий анализ в лог
+                if (event.overall_analysis) {
+                    const oa = event.overall_analysis;
+                    logText += `\n--- Общий анализ ---\n`;
+                    logText += `AI: ${oa.AI}%\n`;
+                    logText += `LIKELY_AI: ${oa.LIKELY_AI}%\n`;
+                    logText += `LIKELY_HUMAN: ${oa.LIKELY_HUMAN}%\n`;
+                    logText += `HUMAN: ${oa.HUMAN}%\n`;
+                    logText += `SCORE: ${oa.score}%\n`;
+                }
                 resolve(event);
                 break;
             case 'error':
@@ -771,8 +781,8 @@ document.addEventListener('DOMContentLoaded', function() {
             statusText.className = 'status-text success';
         })
         .catch(() => {
-            document.getElementById('versionBadge').textContent = 'v4.1.0';
-            document.getElementById('footerVersion').textContent = 'Chapter Editor v4.1.0 — локальное перефразирование';
+            document.getElementById('versionBadge').textContent = 'v4.5.0';
+            document.getElementById('footerVersion').textContent = 'Chapter Editor v4.5.0 — локальное перефразирование';
             statusText.textContent = '⚠️ Не удалось подключиться к серверу';
             statusText.className = 'status-text error';
         });
