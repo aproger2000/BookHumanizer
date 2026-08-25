@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "4.4.0"
+APP_VERSION = "4.5.0"
 MAX_CHARS = 30_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
@@ -45,6 +45,7 @@ except Exception as e:
     logger.warning(f"Не удалось загрузить модель: {e}. Будет использована эвристика.")
 
 # ========== Используем словари из config ==========
+# ВАЖНО: SYNONYMS теперь список кортежей (паттерн, список синонимов)
 SYNONYMS = config.SYNONYMS_DICT
 INSERTIONS = config.INSERTIONS_LIST
 INTERJECTIONS = config.INTERJECTIONS_LIST
@@ -57,6 +58,7 @@ CLAUSE_CONJUNCTIONS = config.CLAUSE_CONJUNCTIONS
 def _sse(event_type: str, data: dict) -> str:
     payload = {"type": event_type, **data}
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
 
 def extract_features(text: str) -> dict:
     features = {}
@@ -114,6 +116,7 @@ def extract_features(text: str) -> dict:
 
     return features
 
+
 def get_human_score(text: str) -> int:
     if not text or len(text) < 20:
         return 50
@@ -162,6 +165,7 @@ def get_human_score(text: str) -> int:
         score -= 15
     return max(0, min(100, int(score)))
 
+
 def post_process(text: str, logs: list = None) -> str:
     if not text or len(text) < 20:
         return text
@@ -193,21 +197,21 @@ def post_process(text: str, logs: list = None) -> str:
 
     for op in ops:
         if op == 'synonyms':
-            words = text.split(' ')
-            new_words = []
+            # ===== ИСПРАВЛЕННЫЙ БЛОК ЗАМЕНЫ СИНОНИМОВ =====
             replacements = 0
-            for word in words:
-                clean = re.sub(r'[^a-zA-Zа-яА-Я]', '', word)
-                if clean.lower() in SYNONYMS and random.random() < 0.5:
-                    syn = random.choice(SYNONYMS[clean.lower()])
-                    if clean[0].isupper():
-                        syn = syn.capitalize()
-                    suffix = word[len(clean):]
-                    new_words.append(syn + suffix)
-                    replacements += 1
-                else:
-                    new_words.append(word)
-            text = ' '.join(new_words)
+            for pattern, syn_list in SYNONYMS:
+                if random.random() < config.PROB_SYNONYMS:
+                    # Находим все вхождения слова по паттерну
+                    matches = list(re.finditer(pattern, text, flags=re.IGNORECASE))
+                    if matches:
+                        match = random.choice(matches)
+                        word = match.group(0)
+                        syn = random.choice(syn_list)
+                        # Сохраняем регистр
+                        if word[0].isupper():
+                            syn = syn.capitalize()
+                        text = text[:match.start()] + syn + text[match.end():]
+                        replacements += 1
             if replacements:
                 logs.append(f"  - заменено синонимов: {replacements}")
 
@@ -360,13 +364,15 @@ def post_process(text: str, logs: list = None) -> str:
 
     return text
 
-# ========== Остальные функции без изменений ==========
+
+# ========== Остальные функции ==========
 def split_paragraphs(text: str) -> list:
     if not text:
         return []
     text = text.replace('\r\n', '\n')
     paragraphs = text.split('\n\n')
     return [p.strip() for p in paragraphs if p.strip()]
+
 
 def process_paragraph(paragraph: str) -> dict:
     if not paragraph:
@@ -386,10 +392,11 @@ def process_paragraph(paragraph: str) -> dict:
         "original": paragraph,
         "revised": revised,
         "status": "done" if score > 50 else "partial",
-        "chain": "LOCAL (v4.4.0)",
+        "chain": "LOCAL (v4.5.0)",
         "human_score": score,
         "logs": logs
     }
+
 
 def analyze_overall(text: str) -> dict:
     if not text or len(text) < 100:
@@ -419,9 +426,11 @@ def analyze_overall(text: str) -> dict:
     results["score"] = int(score)
     return results
 
+
 @app.get("/api/health")
 def health():
     return jsonify(status="ok", version=APP_VERSION)
+
 
 @app.post("/api/revise")
 def api_revise():
@@ -538,18 +547,22 @@ def api_revise():
         logger.exception("api_revise: Unexpected error")
         return jsonify(detail=f"Server error: {str(e)}"), 500
 
+
 @app.get("/")
 def index():
     return app.send_static_file("index.html")
+
 
 @app.errorhandler(HTTPException)
 def handle_http_exception(exc):
     return jsonify(detail=exc.description or str(exc)), exc.code or 500
 
+
 @app.errorhandler(Exception)
 def handle_exception(exc):
     logger.exception("Unhandled exception")
     return jsonify(detail=f"Server error: {str(exc)}"), 500
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
