@@ -15,18 +15,6 @@ from werkzeug.exceptions import HTTPException
 # Импортируем настройки из config.py
 import config
 
-# Если в config нет какого-то атрибута, используем запасные варианты
-SYNONYMS = getattr(config, 'SYNONYMS_DICT', [])
-INSERTIONS = getattr(config, 'INSERTIONS_LIST', [])
-INTERJECTIONS = getattr(config, 'INTERJECTIONS_LIST', [])
-PARTICLES = getattr(config, 'PARTICLES_LIST', [])
-ADVERBS = getattr(config, 'ADVERBS_LIST', [])
-REPORTING_VERBS = getattr(config, 'REPORTING_VERBS', [])
-CLAUSE_CONJUNCTIONS = getattr(config, 'CLAUSE_CONJUNCTIONS', [])
-CANCEL_CANCEL_DICT = getattr(config, 'CANCEL_CANCEL_DICT', [])
-AI_MARKERS = getattr(config, 'AI_MARKERS', [])
-COLLOQUIAL_PARTICLES = getattr(config, 'COLLOQUIAL_PARTICLES', [])
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -76,7 +64,7 @@ if config.USE_RU_T5:
             ru_tokenizer = T5Tokenizer.from_pretrained(model_name)
             ru_model = T5ForConditionalGeneration.from_pretrained(
                 model_name,
-                torch_dtype=torch.float16,      # экономия памяти
+                torch_dtype=torch.float16,
                 low_cpu_mem_usage=True
             )
             ru_model.eval()
@@ -107,7 +95,6 @@ def _sse(event_type: str, data: dict) -> str:
 
 
 def extract_features(text: str) -> dict:
-    # (без изменений, та же функция, что была)
     features = {}
     letters = sum(1 for ch in text if ch.isalpha())
     if letters == 0:
@@ -214,20 +201,338 @@ def get_human_score(text: str) -> int:
 
 
 def post_process(text: str, logs: list = None) -> str:
-    # (полная функция из предыдущей версии — без изменений)
-    # Для краткости я не дублирую её здесь, но она должна быть полностью скопирована из v4.6.1
-    # Она включает все операции: синонимы, вставки, перестановки, инверсии, опечатки и т.д.
-    pass
+    if not text or len(text) < 20:
+        return text
+    if logs is None:
+        logs = []
+
+    ops = []
+    if random.random() < config.PROB_SYNONYMS:
+        ops.append('synonyms')
+    if random.random() < config.PROB_INSERTIONS:
+        ops.append('insertions')
+    if random.random() < config.PROB_SWAP_FIRST_WORDS:
+        ops.append('swap_first_words')
+    if random.random() < config.PROB_INTERJECTIONS:
+        ops.append('interjections')
+    if random.random() < config.PROB_SWAP_CLAUSES:
+        ops.append('swap_clauses')
+    if random.random() < config.PROB_DIRECT_INDIRECT:
+        ops.append('direct_indirect')
+    if random.random() < config.PROB_INVERSION:
+        ops.append('inversion')
+    if random.random() < config.PROB_SWAP_SUBJECT_PREDICATE:
+        ops.append('swap_subject_predicate')
+    if random.random() < config.PROB_PARTICLES:
+        ops.append('insert_particles')
+    if random.random() < config.PROB_CANCEL_CANCEL:
+        ops.append('cancel_cancel')
+    if random.random() < config.PROB_REMOVE_AI_MARKERS:
+        ops.append('remove_ai_markers')
+    if random.random() < config.PROB_SPLIT_LONG_SENTENCES:
+        ops.append('split_long_sentences')
+    if random.random() < config.PROB_ADD_COLLOQUIAL:
+        ops.append('add_colloquial')
+    if random.random() < config.PROB_CHANGE_WORD_ORDER:
+        ops.append('change_word_order')
+    if random.random() < config.PROB_TYPOS:
+        ops.append('add_typos')
+
+    if not ops:
+        ops.append('synonyms')
+
+    for op in ops:
+        # ---------- synonyms ----------
+        if op == 'synonyms':
+            replacements = 0
+            for pattern, syn_list in SYNONYMS:
+                if random.random() < config.PROB_SYNONYMS:
+                    matches = list(re.finditer(pattern, text, flags=re.IGNORECASE))
+                    if matches:
+                        match = random.choice(matches)
+                        word = match.group(0)
+                        syn = random.choice(syn_list)
+                        if word[0].isupper():
+                            syn = syn.capitalize()
+                        text = text[:match.start()] + syn + text[match.end():]
+                        replacements += 1
+            if replacements:
+                logs.append(f"  - заменено синонимов: {replacements}")
+
+        # ---------- insertions ----------
+        elif op == 'insertions':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            inserted = 0
+            for sent in sentences:
+                if len(sent.split()) > 5 and random.random() < 0.3:
+                    words = sent.split()
+                    pos = random.randint(1, min(3, len(words)-1))
+                    ins = random.choice(INSERTIONS)
+                    words.insert(pos, ins + ',')
+                    sent = ' '.join(words)
+                    inserted += 1
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if inserted:
+                logs.append(f"  - вставлено вводных слов: {inserted}")
+
+        # ---------- swap_first_words ----------
+        elif op == 'swap_first_words':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            swapped = 0
+            for sent in sentences:
+                if len(sent.split()) > 4 and random.random() < 0.25:
+                    words = sent.split()
+                    if len(words) >= 3 and not words[0].startswith(('—', '"', '«')):
+                        words[0], words[1] = words[1], words[0]
+                        sent = ' '.join(words)
+                        swapped += 1
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if swapped:
+                logs.append(f"  - перестановок первых слов: {swapped}")
+
+        # ---------- interjections ----------
+        elif op == 'interjections':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            inserted_interj = 0
+            for sent in sentences:
+                if re.match(r'^[—"«]', sent) and random.random() < 0.2:
+                    ins = random.choice(INTERJECTIONS)
+                    match = re.search(r'^([—"«])\s*', sent)
+                    if match:
+                        prefix = match.group(0)
+                        rest = sent[len(prefix):]
+                        sent = prefix + ins + ', ' + rest[0].lower() + rest[1:] if rest else prefix + ins
+                        inserted_interj += 1
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if inserted_interj:
+                logs.append(f"  - вставлено междометий: {inserted_interj}")
+
+        # ---------- swap_clauses ----------
+        elif op == 'swap_clauses':
+            def swap_clauses(text):
+                patterns = [
+                    (r'(.+?)\s+когда\s+(.+?)([.!?])', r'Когда \2, \1\3'),
+                    (r'(.+?)\s+если\s+(.+?)([.!?])', r'Если \2, \1\3'),
+                    (r'(.+?)\s+потому что\s+(.+?)([.!?])', r'Потому что \2, \1\3'),
+                    (r'(.+?)\s+хотя\s+(.+?)([.!?])', r'Хотя \2, \1\3'),
+                    (r'(.+?)\s+чтобы\s+(.+?)([.!?])', r'Чтобы \2, \1\3'),
+                ]
+                for pattern, repl in patterns:
+                    text = re.sub(pattern, repl, text, flags=re.DOTALL)
+                return text
+            new_text = swap_clauses(text)
+            if new_text != text:
+                logs.append("  - перестановка частей (когда/если/потому что/хотя/чтобы)")
+                text = new_text
+
+        # ---------- direct_indirect ----------
+        elif op == 'direct_indirect':
+            def replace_direct_indirect(text):
+                pattern = re.compile(r'—\s*(.+?)\s*,\s*—\s*(' + '|'.join(REPORTING_VERBS) + r')\s+([а-яА-ЯёЁ]+)\.?')
+                def repl(m):
+                    text_part = m.group(1).strip()
+                    verb = m.group(2)
+                    who = m.group(3)
+                    if verb.endswith('а'):
+                        who_form = who
+                        if who in ('он', 'Алексей', 'Масарик', 'Кросс'):
+                            who_form = 'она'
+                    else:
+                        who_form = who
+                    return f"{who_form} {verb}, что {text_part.lower()}."
+                return pattern.sub(repl, text)
+            new_text = replace_direct_indirect(text)
+            if new_text != text:
+                logs.append("  - замена прямой речи на косвенную")
+                text = new_text
+
+        # ---------- inversion ----------
+        elif op == 'inversion':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            inverted = 0
+            for sent in sentences:
+                words = sent.split()
+                if len(words) >= 4:
+                    for i in range(len(words)-1, max(0, len(words)-3), -1):
+                        if words[i].lower().rstrip('.,!?') in ADVERBS:
+                            adv = words.pop(i)
+                            adv_clean = adv.rstrip('.,!?')
+                            words.insert(0, adv_clean + ',')
+                            sent = ' '.join(words)
+                            inverted += 1
+                            break
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if inverted:
+                logs.append(f"  - инверсий (вынос обстоятельства): {inverted}")
+
+        # ---------- swap_subject_predicate ----------
+        elif op == 'swap_subject_predicate':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            swapped_sp = 0
+            for sent in sentences:
+                if len(sent.split()) >= 4:
+                    words = sent.split()
+                    if not words[0].startswith(('—', '"', '«')):
+                        for i in range(0, min(3, len(words)-2)):
+                            if words[i].lower() in ['он', 'она', 'оно', 'они', 'мы', 'вы', 'ты', 'я', 'алексей', 'анна', 'рио', 'лео', 'кросс', 'масарик', 'надира']:
+                                for j in range(i+1, min(i+4, len(words))):
+                                    if words[j].endswith(('ить', 'ать', 'ять', 'еть', 'уть', 'чь')):
+                                        words[i], words[j] = words[j], words[i]
+                                        sent = ' '.join(words)
+                                        swapped_sp += 1
+                                        break
+                                break
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if swapped_sp:
+                logs.append(f"  - перестановок подлежащего/сказуемого: {swapped_sp}")
+
+        # ---------- insert_particles ----------
+        elif op == 'insert_particles':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            inserted_particles = 0
+            for sent in sentences:
+                if len(sent.split()) > 3 and random.random() < 0.3:
+                    words = sent.split()
+                    pos = random.randint(0, min(2, len(words)-1))
+                    part = random.choice(PARTICLES)
+                    words.insert(pos, part)
+                    sent = ' '.join(words)
+                    inserted_particles += 1
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if inserted_particles:
+                logs.append(f"  - вставлено частиц: {inserted_particles}")
+
+        # ---------- cancel_cancel ----------
+        elif op == 'cancel_cancel':
+            replacements = 0
+            for pattern, replacement in CANCEL_CANCEL_DICT:
+                if re.search(pattern, text, flags=re.IGNORECASE):
+                    text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+                    replacements += 1
+            if replacements:
+                logs.append(f"  - заменено канцеляризмов: {replacements}")
+
+        # ---------- remove_ai_markers ----------
+        elif op == 'remove_ai_markers':
+            removed = 0
+            for marker in AI_MARKERS:
+                pattern = r'\s*' + re.escape(marker) + r'\s*,?\s*'
+                if re.search(pattern, text, flags=re.IGNORECASE):
+                    text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+                    removed += 1
+            if removed:
+                logs.append(f"  - удалено AI-маркеров: {removed}")
+
+        # ---------- split_long_sentences ----------
+        elif op == 'split_long_sentences':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            split_count = 0
+            for sent in sentences:
+                words = sent.split()
+                if len(words) > 25:
+                    conjunctions = [' и ', ' а ', ' но ', ' что ', ' чтобы ', ' когда ', ' если ', ' потому что ']
+                    best_pos = -1
+                    for conj in conjunctions:
+                        pos = sent.find(conj)
+                        if pos != -1:
+                            best_pos = pos
+                            break
+                    if best_pos != -1:
+                        part1 = sent[:best_pos].strip()
+                        part2 = sent[best_pos + len(conj):].strip()
+                        if len(part1.split()) > 5 and len(part2.split()) > 5:
+                            new_sentences.append(part1 + '.')
+                            new_sentences.append(part2 + '.')
+                            split_count += 1
+                            continue
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if split_count:
+                logs.append(f"  - разбито длинных предложений: {split_count}")
+
+        # ---------- add_colloquial ----------
+        elif op == 'add_colloquial':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            added = 0
+            for sent in sentences:
+                if len(sent.split()) > 3 and random.random() < 0.3:
+                    words = sent.split()
+                    pos = random.randint(0, min(2, len(words)-1))
+                    particle = random.choice(COLLOQUIAL_PARTICLES)
+                    words.insert(pos, particle)
+                    sent = ' '.join(words)
+                    added += 1
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if added:
+                logs.append(f"  - добавлено разговорных частиц: {added}")
+
+        # ---------- change_word_order ----------
+        elif op == 'change_word_order':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            changed = 0
+            for sent in sentences:
+                words = sent.split()
+                if len(words) >= 4:
+                    for i in range(len(words)-1, 0, -1):
+                        word = words[i].lower().rstrip('.,!?')
+                        if word.endswith('о') or word.endswith('е') or word in ADVERBS:
+                            adv = words.pop(i)
+                            adv_clean = adv.rstrip('.,!?')
+                            words.insert(0, adv_clean + ',')
+                            sent = ' '.join(words)
+                            changed += 1
+                            break
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if changed:
+                logs.append(f"  - изменений порядка слов (усиленная инверсия): {changed}")
+
+        # ---------- add_typos ----------
+        elif op == 'add_typos':
+            chars = list(text)
+            typo_count = 0
+            replacements = {
+                'а': 'о', 'о': 'а', 'е': 'и', 'и': 'е',
+                'н': 'т', 'т': 'н', 'с': 'з', 'з': 'с',
+                'р': 'п', 'п': 'р', 'л': 'м', 'м': 'л',
+                'в': 'б', 'б': 'в', 'к': 'н', 'н': 'к',
+            }
+            for i in range(len(chars)):
+                if chars[i].isalpha() and random.random() < 0.02:
+                    lower_char = chars[i].lower()
+                    if lower_char in replacements:
+                        replacement = replacements[lower_char]
+                        if chars[i].isupper():
+                            replacement = replacement.upper()
+                        chars[i] = replacement
+                        typo_count += 1
+            text = ''.join(chars)
+            if typo_count:
+                logs.append(f"  - добавлено опечаток: {typo_count}")
+
+    return text
 
 
+# ========== Функция перефразирования через ruT5 ==========
 def rewrite_with_ru_t5(text: str, logs: list = None) -> str:
-    """
-    Перефразирует текст с помощью ruT5-tiny.
-    Возвращает лучший вариант из нескольких попыток.
-    """
     if not RU_T5_AVAILABLE:
         return text
-
     if not text or len(text) < config.MIN_PARAGRAPH_LENGTH:
         return text
 
@@ -269,6 +574,7 @@ def rewrite_with_ru_t5(text: str, logs: list = None) -> str:
     return best_text
 
 
+# ========== Обработка абзаца ==========
 def process_paragraph(paragraph: str) -> dict:
     if not paragraph:
         return {
@@ -281,7 +587,6 @@ def process_paragraph(paragraph: str) -> dict:
         }
 
     logs = []
-    # Сначала оцениваем оригинал
     original_score = get_human_score(paragraph)
     logs.append(f"Оригинальный HUMAN: {original_score}%")
 
@@ -338,11 +643,37 @@ def process_paragraph(paragraph: str) -> dict:
     }
 
 
+# ========== Общий анализ ==========
 def analyze_overall(text: str) -> dict:
-    # (без изменений)
-    pass
+    if not text or len(text) < 100:
+        return {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0, "score": 0}
+    segments = re.split(r'(?<=[.!?])\s+', text)
+    if len(segments) < 3:
+        return {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0, "score": 0}
+    results = {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0}
+    for seg in segments:
+        if len(seg) < 15:
+            continue
+        score = get_human_score(seg)
+        if score < 30:
+            results["AI"] += 1
+        elif score < 50:
+            results["LIKELY_AI"] += 1
+        elif score < 70:
+            results["LIKELY_HUMAN"] += 1
+        else:
+            results["HUMAN"] += 1
+    total = sum(results.values())
+    if total == 0:
+        return {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0, "score": 0}
+    for k in results:
+        results[k] = int(results[k] / total * 100)
+    score = results["HUMAN"] * 1.0 + results["LIKELY_HUMAN"] * 0.7 + results["LIKELY_AI"] * 0.3
+    results["score"] = int(score)
+    return results
 
 
+# ========== Flask endpoints ==========
 @app.get("/api/health")
 def health():
     return jsonify(status="ok", version=APP_VERSION)
@@ -350,15 +681,136 @@ def health():
 
 @app.post("/api/revise")
 def api_revise():
-    # (без изменений, полная функция из предыдущих версий)
-    pass
+    logger.info(f"=== api_revise: START (v{APP_VERSION}) ===")
+    try:
+        file_storage = request.files.get("file")
+        text = request.form.get("text", "")
+        style = request.form.get("style", "neutral")
+
+        if file_storage and file_storage.filename:
+            raw = file_storage.read()
+            chapter_text = raw.decode("utf-8", errors="replace")
+        elif text.strip():
+            chapter_text = text
+        else:
+            return jsonify(detail="Provide chapter text or upload a file."), 400
+
+        chapter_text = chapter_text.strip()
+        if not chapter_text:
+            return jsonify(detail="Chapter text is empty."), 400
+
+        if len(chapter_text) > MAX_CHARS:
+            chapter_text = chapter_text[:MAX_CHARS]
+            logger.warning(f"Truncated text to {MAX_CHARS} chars")
+
+        paragraphs = split_paragraphs(chapter_text)
+        total = len(paragraphs)
+        logger.info(f"Split into {total} paragraphs")
+
+        def generate():
+            try:
+                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев (v4.7.0)..."})
+
+                results = []
+                for idx, para in enumerate(paragraphs):
+                    yield _sse("paragraph_start", {
+                        "index": idx,
+                        "original": para,
+                        "status": "processing"
+                    })
+
+                    try:
+                        result = process_paragraph(para)
+                    except Exception as e:
+                        logger.error(f"Paragraph {idx} processing error: {e}")
+                        result = {
+                            "original": para,
+                            "revised": para,
+                            "status": "error",
+                            "chain": "LOCAL",
+                            "human_score": 0,
+                            "logs": [f"Ошибка: {str(e)}"]
+                        }
+                    results.append(result)
+
+                    yield _sse("paragraph_status", {
+                        "index": idx,
+                        "original": result["original"],
+                        "revised": result["revised"],
+                        "status": result["status"],
+                        "chain": result["chain"],
+                        "human_score": result.get("human_score", 0),
+                        "logs": result.get("logs", [])
+                    })
+
+                    yield _sse("progress", {
+                        "chars": idx + 1,
+                        "estimated_total": total,
+                        "percent": (idx + 1) / total * 100,
+                        "log": f"Обработано {idx+1}/{total} абзацев"
+                    })
+
+                    yield _sse("paragraph_progress", {
+                        "current": idx + 1,
+                        "total": total,
+                        "percent": (idx + 1) / total * 100
+                    })
+
+                final_text = "\n\n".join(r["revised"] for r in results)
+
+                scores = [r.get("human_score", 0) for r in results if r.get("human_score", 0) > 0]
+                avg_score = sum(scores) // len(scores) if scores else 0
+
+                overall = analyze_overall(final_text)
+                logger.info(f"Overall analysis: {overall}")
+
+                status_counts = {"done": 0, "partial": 0, "error": 0}
+                for r in results:
+                    status_counts[r.get("status", "error")] += 1
+
+                logger.info(f"Статусы абзацев: {status_counts}")
+
+                yield _sse("done", {
+                    "revised_text": final_text,
+                    "original_text": chapter_text,
+                    "summary": f"Обработано {total} абзацев (v4.7.0). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
+                    "paragraphs": results,
+                    "average_human_score": avg_score,
+                    "overall_analysis": overall,
+                    "status_counts": status_counts,
+                    "checklist": []
+                })
+            except Exception as e:
+                logger.exception("Unexpected error in generate")
+                yield _sse("error", {"detail": f"Unexpected error: {str(e)}"})
+
+        return Response(
+            stream_with_context(generate()),
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+        )
+
+    except Exception as e:
+        logger.exception("api_revise: Unexpected error")
+        return jsonify(detail=f"Server error: {str(e)}"), 500
 
 
+# ========== Вспомогательная функция разбиения на абзацы ==========
+def split_paragraphs(text: str) -> list:
+    if not text:
+        return []
+    text = text.replace('\r\n', '\n')
+    paragraphs = text.split('\n\n')
+    return [p.strip() for p in paragraphs if p.strip()]
+
+
+# ========== Статическая страница ==========
 @app.get("/")
 def index():
     return app.send_static_file("index.html")
 
 
+# ========== Обработчики ошибок ==========
 @app.errorhandler(HTTPException)
 def handle_http_exception(exc):
     return jsonify(detail=exc.description or str(exc)), exc.code or 500
@@ -367,9 +819,10 @@ def handle_http_exception(exc):
 @app.errorhandler(Exception)
 def handle_exception(exc):
     logger.exception("Unhandled exception")
-    return jsonify(detail=f"Server error: {str(e)}"), 500
+    return jsonify(detail=f"Server error: {str(exc)}"), 500
 
 
+# ========== Запуск ==========
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port, debug=False)
