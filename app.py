@@ -1,5 +1,5 @@
 """
-Chapter Editor v4.7.0 — с выборочным перефразированием через ruT5-tiny
+Chapter Editor v4.6.2 — пост-обработка (без ruT5)
 """
 import json
 import os
@@ -21,16 +21,13 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "4.7.0"
+APP_VERSION = "4.6.2"
 MAX_CHARS = 30_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 
 random.seed(config.RANDOM_SEED)
-
-# Глобальный счётчик для ограничения числа абзацев, обрабатываемых ruT5
-_ru_t5_paragraph_counter = 0
 
 # ========== Загрузка калибровочной модели ==========
 MODEL_LOADED = False
@@ -45,38 +42,6 @@ try:
     logger.info("Калибровочная модель HUMAN загружена.")
 except Exception as e:
     logger.warning(f"Не удалось загрузить калибровочную модель: {e}")
-
-# ========== Инициализация ruT5 ==========
-RU_T5_AVAILABLE = False
-ru_model = None
-ru_tokenizer = None
-
-if config.USE_RU_T5:
-    try:
-        from transformers import T5ForConditionalGeneration, T5Tokenizer
-        import torch
-        TRANSFORMERS_AVAILABLE = True
-    except ImportError:
-        TRANSFORMERS_AVAILABLE = False
-        logger.warning("transformers/torch не установлены, ruT5 недоступен.")
-
-    if TRANSFORMERS_AVAILABLE:
-        try:
-            model_name = "cointegrated/ruT5-tiny"
-            logger.info(f"Загрузка {model_name}...")
-            ru_tokenizer = T5Tokenizer.from_pretrained(model_name)
-            ru_model = T5ForConditionalGeneration.from_pretrained(
-                model_name,
-                torch_dtype=torch.float16,
-                low_cpu_mem_usage=True
-            )
-            ru_model.eval()
-            RU_T5_AVAILABLE = True
-            logger.info("ruT5-tiny загружена успешно.")
-        except Exception as e:
-            logger.warning(f"Не удалось загрузить ruT5: {e}")
-else:
-    logger.info("ruT5 отключён в конфиге.")
 
 # ========== Используем словари из config ==========
 SYNONYMS = config.SYNONYMS_DICT
@@ -165,7 +130,7 @@ def get_human_score(text: str) -> int:
             return max(0, min(100, int(round(pred))))
         except Exception as e:
             logger.warning(f"Ошибка предсказания: {e}. Использую эвристику.")
-    # эвристический fallback (старый код)
+    # эвристический fallback
     letters = sum(1 for ch in text if ch.isalpha())
     if letters == 0:
         return 80
@@ -532,55 +497,8 @@ def post_process(text: str, logs: list = None) -> str:
     return text
 
 
-# ========== Функция перефразирования через ruT5 ==========
-def rewrite_with_ru_t5(text: str, logs: list = None) -> str:
-    if not RU_T5_AVAILABLE:
-        return text
-    if not text or len(text) < config.MIN_PARAGRAPH_LENGTH:
-        return text
-
-    best_text = text
-    best_score = 0
-
-    for attempt in range(config.RU_T5_ATTEMPTS):
-        try:
-            input_text = f"paraphrase: {text}"
-            inputs = ru_tokenizer(input_text, return_tensors="pt", truncation=True, max_length=256)
-
-            with torch.no_grad():
-                outputs = ru_model.generate(
-                    **inputs,
-                    max_length=256,
-                    temperature=config.RU_T5_TEMPERATURE,
-                    do_sample=True,
-                    top_p=0.95,
-                    repetition_penalty=1.2,
-                    num_beams=1
-                )
-            paraphrased = ru_tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-            if paraphrased and len(paraphrased) > 5:
-                # После модели можно применить лёгкую пост-обработку
-                post_logs = []
-                paraphrased = post_process(paraphrased, logs=post_logs)
-                score = get_human_score(paraphrased)
-                if logs is not None:
-                    logs.append(f"Попытка {attempt+1}: '{paraphrased[:50]}...' (HUMAN={score}%)")
-                    logs.extend([f"  {l}" for l in post_logs])
-                if score > best_score:
-                    best_score = score
-                    best_text = paraphrased
-        except Exception as e:
-            logger.warning(f"ruT5 попытка {attempt+1} ошибка: {e}")
-            continue
-
-    return best_text
-
-
 # ========== Обработка абзаца ==========
 def process_paragraph(paragraph: str) -> dict:
-    global _ru_t5_paragraph_counter
-
     if not paragraph:
         return {
             "original": paragraph,
@@ -595,7 +513,6 @@ def process_paragraph(paragraph: str) -> dict:
     original_score = get_human_score(paragraph)
     logs.append(f"Оригинальный HUMAN: {original_score}%")
 
-    # Если абзац уже хороший (>50) — оставляем как есть
     if original_score >= 50:
         return {
             "original": paragraph,
@@ -606,40 +523,7 @@ def process_paragraph(paragraph: str) -> dict:
             "logs": logs + ["Абзац уже имеет HUMAN >= 50, пропущен"]
         }
 
-    # Проверяем, можно ли использовать ruT5 для этого абзаца
-    use_ru_t5 = (
-        config.USE_RU_T5 and
-        RU_T5_AVAILABLE and
-        len(paragraph) >= config.MIN_PARAGRAPH_LENGTH and
-        _ru_t5_paragraph_counter < config.MAX_PARAGRAPHS_FOR_RU_T5
-    )
-
-    if use_ru_t5:
-        _ru_t5_paragraph_counter += 1
-        model_logs = []
-        model_text = rewrite_with_ru_t5(paragraph, logs=model_logs)
-        if model_text != paragraph:
-            model_score = get_human_score(model_text)
-            logs.extend(model_logs)
-            logs.append(f"После ruT5 HUMAN: {model_score}%")
-            # Если модель улучшила результат — берём её вариант
-            if model_score > original_score:
-                # Применяем лёгкую пост-обработку к результату модели
-                final_logs = []
-                final_text = post_process(model_text, logs=final_logs)
-                final_score = get_human_score(final_text)
-                logs.extend(final_logs)
-                logs.append(f"Итоговый HUMAN: {final_score}%")
-                return {
-                    "original": paragraph,
-                    "revised": final_text,
-                    "status": "done" if final_score > 50 else "partial",
-                    "chain": "LOCAL (ruT5 + post)",
-                    "human_score": final_score,
-                    "logs": logs
-                }
-
-    # Если модель не помогла или недоступна — применяем только пост-обработку
+    # Только пост-обработка
     post_logs = []
     revised = post_process(paragraph, logs=post_logs)
     score = get_human_score(revised)
@@ -694,9 +578,6 @@ def health():
 
 @app.post("/api/revise")
 def api_revise():
-    global _ru_t5_paragraph_counter
-    _ru_t5_paragraph_counter = 0   # сброс для нового запроса
-
     logger.info(f"=== api_revise: START (v{APP_VERSION}) ===")
     try:
         file_storage = request.files.get("file")
@@ -725,7 +606,7 @@ def api_revise():
 
         def generate():
             try:
-                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев (v4.7.0)..."})
+                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев (v4.6.2)..."})
 
                 results = []
                 for idx, para in enumerate(paragraphs):
@@ -789,7 +670,7 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": final_text,
                     "original_text": chapter_text,
-                    "summary": f"Обработано {total} абзацев (v4.7.0). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
+                    "summary": f"Обработано {total} абзацев (v4.6.2). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
                     "paragraphs": results,
                     "average_human_score": avg_score,
                     "overall_analysis": overall,
