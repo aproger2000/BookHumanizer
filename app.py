@@ -1,5 +1,5 @@
 """
-Chapter Editor v4.5.0 — с вынесенными параметрами в config.py
+Chapter Editor v4.6.0 — с интеграцией логики humanizer-ru
 """
 import json
 import os
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "4.5.0"
+APP_VERSION = "4.6.0"
 MAX_CHARS = 30_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
@@ -45,7 +45,6 @@ except Exception as e:
     logger.warning(f"Не удалось загрузить модель: {e}. Будет использована эвристика.")
 
 # ========== Используем словари из config ==========
-# ВАЖНО: SYNONYMS теперь список кортежей (паттерн, список синонимов)
 SYNONYMS = config.SYNONYMS_DICT
 INSERTIONS = config.INSERTIONS_LIST
 INTERJECTIONS = config.INTERJECTIONS_LIST
@@ -53,6 +52,11 @@ PARTICLES = config.PARTICLES_LIST
 ADVERBS = config.ADVERBS_LIST
 REPORTING_VERBS = config.REPORTING_VERBS
 CLAUSE_CONJUNCTIONS = config.CLAUSE_CONJUNCTIONS
+
+# Новые словари
+CANCEL_CANCEL_DICT = config.CANCEL_CANCEL_DICT
+AI_MARKERS = config.AI_MARKERS
+COLLOQUIAL_PARTICLES = config.COLLOQUIAL_PARTICLES
 
 # ========== Вспомогательные функции ==========
 def _sse(event_type: str, data: dict) -> str:
@@ -128,7 +132,7 @@ def get_human_score(text: str) -> int:
             return max(0, min(100, int(round(pred))))
         except Exception as e:
             logger.warning(f"Ошибка предсказания: {e}. Использую эвристику.")
-    # эвристический fallback
+    # эвристический fallback (без изменений)
     letters = sum(1 for ch in text if ch.isalpha())
     if letters == 0:
         return 80
@@ -172,6 +176,7 @@ def post_process(text: str, logs: list = None) -> str:
     if logs is None:
         logs = []
 
+    # Формируем список операций с вероятностями из config
     ops = []
     if random.random() < config.PROB_SYNONYMS:
         ops.append('synonyms')
@@ -192,22 +197,33 @@ def post_process(text: str, logs: list = None) -> str:
     if random.random() < config.PROB_PARTICLES:
         ops.append('insert_particles')
 
-    if not ops:
-        ops.append('synonyms')
+    # НОВЫЕ ОПЕРАЦИИ
+    if random.random() < config.PROB_CANCEL_CANCEL:
+        ops.append('cancel_cancel')
+    if random.random() < config.PROB_REMOVE_AI_MARKERS:
+        ops.append('remove_ai_markers')
+    if random.random() < config.PROB_SPLIT_LONG_SENTENCES:
+        ops.append('split_long_sentences')
+    if random.random() < config.PROB_ADD_COLLOQUIAL:
+        ops.append('add_colloquial')
+    # change_word_order используем как усиленную инверсию – отдельная операция
+    if random.random() < config.PROB_CHANGE_WORD_ORDER:
+        ops.append('change_word_order')
 
+    if not ops:
+        ops.append('synonyms')  # гарантия хоть какой-то обработки
+
+    # Применяем операции
     for op in ops:
         if op == 'synonyms':
-            # ===== ИСПРАВЛЕННЫЙ БЛОК ЗАМЕНЫ СИНОНИМОВ =====
             replacements = 0
             for pattern, syn_list in SYNONYMS:
                 if random.random() < config.PROB_SYNONYMS:
-                    # Находим все вхождения слова по паттерну
                     matches = list(re.finditer(pattern, text, flags=re.IGNORECASE))
                     if matches:
                         match = random.choice(matches)
                         word = match.group(0)
                         syn = random.choice(syn_list)
-                        # Сохраняем регистр
                         if word[0].isupper():
                             syn = syn.capitalize()
                         text = text[:match.start()] + syn + text[match.end():]
@@ -362,10 +378,98 @@ def post_process(text: str, logs: list = None) -> str:
             if inserted_particles:
                 logs.append(f"  - вставлено частиц: {inserted_particles}")
 
+        # ===== НОВЫЕ ОПЕРАЦИИ =====
+
+        elif op == 'cancel_cancel':
+            replacements = 0
+            for pattern, replacement in CANCEL_CANCEL_DICT:
+                if re.search(pattern, text, flags=re.IGNORECASE):
+                    text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+                    replacements += 1
+            if replacements:
+                logs.append(f"  - заменено канцеляризмов: {replacements}")
+
+        elif op == 'remove_ai_markers':
+            removed = 0
+            for marker in AI_MARKERS:
+                pattern = r'\s*' + re.escape(marker) + r'\s*,?\s*'
+                if re.search(pattern, text, flags=re.IGNORECASE):
+                    text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+                    removed += 1
+            if removed:
+                logs.append(f"  - удалено AI-маркеров: {removed}")
+
+        elif op == 'split_long_sentences':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            split_count = 0
+            for sent in sentences:
+                words = sent.split()
+                if len(words) > 25:
+                    conjunctions = [' и ', ' а ', ' но ', ' что ', ' чтобы ', ' когда ', ' если ', ' потому что ']
+                    best_pos = -1
+                    for conj in conjunctions:
+                        pos = sent.find(conj)
+                        if pos != -1:
+                            best_pos = pos
+                            break
+                    if best_pos != -1:
+                        part1 = sent[:best_pos].strip()
+                        part2 = sent[best_pos + len(conj):].strip()
+                        if len(part1.split()) > 5 and len(part2.split()) > 5:
+                            new_sentences.append(part1 + '.')
+                            new_sentences.append(part2 + '.')
+                            split_count += 1
+                            continue
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if split_count:
+                logs.append(f"  - разбито длинных предложений: {split_count}")
+
+        elif op == 'add_colloquial':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            added = 0
+            for sent in sentences:
+                if len(sent.split()) > 3 and random.random() < 0.3:
+                    words = sent.split()
+                    pos = random.randint(0, min(2, len(words)-1))
+                    particle = random.choice(COLLOQUIAL_PARTICLES)
+                    words.insert(pos, particle)
+                    sent = ' '.join(words)
+                    added += 1
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if added:
+                logs.append(f"  - добавлено разговорных частиц: {added}")
+
+        elif op == 'change_word_order':
+            # Усиленная инверсия – пробуем вынести любое наречие в начало
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            changed = 0
+            for sent in sentences:
+                words = sent.split()
+                if len(words) >= 4:
+                    # Ищем наречие (заканчивается на "о" или "е")
+                    for i in range(len(words)-1, 0, -1):
+                        word = words[i].lower().rstrip('.,!?')
+                        if word.endswith('о') or word.endswith('е') or word in ADVERBS:
+                            adv = words.pop(i)
+                            adv_clean = adv.rstrip('.,!?')
+                            words.insert(0, adv_clean + ',')
+                            sent = ' '.join(words)
+                            changed += 1
+                            break
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if changed:
+                logs.append(f"  - изменений порядка слов (усиленная инверсия): {changed}")
+
     return text
 
 
-# ========== Остальные функции ==========
+# ========== Остальные функции без изменений ==========
 def split_paragraphs(text: str) -> list:
     if not text:
         return []
@@ -392,7 +496,7 @@ def process_paragraph(paragraph: str) -> dict:
         "original": paragraph,
         "revised": revised,
         "status": "done" if score > 50 else "partial",
-        "chain": "LOCAL (v4.5.0)",
+        "chain": "LOCAL (v4.6.0)",
         "human_score": score,
         "logs": logs
     }
@@ -462,7 +566,7 @@ def api_revise():
 
         def generate():
             try:
-                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев..."})
+                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев (v4.6.0)..."})
 
                 results = []
                 for idx, para in enumerate(paragraphs):
@@ -526,7 +630,7 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": final_text,
                     "original_text": chapter_text,
-                    "summary": f"Обработано {total} абзацев. Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
+                    "summary": f"Обработано {total} абзацев (v4.6.0). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
                     "paragraphs": results,
                     "average_human_score": avg_score,
                     "overall_analysis": overall,
@@ -561,7 +665,7 @@ def handle_http_exception(exc):
 @app.errorhandler(Exception)
 def handle_exception(exc):
     logger.exception("Unhandled exception")
-    return jsonify(detail=f"Server error: {str(exc)}"), 500
+    return jsonify(detail=f"Server error: {str(e)}"), 500
 
 
 if __name__ == "__main__":
