@@ -1,5 +1,5 @@
 """
-Chapter Editor v4.6.0 — с интеграцией логики humanizer-ru
+Chapter Editor v4.6.1 — с интеграцией логики humanizer-ru и опечатками
 """
 import json
 import os
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "4.6.0"
+APP_VERSION = "4.6.1"
 MAX_CHARS = 30_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
@@ -197,7 +197,7 @@ def post_process(text: str, logs: list = None) -> str:
     if random.random() < config.PROB_PARTICLES:
         ops.append('insert_particles')
 
-    # НОВЫЕ ОПЕРАЦИИ
+    # Новые операции из humanizer-ru
     if random.random() < config.PROB_CANCEL_CANCEL:
         ops.append('cancel_cancel')
     if random.random() < config.PROB_REMOVE_AI_MARKERS:
@@ -206,9 +206,11 @@ def post_process(text: str, logs: list = None) -> str:
         ops.append('split_long_sentences')
     if random.random() < config.PROB_ADD_COLLOQUIAL:
         ops.append('add_colloquial')
-    # change_word_order используем как усиленную инверсию – отдельная операция
     if random.random() < config.PROB_CHANGE_WORD_ORDER:
         ops.append('change_word_order')
+    # ===== НОВАЯ ОПЕРАЦИЯ: ОПЕЧАТКИ =====
+    if random.random() < config.PROB_TYPOS:
+        ops.append('add_typos')
 
     if not ops:
         ops.append('synonyms')  # гарантия хоть какой-то обработки
@@ -378,7 +380,7 @@ def post_process(text: str, logs: list = None) -> str:
             if inserted_particles:
                 logs.append(f"  - вставлено частиц: {inserted_particles}")
 
-        # ===== НОВЫЕ ОПЕРАЦИИ =====
+        # ===== ОПЕРАЦИИ ИЗ HUMANIZER-RU =====
 
         elif op == 'cancel_cancel':
             replacements = 0
@@ -466,6 +468,29 @@ def post_process(text: str, logs: list = None) -> str:
             if changed:
                 logs.append(f"  - изменений порядка слов (усиленная инверсия): {changed}")
 
+        # ===== НОВАЯ ОПЕРАЦИЯ: ОПЕЧАТКИ =====
+        elif op == 'add_typos':
+            chars = list(text)
+            typo_count = 0
+            replacements = {
+                'а': 'о', 'о': 'а', 'е': 'и', 'и': 'е',
+                'н': 'т', 'т': 'н', 'с': 'з', 'з': 'с',
+                'р': 'п', 'п': 'р', 'л': 'м', 'м': 'л',
+                'в': 'б', 'б': 'в', 'к': 'н', 'н': 'к',
+            }
+            for i in range(len(chars)):
+                if chars[i].isalpha() and random.random() < 0.02:
+                    lower_char = chars[i].lower()
+                    if lower_char in replacements:
+                        replacement = replacements[lower_char]
+                        if chars[i].isupper():
+                            replacement = replacement.upper()
+                        chars[i] = replacement
+                        typo_count += 1
+            text = ''.join(chars)
+            if typo_count:
+                logs.append(f"  - добавлено опечаток: {typo_count}")
+
     return text
 
 
@@ -496,7 +521,7 @@ def process_paragraph(paragraph: str) -> dict:
         "original": paragraph,
         "revised": revised,
         "status": "done" if score > 50 else "partial",
-        "chain": "LOCAL (v4.6.0)",
+        "chain": "LOCAL (v4.6.1)",
         "human_score": score,
         "logs": logs
     }
@@ -566,7 +591,7 @@ def api_revise():
 
         def generate():
             try:
-                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев (v4.6.0)..."})
+                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев (v4.6.1)..."})
 
                 results = []
                 for idx, para in enumerate(paragraphs):
@@ -630,7 +655,7 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": final_text,
                     "original_text": chapter_text,
-                    "summary": f"Обработано {total} абзацев (v4.6.0). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
+                    "summary": f"Обработано {total} абзацев (v4.6.1). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
                     "paragraphs": results,
                     "average_human_score": avg_score,
                     "overall_analysis": overall,
