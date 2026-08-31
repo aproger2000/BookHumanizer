@@ -15,6 +15,18 @@ from werkzeug.exceptions import HTTPException
 # Импортируем настройки из config.py
 import config
 
+# Если в config нет какого-то атрибута, используем запасные варианты
+SYNONYMS = getattr(config, 'SYNONYMS_DICT', [])
+INSERTIONS = getattr(config, 'INSERTIONS_LIST', [])
+INTERJECTIONS = getattr(config, 'INTERJECTIONS_LIST', [])
+PARTICLES = getattr(config, 'PARTICLES_LIST', [])
+ADVERBS = getattr(config, 'ADVERBS_LIST', [])
+REPORTING_VERBS = getattr(config, 'REPORTING_VERBS', [])
+CLAUSE_CONJUNCTIONS = getattr(config, 'CLAUSE_CONJUNCTIONS', [])
+CANCEL_CANCEL_DICT = getattr(config, 'CANCEL_CANCEL_DICT', [])
+AI_MARKERS = getattr(config, 'AI_MARKERS', [])
+COLLOQUIAL_PARTICLES = getattr(config, 'COLLOQUIAL_PARTICLES', [])
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
