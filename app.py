@@ -29,6 +29,9 @@ app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 
 random.seed(config.RANDOM_SEED)
 
+# Глобальный счётчик для ограничения числа абзацев, обрабатываемых ruT5
+_ru_t5_paragraph_counter = 0
+
 # ========== Загрузка калибровочной модели ==========
 MODEL_LOADED = False
 human_model = None
@@ -576,6 +579,8 @@ def rewrite_with_ru_t5(text: str, logs: list = None) -> str:
 
 # ========== Обработка абзаца ==========
 def process_paragraph(paragraph: str) -> dict:
+    global _ru_t5_paragraph_counter
+
     if not paragraph:
         return {
             "original": paragraph,
@@ -601,8 +606,16 @@ def process_paragraph(paragraph: str) -> dict:
             "logs": logs + ["Абзац уже имеет HUMAN >= 50, пропущен"]
         }
 
-    # Пробуем модель, если абзац достаточно длинный и включена
-    if config.USE_RU_T5 and RU_T5_AVAILABLE:
+    # Проверяем, можно ли использовать ruT5 для этого абзаца
+    use_ru_t5 = (
+        config.USE_RU_T5 and
+        RU_T5_AVAILABLE and
+        len(paragraph) >= config.MIN_PARAGRAPH_LENGTH and
+        _ru_t5_paragraph_counter < config.MAX_PARAGRAPHS_FOR_RU_T5
+    )
+
+    if use_ru_t5:
+        _ru_t5_paragraph_counter += 1
         model_logs = []
         model_text = rewrite_with_ru_t5(paragraph, logs=model_logs)
         if model_text != paragraph:
@@ -681,6 +694,9 @@ def health():
 
 @app.post("/api/revise")
 def api_revise():
+    global _ru_t5_paragraph_counter
+    _ru_t5_paragraph_counter = 0   # сброс для нового запроса
+
     logger.info(f"=== api_revise: START (v{APP_VERSION}) ===")
     try:
         file_storage = request.files.get("file")
