@@ -1,14 +1,14 @@
 """
-config.py — эксперимент: разговорные частицы 0.35 (v1.9)
+config.py — эксперимент: разговорные частицы 0.35 (v2.0)
 """
 
-CONFIG_VERSION = "v1.9"
+CONFIG_VERSION = "v2.0"
 HYPOTHESIS = "Разговорные частицы 0.35 + опечатки 0.3"
 
 RANDOM_SEED = 42
 
 PROB_SYNONYMS = 0.3
-PROB_INSERTIONS = 0.3
+PROB_INSERTIONS = 0.35
 PROB_SWAP_FIRST_WORDS = 0.2
 PROB_INTERJECTIONS = 0.2
 PROB_PARTICLES = 0.15
