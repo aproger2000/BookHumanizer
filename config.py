@@ -1,15 +1,14 @@
 """
-config.py — эксперимент: синонимы 0.4 + опечатки 0.25 (v1.5)
+config.py — эксперимент: опечатки 0.3 (v1.7)
 """
 
-# ========== Идентификация конфига ==========
-CONFIG_VERSION = "v1.6"
-HYPOTHESIS = "Вставки 0.4 + опечатки 0.25 (синонимы 0.3)"
+CONFIG_VERSION = "v1.7"
+HYPOTHESIS = "Опечатки 0.3 (было 0.25)"
 
 RANDOM_SEED = 42
 
 PROB_SYNONYMS = 0.3
-PROB_INSERTIONS = 0.4          # <-- изменено
+PROB_INSERTIONS = 0.3
 PROB_SWAP_FIRST_WORDS = 0.2
 PROB_INTERJECTIONS = 0.2
 PROB_PARTICLES = 0.15
@@ -17,24 +16,23 @@ PROB_CANCEL_CANCEL = 0.5
 PROB_REMOVE_AI_MARKERS = 0.6
 PROB_SPLIT_LONG_SENTENCES = 0.3
 PROB_ADD_COLLOQUIAL = 0.3
-PROB_TYPOS = 0.25
+PROB_TYPOS = 0.3                     # <-- изменено
 
-# Отключённые (без изменений)
 PROB_SWAP_CLAUSES = 0.0
 PROB_CHANGE_WORD_ORDER = 0.0
 PROB_SWAP_SUBJECT_PREDICATE = 0.0
 PROB_INVERSION = 0.0
 PROB_SWAP_MID_WORDS = 0.0
 
-# ... все словари без изменений
-
-# ========== ruT5 ==========
 USE_RU_T5 = False
 MIN_PARAGRAPH_LENGTH = 30
 RU_T5_THRESHOLD = 50
 RU_T5_ATTEMPTS = 2
 RU_T5_TEMPERATURE = 1.0
 MAX_PARAGRAPHS_FOR_RU_T5 = 3
+
+# ===== СЛОВАРИ (без изменений) =====
+# (скопируйте из предыдущего рабочего config.py)
 
 # ========== Словари ==========
 SYNONYMS_DICT = [
