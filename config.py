@@ -1,26 +1,34 @@
 """
-config.py — эксперимент: увеличение удаления AI-маркеров до 0.7
+config.py — настройки пост-обработки (версионирование)
 """
 
+# ========== Идентификация конфига ==========
+CONFIG_VERSION = "v1.3"                # Увеличивайте при каждом эксперименте
+HYPOTHESIS = "Удаление AI-маркеров 0.7"  # Краткое описание гипотезы
+
+# ========== Случайный seed ==========
 RANDOM_SEED = 42
 
+# ========== Вероятности операций ==========
 PROB_SYNONYMS = 0.3
 PROB_INSERTIONS = 0.3
 PROB_SWAP_FIRST_WORDS = 0.2
 PROB_INTERJECTIONS = 0.2
 PROB_PARTICLES = 0.15
 PROB_CANCEL_CANCEL = 0.5
-PROB_REMOVE_AI_MARKERS = 0.7   # <-- изменено
+PROB_REMOVE_AI_MARKERS = 0.7          # <-- текущая гипотеза
 PROB_SPLIT_LONG_SENTENCES = 0.3
 PROB_ADD_COLLOQUIAL = 0.3
 PROB_TYPOS = 0.2
 
+# ========== Отключённые ==========
 PROB_SWAP_CLAUSES = 0.0
 PROB_CHANGE_WORD_ORDER = 0.0
 PROB_SWAP_SUBJECT_PREDICATE = 0.0
 PROB_INVERSION = 0.0
 PROB_SWAP_MID_WORDS = 0.0
 
+# ========== ruT5 ==========
 USE_RU_T5 = False
 MIN_PARAGRAPH_LENGTH = 30
 RU_T5_THRESHOLD = 50
@@ -28,10 +36,7 @@ RU_T5_ATTEMPTS = 2
 RU_T5_TEMPERATURE = 1.0
 MAX_PARAGRAPHS_FOR_RU_T5 = 3
 
-# ===== СЛОВАРИ (без изменений) =====
-# (скопируйте из стабильной версии)
-
-# ===== СЛОВАРИ =====
+# ========== Словари (без изменений) ==========
 SYNONYMS_DICT = [
     (r'\bсказал\b', ['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал', 'отозвался']),
     (r'\bсказала\b', ['произнесла', 'бросила', 'выдохнула', 'усмехнулась', 'пробормотала', 'отозвалась']),
