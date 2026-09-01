@@ -3,23 +3,19 @@ config.py — эксперимент: опечатки 0.25
 """
 
 # ========== Идентификация конфига ==========
-CONFIG_VERSION = "v1.4"
-HYPOTHESIS = "Опечатки 0.25 (было 0.2)"
+CONFIG_VERSION = "v1.5"
+HYPOTHESIS = "Синонимы 0.4 + опечатки 0.25"
 
-# ========== Случайный seed ==========
-RANDOM_SEED = 42
-
-# ========== Вероятности операций ==========
-PROB_SYNONYMS = 0.3
+PROB_SYNONYMS = 0.4          # изменено (было 0.3)
 PROB_INSERTIONS = 0.3
 PROB_SWAP_FIRST_WORDS = 0.2
 PROB_INTERJECTIONS = 0.2
 PROB_PARTICLES = 0.15
 PROB_CANCEL_CANCEL = 0.5
-PROB_REMOVE_AI_MARKERS = 0.6      # возвращаем к стабильному
+PROB_REMOVE_AI_MARKERS = 0.6
 PROB_SPLIT_LONG_SENTENCES = 0.3
 PROB_ADD_COLLOQUIAL = 0.3
-PROB_TYPOS = 0.25                  # <-- изменено (было 0.2)
+PROB_TYPOS = 0.25            # оставляем
 
 # ========== Отключённые ==========
 PROB_SWAP_CLAUSES = 0.0
