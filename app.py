@@ -493,7 +493,12 @@ def analyze_overall(text: str) -> dict:
 # ========== Flask endpoints ==========
 @app.get("/api/health")
 def health():
-    return jsonify(status="ok", version=APP_VERSION)
+    return jsonify(
+        status="ok",
+        version=APP_VERSION,
+        config_version=config.CONFIG_VERSION,
+        hypothesis=config.HYPOTHESIS
+    )
 
 
 @app.post("/api/revise")
