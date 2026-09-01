@@ -1,5 +1,5 @@
 """
-config.py — эксперимент: увеличение междометий до 0.3
+config.py — эксперимент: увеличение удаления AI-маркеров до 0.7
 """
 
 RANDOM_SEED = 42
@@ -7,10 +7,10 @@ RANDOM_SEED = 42
 PROB_SYNONYMS = 0.3
 PROB_INSERTIONS = 0.3
 PROB_SWAP_FIRST_WORDS = 0.2
-PROB_INTERJECTIONS = 0.3
+PROB_INTERJECTIONS = 0.2
 PROB_PARTICLES = 0.15
 PROB_CANCEL_CANCEL = 0.5
-PROB_REMOVE_AI_MARKERS = 0.6
+PROB_REMOVE_AI_MARKERS = 0.7   # <-- изменено
 PROB_SPLIT_LONG_SENTENCES = 0.3
 PROB_ADD_COLLOQUIAL = 0.3
 PROB_TYPOS = 0.2
@@ -27,6 +27,9 @@ RU_T5_THRESHOLD = 50
 RU_T5_ATTEMPTS = 2
 RU_T5_TEMPERATURE = 1.0
 MAX_PARAGRAPHS_FOR_RU_T5 = 3
+
+# ===== СЛОВАРИ (без изменений) =====
+# (скопируйте из стабильной версии)
 
 # ===== СЛОВАРИ =====
 SYNONYMS_DICT = [
