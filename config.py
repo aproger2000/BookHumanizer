@@ -1,37 +1,38 @@
 """
-config.py — настройки пост-обработки и модели ruT5 (v4.7.1)
+config.py — настройки пост-обработки (v4.6.2-stable)
 """
 
-# ========== Случайный seed ==========
 RANDOM_SEED = 42
 
-# ========== Вероятности операций ==========
-# Лёгкие, полезные операции
-PROB_SYNONYMS = 0.5
-PROB_INSERTIONS = 0.35
+# ========== Вероятности операций (проверенные) ==========
+PROB_SYNONYMS = 0.3
+PROB_INSERTIONS = 0.3
 PROB_SWAP_FIRST_WORDS = 0.2
-PROB_INTERJECTIONS = 0.3
+PROB_INTERJECTIONS = 0.2
 PROB_PARTICLES = 0.15
 PROB_CANCEL_CANCEL = 0.5
-PROB_REMOVE_AI_MARKERS = 0.6
+PROB_REMOVE_AI_MARKERS = 0.6    # чуть выше, чем было (0.5)
 PROB_SPLIT_LONG_SENTENCES = 0.3
-PROB_ADD_COLLOQUIAL = 0.4
-PROB_TYPOS = 0.25
-PROB_SWAP_MID_WORDS = 0.2   # Новая операция
+PROB_ADD_COLLOQUIAL = 0.3        # было 0.4 – возвращаем
+PROB_TYPOS = 0.2                 # было 0.15 – немного увеличиваем (опечатки помогали)
 
-# ========== Отключённые (вредные) операции ==========
+# ========== ОТКЛЮЧАЕМ ВРЕДНЫЕ ==========
 PROB_SWAP_CLAUSES = 0.0
 PROB_CHANGE_WORD_ORDER = 0.0
 PROB_SWAP_SUBJECT_PREDICATE = 0.0
-PROB_INVERSION = 0.0          # тоже можно отключить, если мешает
+PROB_INVERSION = 0.0
+PROB_SWAP_MID_WORDS = 0.0        # полностью убираем
 
-# ========== Настройки модели ruT5 ==========
-USE_RU_T5 = False             # пока отключена, можно включить позже
+# ========== ruT5 отключён ==========
+USE_RU_T5 = False
 MIN_PARAGRAPH_LENGTH = 30
 RU_T5_THRESHOLD = 50
 RU_T5_ATTEMPTS = 2
 RU_T5_TEMPERATURE = 1.0
 MAX_PARAGRAPHS_FOR_RU_T5 = 3
+
+# ========== Словари (без изменений) ==========
+# ... все словари остаются как в предыдущей стабильной версии ...
 
 # ========== Словари ==========
 
