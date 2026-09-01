@@ -196,6 +196,8 @@ if random.random() < config.PROB_ADD_COLLOQUIAL:
 if random.random() < config.PROB_TYPOS:
     ops.append('add_typos')
 if random.random() < config.PROB_SWAP_MID_WORDS:
+    ops.append('swap_mid_words')
+if random.random() < config.PROB_SWAP_MID_WORDS:
     ops.append('swap_mid_words')   # новая
 
     if not ops:
@@ -236,6 +238,23 @@ if random.random() < config.PROB_SWAP_MID_WORDS:
             text = '. '.join(new_sentences)
             if inserted:
                 logs.append(f"  - вставлено вводных слов: {inserted}")
+
+        elif op == 'swap_mid_words':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            swapped = 0
+            for sent in sentences:
+                words = sent.split()
+                if len(words) >= 5 and random.random() < 0.15:
+                    i = random.randint(1, len(words)-3)
+                    words[i], words[i+1] = words[i+1], words[i]
+                    sent = ' '.join(words)
+                    swapped += 1
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if swapped:
+            logs.append(f"  - перестановок в середине: {swapped}")
+        
 
         # ---------- swap_first_words ----------
         elif op == 'swap_first_words':
