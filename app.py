@@ -174,37 +174,29 @@ def post_process(text: str, logs: list = None) -> str:
     if logs is None:
         logs = []
 
-    ops = []
-    if random.random() < config.PROB_SYNONYMS:
-        ops.append('synonyms')
-    if random.random() < config.PROB_INSERTIONS:
-        ops.append('insertions')
-    if random.random() < config.PROB_SWAP_FIRST_WORDS:
-        ops.append('swap_first_words')
-    if random.random() < config.PROB_INTERJECTIONS:
-        ops.append('interjections')
-    if random.random() < config.PROB_SWAP_CLAUSES:
-        ops.append('swap_clauses')
-    if random.random() < config.PROB_DIRECT_INDIRECT:
-        ops.append('direct_indirect')
-    if random.random() < config.PROB_INVERSION:
-        ops.append('inversion')
-    if random.random() < config.PROB_SWAP_SUBJECT_PREDICATE:
-        ops.append('swap_subject_predicate')
-    if random.random() < config.PROB_PARTICLES:
-        ops.append('insert_particles')
-    if random.random() < config.PROB_CANCEL_CANCEL:
-        ops.append('cancel_cancel')
-    if random.random() < config.PROB_REMOVE_AI_MARKERS:
-        ops.append('remove_ai_markers')
-    if random.random() < config.PROB_SPLIT_LONG_SENTENCES:
-        ops.append('split_long_sentences')
-    if random.random() < config.PROB_ADD_COLLOQUIAL:
-        ops.append('add_colloquial')
-    if random.random() < config.PROB_CHANGE_WORD_ORDER:
-        ops.append('change_word_order')
-    if random.random() < config.PROB_TYPOS:
-        ops.append('add_typos')
+ops = []
+if random.random() < config.PROB_SYNONYMS:
+    ops.append('synonyms')
+if random.random() < config.PROB_INSERTIONS:
+    ops.append('insertions')
+if random.random() < config.PROB_SWAP_FIRST_WORDS:
+    ops.append('swap_first_words')
+if random.random() < config.PROB_INTERJECTIONS:
+    ops.append('interjections')
+if random.random() < config.PROB_PARTICLES:
+    ops.append('insert_particles')
+if random.random() < config.PROB_CANCEL_CANCEL:
+    ops.append('cancel_cancel')
+if random.random() < config.PROB_REMOVE_AI_MARKERS:
+    ops.append('remove_ai_markers')
+if random.random() < config.PROB_SPLIT_LONG_SENTENCES:
+    ops.append('split_long_sentences')
+if random.random() < config.PROB_ADD_COLLOQUIAL:
+    ops.append('add_colloquial')
+if random.random() < config.PROB_TYPOS:
+    ops.append('add_typos')
+if random.random() < config.PROB_SWAP_MID_WORDS:
+    ops.append('swap_mid_words')   # новая
 
     if not ops:
         ops.append('synonyms')
