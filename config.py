@@ -5,16 +5,16 @@ config.py — настройки пост-обработки (v4.6.2-stable)
 RANDOM_SEED = 42
 
 # ========== Вероятности операций (проверенные) ==========
-PROB_SYNONYMS = 0.3
+PROB_SYNONYMS = 0.4
 PROB_INSERTIONS = 0.3
 PROB_SWAP_FIRST_WORDS = 0.2
 PROB_INTERJECTIONS = 0.2
 PROB_PARTICLES = 0.15
 PROB_CANCEL_CANCEL = 0.5
-PROB_REMOVE_AI_MARKERS = 0.6    # чуть выше, чем было (0.5)
+PROB_REMOVE_AI_MARKERS = 0.6
 PROB_SPLIT_LONG_SENTENCES = 0.3
-PROB_ADD_COLLOQUIAL = 0.3        # было 0.4 – возвращаем
-PROB_TYPOS = 0.2                 # было 0.15 – немного увеличиваем (опечатки помогали)
+PROB_ADD_COLLOQUIAL = 0.2   # понижаем
+PROB_TYPOS = 0.3            # повышаем
 
 # ========== ОТКЛЮЧАЕМ ВРЕДНЫЕ ==========
 PROB_SWAP_CLAUSES = 0.0
