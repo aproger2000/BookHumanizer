@@ -1,10 +1,10 @@
 """
-config.py — настройки пост-обработки (версионирование)
+config.py — эксперимент: опечатки 0.25
 """
 
 # ========== Идентификация конфига ==========
-CONFIG_VERSION = "v1.3"                # Увеличивайте при каждом эксперименте
-HYPOTHESIS = "Удаление AI-маркеров 0.7"  # Краткое описание гипотезы
+CONFIG_VERSION = "v1.4"
+HYPOTHESIS = "Опечатки 0.25 (было 0.2)"
 
 # ========== Случайный seed ==========
 RANDOM_SEED = 42
@@ -16,10 +16,10 @@ PROB_SWAP_FIRST_WORDS = 0.2
 PROB_INTERJECTIONS = 0.2
 PROB_PARTICLES = 0.15
 PROB_CANCEL_CANCEL = 0.5
-PROB_REMOVE_AI_MARKERS = 0.7          # <-- текущая гипотеза
+PROB_REMOVE_AI_MARKERS = 0.6      # возвращаем к стабильному
 PROB_SPLIT_LONG_SENTENCES = 0.3
 PROB_ADD_COLLOQUIAL = 0.3
-PROB_TYPOS = 0.2
+PROB_TYPOS = 0.25                  # <-- изменено (было 0.2)
 
 # ========== Отключённые ==========
 PROB_SWAP_CLAUSES = 0.0
@@ -36,6 +36,8 @@ RU_T5_ATTEMPTS = 2
 RU_T5_TEMPERATURE = 1.0
 MAX_PARAGRAPHS_FOR_RU_T5 = 3
 
+# ========== Словари (без изменений) ==========
+# (скопируйте из предыдущего стабильного config.py)
 # ========== Словари (без изменений) ==========
 SYNONYMS_DICT = [
     (r'\bсказал\b', ['произнёс', 'бросил', 'выдохнул', 'усмехнулся', 'пробормотал', 'отозвался']),
