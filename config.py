@@ -1,9 +1,9 @@
 """
-config.py — эксперимент: перестановка слов в середине 0.15 (v1.24)
+config.py — эксперимент: синтаксические трансформации (v1.24)
 """
 
 CONFIG_VERSION = "v1.24"
-HYPOTHESIS = "Перестановка слов в середине 0.15 + перестановка первых слов 0.3 + междометия 0.25 + частицы 0.25"
+HYPOTHESIS = "Перестановка частей 0.2 + замена прямой речи 0.15 + базовые параметры v1.18"
 
 RANDOM_SEED = 42
 
@@ -18,25 +18,22 @@ PROB_SPLIT_LONG_SENTENCES = 0.3
 PROB_ADD_COLLOQUIAL = 0.3
 PROB_TYPOS = 0.3
 
-# НОВАЯ ОПЕРАЦИЯ
-PROB_SWAP_MID_WORDS = 0.15
+# ===== НОВЫЕ ОПЕРАЦИИ (ранее отключены) =====
+PROB_SWAP_CLAUSES = 0.2          # перестановка частей (было 0.0)
+PROB_DIRECT_INDIRECT = 0.15      # замена прямой/косвенной речи (было 0.0)
 
-# Отключённые операции
-PROB_SWAP_CLAUSES = 0.0
+# ===== Остальные отключены =====
 PROB_CHANGE_WORD_ORDER = 0.0
 PROB_SWAP_SUBJECT_PREDICATE = 0.0
 PROB_INVERSION = 0.0
+PROB_SWAP_MID_WORDS = 0.0
 
-# ruT5 (отключена)
 USE_RU_T5 = False
 MIN_PARAGRAPH_LENGTH = 30
 RU_T5_THRESHOLD = 50
 RU_T5_ATTEMPTS = 2
 RU_T5_TEMPERATURE = 1.0
 MAX_PARAGRAPHS_FOR_RU_T5 = 3
-
-# ===== СЛОВАРИ (без изменений) =====
-# (все словари из предыдущих версий — они не меняются)
 
 # ===== СЛОВАРИ =====
 SYNONYMS_DICT = [
