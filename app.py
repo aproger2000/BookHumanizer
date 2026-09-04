@@ -1,4 +1,116 @@
 """
+Chapter Editor v4.8.4 — полная версия с диагностикой и всеми операциями
+"""
+import json
+import os
+import sys
+import re
+import logging
+import random
+import joblib
+import csv
+import threading
+from pathlib import Path
+
+from flask import Flask, Response, jsonify, request, stream_with_context
+from werkzeug.exceptions import HTTPException
+
+import config
+import pandas as pd
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
+
+APP_VERSION = "4.8.4"
+MAX_CHARS = 30_000
+
+app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
+app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
+
+random.seed(config.RANDOM_SEED)
+
+# ========== Загрузка калибровочной модели ==========
+MODEL_LOADED = False
+human_model = None
+feature_cols = []
+
+def load_model():
+    global human_model, feature_cols, MODEL_LOADED
+    try:
+        human_model = joblib.load('human_model.pkl')
+        with open('feature_cols.txt', 'r') as f:
+            feature_cols = [col.strip() for col in f.read().strip().split(',') if col.strip()]
+        MODEL_LOADED = True
+        logger.info(f"Калибровочная модель HUMAN загружена. Признаков: {len(feature_cols)}")
+    except Exception as e:
+        MODEL_LOADED = False
+        logger.warning(f"Не удалось загрузить калибровочную модель: {e}")
+
+load_model()
+
+# ========== Инициализация ruT5 (отключена) ==========
+RU_T5_AVAILABLE = False
+ru_model = None
+ru_tokenizer = None
+
+# ========== Используем словари из config ==========
+SYNONYMS = config.SYNONYMS_DICT
+INSERTIONS = config.INSERTIONS_LIST
+INTERJECTIONS = config.INTERJECTIONS_LIST
+PARTICLES = config.PARTICLES_LIST
+ADVERBS = config.ADVERBS_LIST
+REPORTING_VERBS = config.REPORTING_VERBS
+CLAUSE_CONJUNCTIONS = config.CLAUSE_CONJUNCTIONS
+CANCEL_CANCEL_DICT = config.CANCEL_CANCEL_DICT
+AI_MARKERS = config.AI_MARKERS
+COLLOQUIAL_PARTICLES = config.COLLOQUIAL_PARTICLES
+
+# ========== Счётчик для фонового переобучения ==========
+_retrain_lock = threading.Lock()
+
+# ========== Функция переобучения (синхронная) ==========
+def retrain_model_sync():
+    """Переобучает модель на всех данных из training_data.csv и перезагружает её."""
+    with _retrain_lock:
+        logger.info("=== RETRAIN START (sync) ===")
+        csv_path = Path('training_data.csv')
+        if not csv_path.exists():
+            logger.warning("training_data.csv не найден, переобучение пропущено.")
+            return
+
+        try:
+            df = pd.read_csv(csv_path)
+        except Exception as e:
+            logger.error(f"Ошибка чтения training_data.csv: {e}")
+            return
+
+        df = df.dropna(subset=['HUMAN_yandex'])
+        if len(df) == 0:
+            logger.info("Нет данных для обучения (0 строк).")
+            return
+
+        logger.info(f"Найдено {len(df)} записей.")
+
+        # Извлекаем признаки
+        feature_rows = []
+        for idx, row in df.iterrows():
+            text = row['processed_text']
+            if not isinstance(text, str) or len(text) < 10:
+                continue
+            try:
+                feats = extract_features(text)
+                feature_rows.append(feats)
+            except Exception as e:
+                logger.warning(f"Ошибка извлечения признаков для строки {idx}: {e}")
+                continue
+
+        if not feature_rows:
+            logger.warning("Не удалось извлечь признаки ни для одной запи"""
 Chapter Editor v4.8.4 — диагностика локального детектора
 """
 import json
