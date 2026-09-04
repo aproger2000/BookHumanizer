@@ -1,5 +1,5 @@
 """
-Chapter Editor v4.8.1 — с автоматическим фоновым переобучением
+Chapter Editor v4.8.2 — с встроенным переобучением и принудительной перезагрузкой
 """
 import json
 import os
@@ -8,17 +8,17 @@ import re
 import logging
 import random
 import joblib
-import subprocess
 import csv
 import threading
-import time
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 from werkzeug.exceptions import HTTPException
 
-# Импортируем настройки из config.py
 import config
+import pandas as pd
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "4.8.1"
+APP_VERSION = "4.8.2"
 MAX_CHARS = 30_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
@@ -72,7 +72,76 @@ COLLOQUIAL_PARTICLES = config.COLLOQUIAL_PARTICLES
 
 # ========== Счётчик для фонового переобучения ==========
 _last_retrain_count = 0
-RETRAIN_EVERY_N = 5  # переобучать каждые 5 новых записей
+RETRAIN_EVERY_N = 3  # переобучать каждые 3 новых записи (для быстрого теста)
+_retrain_lock = threading.Lock()
+
+# ========== Функция переобучения (встроенная) ==========
+def retrain_model_sync():
+    """Переобучает модель на всех данных из training_data.csv и перезагружает её."""
+    global _last_retrain_count
+    with _retrain_lock:
+        logger.info("=== RETRAIN START (sync) ===")
+        csv_path = Path('training_data.csv')
+        if not csv_path.exists():
+            logger.warning("training_data.csv не найден, переобучение пропущено.")
+            return
+
+        try:
+            df = pd.read_csv(csv_path)
+        except Exception as e:
+            logger.error(f"Ошибка чтения training_data.csv: {e}")
+            return
+
+        df = df.dropna(subset=['HUMAN_yandex'])
+        if len(df) == 0:
+            logger.info("Нет данных для обучения (0 строк).")
+            return
+
+        logger.info(f"Найдено {len(df)} записей.")
+
+        # Извлекаем признаки
+        feature_rows = []
+        for idx, row in df.iterrows():
+            text = row['processed_text']
+            if not isinstance(text, str) or len(text) < 10:
+                continue
+            try:
+                feats = extract_features(text)
+                feature_rows.append(feats)
+            except Exception as e:
+                logger.warning(f"Ошибка извлечения признаков для строки {idx}: {e}")
+                continue
+
+        if not feature_rows:
+            logger.warning("Не удалось извлечь признаки ни для одной записи.")
+            return
+
+        feature_names = list(feature_rows[0].keys())
+        X = pd.DataFrame(feature_rows)[feature_names]
+        y = df['HUMAN_yandex'].values[:len(X)]
+
+        if len(X) < 5:
+            logger.info(f"Слишком мало примеров ({len(X)}), переобучение пропущено.")
+            return
+
+        logger.info(f"Обучение на {len(X)} примерах...")
+        model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
+        model.fit(X, y)
+
+        y_pred = model.predict(X)
+        mae = mean_absolute_error(y, y_pred)
+        logger.info(f"MAE на обучении: {mae:.2f}")
+
+        # Сохраняем модель и список признаков
+        joblib.dump(model, 'human_model.pkl')
+        with open('feature_cols.txt', 'w') as f:
+            f.write(','.join(feature_names))
+
+        # Перезагружаем модель в памяти
+        load_model()
+        _last_retrain_count = len(df)
+        logger.info(f"Модель успешно переобучена и перезагружена. Всего строк: {len(df)}")
+        logger.info("=== RETRAIN END ===")
 
 # ========== Вспомогательные функции ==========
 def _sse(event_type: str, data: dict) -> str:
@@ -183,7 +252,7 @@ def get_human_score(text: str) -> int:
         score -= 15
     return max(0, min(100, int(score)))
 
-# ========== Полная пост-обработка (v1.12) ==========
+# ========== Полная пост-обработка (v1.18) ==========
 def post_process(text: str, logs: list = None) -> str:
     if not text or len(text) < 20:
         return text
@@ -254,7 +323,7 @@ def post_process(text: str, logs: list = None) -> str:
             new_sentences = []
             swapped = 0
             for sent in sentences:
-                if len(sent.split()) > 4 and random.random() < 0.25:
+                if len(sent.split()) > 4 and random.random() < 0.3:  # новое значение
                     words = sent.split()
                     if len(words) >= 3 and not words[0].startswith(('—', '"', '«')):
                         words[0], words[1] = words[1], words[0]
@@ -270,7 +339,7 @@ def post_process(text: str, logs: list = None) -> str:
             new_sentences = []
             inserted_interj = 0
             for sent in sentences:
-                if re.match(r'^[—"«]', sent) and random.random() < 0.2:
+                if re.match(r'^[—"«]', sent) and random.random() < 0.25:
                     ins = random.choice(INTERJECTIONS)
                     match = re.search(r'^([—"«])\s*', sent)
                     if match:
@@ -463,26 +532,6 @@ def split_paragraphs(text: str) -> list:
     paragraphs = text.split('\n\n')
     return [p.strip() for p in paragraphs if p.strip()]
 
-# ========== Фоновое переобучение ==========
-def retrain_in_background():
-    """Запускает переобучение в отдельном потоке и перезагружает модель."""
-    try:
-        logger.info("Фоновое переобучение: START")
-        result = subprocess.run(
-            [sys.executable, "retrain_model.py"],
-            capture_output=True,
-            text=True,
-            timeout=300
-        )
-        if result.returncode == 0:
-            logger.info(f"Фоновое переобучение успешно завершено.\n{result.stdout}")
-            # Перезагружаем модель
-            load_model()
-        else:
-            logger.error(f"Фоновое переобучение провалилось (код {result.returncode}): {result.stderr}")
-    except Exception as e:
-        logger.error(f"Ошибка фонового переобучения: {e}")
-
 # ========== Flask endpoints ==========
 @app.get("/api/health")
 def health():
@@ -501,17 +550,10 @@ def api_retrain():
     if token != RETRAIN_TOKEN:
         return jsonify({"error": "Unauthorized"}), 401
     try:
-        result = subprocess.run(
-            [sys.executable, "retrain_model.py"],
-            capture_output=True,
-            text=True,
-            timeout=300
-        )
-        if result.returncode != 0:
-            return jsonify({"error": "Retrain failed", "details": result.stderr}), 500
-        load_model()
-        return jsonify({"status": "ok", "output": result.stdout})
+        retrain_model_sync()
+        return jsonify({"status": "ok", "message": "Retrained successfully"})
     except Exception as e:
+        logger.error(f"Retrain error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.post("/api/reload_model")
@@ -584,7 +626,7 @@ def feedback():
 
     logger.info(f"Added feedback: score={yandex_score}, text length={len(revised_text)}")
 
-    # Считаем количество строк в CSV (приблизительно)
+    # Считаем количество строк в CSV
     try:
         with open(csv_path, 'r', encoding='utf-8') as f:
             row_count = sum(1 for _ in f) - 1  # минус заголовок
@@ -593,11 +635,10 @@ def feedback():
 
     # Переобучаем, если накопилось достаточно новых записей
     if row_count > 0 and (row_count - _last_retrain_count) >= RETRAIN_EVERY_N:
-        _last_retrain_count = row_count
-        # Запускаем переобучение в фоне
-        thread = threading.Thread(target=retrain_in_background, daemon=True)
+        # Запускаем синхронное переобучение в отдельном потоке, чтобы не блокировать ответ
+        thread = threading.Thread(target=retrain_model_sync, daemon=True)
         thread.start()
-        logger.info(f"Запущено фоновое переобучение (всего строк: {row_count})")
+        logger.info(f"Запущено синхронное переобучение (всего строк: {row_count})")
     else:
         logger.info(f"Пропускаем переобучение (строк: {row_count}, последний счётчик: {_last_retrain_count})")
 
@@ -633,7 +674,7 @@ def api_revise():
 
         def generate():
             try:
-                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев (v4.8.1)..."})
+                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев (v4.8.2)..."})
 
                 results = []
                 for idx, para in enumerate(paragraphs):
@@ -697,7 +738,7 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": final_text,
                     "original_text": chapter_text,
-                    "summary": f"Обработано {total} абзацев (v4.8.1). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
+                    "summary": f"Обработано {total} абзацев (v4.8.2). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
                     "paragraphs": results,
                     "average_human_score": avg_score,
                     "overall_analysis": overall,
@@ -729,7 +770,7 @@ def handle_http_exception(exc):
 @app.errorhandler(Exception)
 def handle_exception(exc):
     logger.exception("Unhandled exception")
-    return jsonify(detail=f"Server error: {str(exc)}"), 500
+    return jsonify(detail=f"Server error: {str(e)}"), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
