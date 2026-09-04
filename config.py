@@ -1,9 +1,9 @@
 """
-config.py — эксперимент: частицы 0.3 (v1.13)
+config.py — эксперимент: разговорные частицы 0.35 (v1.14)
 """
 
-CONFIG_VERSION = "v1.13"
-HYPOTHESIS = "Частицы 0.3 (было 0.25)"
+CONFIG_VERSION = "v1.14"
+HYPOTHESIS = "Разговорные частицы 0.35 (было 0.3) + частицы 0.25"
 
 RANDOM_SEED = 42
 
@@ -11,11 +11,11 @@ PROB_SYNONYMS = 0.3
 PROB_INSERTIONS = 0.3
 PROB_SWAP_FIRST_WORDS = 0.2
 PROB_INTERJECTIONS = 0.2
-PROB_PARTICLES = 0.3           # <-- изменено
+PROB_PARTICLES = 0.25
 PROB_CANCEL_CANCEL = 0.5
 PROB_REMOVE_AI_MARKERS = 0.6
 PROB_SPLIT_LONG_SENTENCES = 0.3
-PROB_ADD_COLLOQUIAL = 0.3
+PROB_ADD_COLLOQUIAL = 0.35   # <-- изменено
 PROB_TYPOS = 0.3
 
 PROB_SWAP_CLAUSES = 0.0
@@ -31,7 +31,8 @@ RU_T5_ATTEMPTS = 2
 RU_T5_TEMPERATURE = 1.0
 MAX_PARAGRAPHS_FOR_RU_T5 = 3
 
-# ===== СЛОВАРИ (без изменений, скопируйте из предыдущего рабочего config.py) =====
+# ===== СЛОВАРИ (без изменений) =====
+# (скопируйте из предыдущего рабочего config.py — они те же самые)
 
 # ===== СЛОВАРИ =====
 SYNONYMS_DICT = [
