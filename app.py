@@ -1,5 +1,5 @@
 """
-Chapter Editor v4.8.4 - диагностика локального детектора
+Chapter Editor v4.8.5 — с синтаксическими трансформациями (v1.24)
 """
 import json
 import os
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "4.8.4"
+APP_VERSION = "4.8.5"
 MAX_CHARS = 30_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
@@ -254,7 +254,7 @@ def get_human_score(text: str) -> int:
         score -= 15
     return max(0, min(100, int(score)))
 
-# ========== Полная пост-обработка (v1.18) ==========
+# ========== Полная пост-обработка (v1.24) ==========
 def post_process(text: str, logs: list = None) -> str:
     if not text or len(text) < 20:
         return text
@@ -282,6 +282,12 @@ def post_process(text: str, logs: list = None) -> str:
         ops.append('add_colloquial')
     if random.random() < config.PROB_TYPOS:
         ops.append('add_typos')
+    
+    # НОВЫЕ ОПЕРАЦИИ
+    if random.random() < config.PROB_SWAP_CLAUSES:
+        ops.append('swap_clauses')
+    if random.random() < config.PROB_DIRECT_INDIRECT:
+        ops.append('direct_indirect')
 
     if not ops:
         ops.append('synonyms')
@@ -455,6 +461,44 @@ def post_process(text: str, logs: list = None) -> str:
             text = ''.join(chars)
             if typo_count:
                 logs.append(f"  - добавлено опечаток: {typo_count}")
+
+        # ===== НОВЫЕ ОПЕРАЦИИ =====
+        elif op == 'swap_clauses':
+            def swap_clauses(text):
+                patterns = [
+                    (r'(.+?)\s+когда\s+(.+?)([.!?])', r'Когда \2, \1\3'),
+                    (r'(.+?)\s+если\s+(.+?)([.!?])', r'Если \2, \1\3'),
+                    (r'(.+?)\s+потому что\s+(.+?)([.!?])', r'Потому что \2, \1\3'),
+                    (r'(.+?)\s+хотя\s+(.+?)([.!?])', r'Хотя \2, \1\3'),
+                    (r'(.+?)\s+чтобы\s+(.+?)([.!?])', r'Чтобы \2, \1\3'),
+                ]
+                for pattern, repl in patterns:
+                    text = re.sub(pattern, repl, text, flags=re.DOTALL)
+                return text
+            new_text = swap_clauses(text)
+            if new_text != text:
+                logs.append("  - перестановка частей (когда/если/потому что/хотя/чтобы)")
+                text = new_text
+
+        elif op == 'direct_indirect':
+            def replace_direct_indirect(text):
+                pattern = re.compile(r'—\s*(.+?)\s*,\s*—\s*(' + '|'.join(REPORTING_VERBS) + r')\s+([а-яА-ЯёЁ]+)\.?')
+                def repl(m):
+                    text_part = m.group(1).strip()
+                    verb = m.group(2)
+                    who = m.group(3)
+                    if verb.endswith('а'):
+                        who_form = who
+                        if who in ('он', 'Алексей', 'Масарик', 'Кросс'):
+                            who_form = 'она'
+                    else:
+                        who_form = who
+                    return f"{who_form} {verb}, что {text_part.lower()}."
+                return pattern.sub(repl, text)
+            new_text = replace_direct_indirect(text)
+            if new_text != text:
+                logs.append("  - замена прямой речи на косвенную")
+                text = new_text
 
     return text
 
@@ -664,7 +708,7 @@ def api_revise():
 
         def generate():
             try:
-                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев (v4.8.4)..."})
+                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев (v4.8.5)..."})
 
                 results = []
                 for idx, para in enumerate(paragraphs):
@@ -728,7 +772,7 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": final_text,
                     "original_text": chapter_text,
-                    "summary": f"Обработано {total} абзацев (v4.8.4). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
+                    "summary": f"Обработано {total} абзацев (v4.8.5). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
                     "paragraphs": results,
                     "average_human_score": avg_score,
                     "overall_analysis": overall,
