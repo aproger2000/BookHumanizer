@@ -1,26 +1,28 @@
 """
-retrain_model.py — переобучение модели HUMAN на основе новых данных
+retrain_model.py — переобучение модели HUMAN
 """
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error
 import joblib
-import re
 import sys
-
-# Импортируем функцию из app.py для извлечения признаков
-# (если app.py не загружается, можно продублировать функцию)
 from app import extract_features
 
 def train():
-    print("Загрузка данных из training_data.csv...")
-    df = pd.read_csv('training_data.csv')
+    print("=== RETRAIN START ===")
+    try:
+        df = pd.read_csv('training_data.csv')
+    except Exception as e:
+        print(f"Ошибка чтения training_data.csv: {e}")
+        return
+
     df = df.dropna(subset=['HUMAN_yandex'])
     if len(df) == 0:
         print("Нет данных для обучения. Пропускаем.")
         return
 
-    print("Извлечение признаков...")
+    print(f"Найдено {len(df)} записей.")
+
     feature_rows = []
     for idx, row in df.iterrows():
         text = row['processed_text']
@@ -28,6 +30,7 @@ def train():
             continue
         feats = extract_features(text)
         feature_rows.append(feats)
+
     if not feature_rows:
         print("Не удалось извлечь признаки. Пропускаем.")
         return
@@ -52,6 +55,7 @@ def train():
     with open('feature_cols.txt', 'w') as f:
         f.write(','.join(feature_names))
     print("Модель сохранена.")
+    print("=== RETRAIN END ===")
 
 if __name__ == "__main__":
     train()
