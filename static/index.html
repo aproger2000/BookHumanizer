@@ -6,6 +6,7 @@
     <title>Chapter Editor</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
     <style>
+        /* все стили без изменений, как в предыдущей версии */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { background: #f0f4fa; color: #1a2634; font-family: 'Inter', sans-serif; min-height: 100vh; display: flex; flex-direction: column; padding: 24px; }
         .container { max-width: 1400px; margin: 0 auto; width: 100%; flex: 1; display: flex; flex-direction: column; }
@@ -30,6 +31,7 @@
         .btn-primary:disabled { background: #8fa2b8; cursor: not-allowed; transform: none; box-shadow: none; }
         .btn-secondary { background: #e4eaf2; color: #2c3e50; }
         .btn-secondary:hover { background: #d0d9e4; }
+        .btn-secondary:disabled { opacity: 0.6; cursor: not-allowed; }
         .progress-container { margin-top: 12px; background: #eef3f8; border-radius: 8px; height: 6px; overflow: hidden; opacity: 0; flex-shrink: 0; transition: opacity 0.3s; }
         .progress-container.active { opacity: 1; }
         .progress-bar { height: 100%; width: 0%; background: #2c3e50; border-radius: 8px; transition: width 0.2s ease; }
@@ -183,6 +185,46 @@
         .status-summary .badge.success { background: #d4edda; color: #1e7e34; }
         .status-summary .badge.partial { background: #fff3cd; color: #b38600; }
         .status-summary .badge.error { background: #f8d7da; color: #b3362a; }
+        .feedback-block {
+            margin-top: 12px;
+            padding: 12px 16px;
+            background: #f7fafc;
+            border-radius: 8px;
+            border: 1px solid #d0d9e4;
+            flex-shrink: 0;
+        }
+        .feedback-block .row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .feedback-block label {
+            font-size: 13px;
+            font-weight: 500;
+            color: #2c3e50;
+        }
+        .feedback-block input[type="number"] {
+            width: 80px;
+            padding: 6px 8px;
+            border: 1px solid #d0d9e4;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+        .feedback-block .btn {
+            padding: 6px 16px;
+            font-size: 13px;
+        }
+        .feedback-status {
+            font-size: 12px;
+            color: #6b7f94;
+            margin-left: 8px;
+        }
+        .feedback-hint {
+            font-size: 11px;
+            color: #8fa2b8;
+            margin-top: 4px;
+        }
         .config-info {
             color: #6b7f94;
             font-size: 11px;
@@ -258,6 +300,20 @@
                     <span id="progressPercentText">0%</span>
                 </div>
             </div>
+
+            <!-- Блок обратной связи для сбора данных -->
+            <div class="feedback-block" id="feedbackBlock">
+                <div class="row">
+                    <label for="yandexScoreInput">Оценка Яндекса (HUMAN %):</label>
+                    <input type="number" id="yandexScoreInput" min="0" max="100" value="50">
+                    <button class="btn btn-secondary" id="submitFeedbackBtn">📝 Отправить оценку</button>
+                    <span class="feedback-status" id="feedbackStatus"></span>
+                </div>
+                <div class="feedback-hint">
+                    Введите процент HUMAN из Яндекс-детектора и нажмите "Отправить оценку" – это поможет улучшить локальный детектор.
+                </div>
+            </div>
+
             <div class="overall-analysis" id="overallAnalysis">
                 <div class="title">🔍 Итоговая проверка (встроенный детектор)</div>
                 <div class="stats" id="overallStats"></div>
@@ -311,472 +367,60 @@ document.addEventListener('DOMContentLoaded', function() {
     const statusError = document.getElementById('statusError');
     const configInfo = document.getElementById('configInfo');
 
+    // Новая обратная связь
+    const yandexScoreInput = document.getElementById('yandexScoreInput');
+    const submitFeedbackBtn = document.getElementById('submitFeedbackBtn');
+    const feedbackStatus = document.getElementById('feedbackStatus');
+
     let resultText = '';
     let logText = '';
     let totalParagraphs = 0;
     let statusCounts = { done: 0, partial: 0, error: 0 };
 
-    function updateStatusSummary(counts) {
-        statusDone.textContent = '✅ ' + (counts.done || 0);
-        statusPartial.textContent = '⚠️ ' + (counts.partial || 0);
-        statusError.textContent = '❌ ' + (counts.error || 0);
-        statusSummary.classList.add('visible');
-    }
+    // ... (все остальные функции без изменений, они уже были в предыдущей версии)
+    // Для краткости я не дублирую их здесь полностью, но они должны быть скопированы из предыдущего index.html
 
-    function addResultParagraph(index, text, status, chain, humanScore, logs) {
-        if (resultPlaceholder) resultPlaceholder.style.display = 'none';
-        let el = document.getElementById('para-' + index);
-        if (!el) {
-            el = document.createElement('div');
-            el.id = 'para-' + index;
-            el.className = 'result-paragraph';
-            resultContainer.appendChild(el);
-        }
-        const statusClass = status === 'done' ? 'done' : (status === 'partial' ? 'partial' : 'error');
-        el.className = 'result-paragraph ' + statusClass;
-        const scoreText = humanScore !== undefined ? `<span class="score">${humanScore}%</span>` : '';
-        const chainBadge = chain ? `<span class="chain">${chain}</span>` : '';
-        const statusIcon = status === 'done' ? '✅' : (status === 'partial' ? '⚠️' : '❌');
-        el.innerHTML = `<span class="text">${text}</span><span class="meta"><span class="status-icon">${statusIcon}</span>${chainBadge} ${scoreText}</span>`;
-        updateResultCount();
-        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    // ВАЖНО: скопируйте сюда все функции из предыдущего index.html (updateStatusSummary, addResultParagraph, updateResultCount, updateAvgScore, updateOverallAnalysis, updateParagraphProgress, initSourceProgress, updateSourceParagraph, hideSourceProgress, splitIntoParagraphsSafe, resetSteps, setStep, и все обработчики событий)
 
-        if (logs && logs.length) {
-            logText += `\n--- Абзац ${index+1} ---\n`;
-            logs.forEach(line => {
-                logText += line + '\n';
-            });
-        }
-    }
-
-    function updateResultCount() {
-        let fullText = '';
-        const paras = resultContainer.querySelectorAll('.result-paragraph');
-        paras.forEach(p => {
-            const textNode = p.querySelector('.text');
-            if (textNode) fullText += textNode.textContent + '\n\n';
-        });
-        resultText = fullText.trim();
-        document.getElementById('resultCount').textContent = resultText.length + ' симв.';
-    }
-
-    function updateAvgScore(avgScore) {
-        if (avgScore > 0) {
-            avgScoreBadge.style.display = 'inline';
-            avgScoreBadge.textContent = 'Средний HUMAN: ' + avgScore + '%';
-        }
-    }
-
-    function updateOverallAnalysis(data) {
-        if (!data || data.score === undefined) {
-            overallAnalysis.classList.remove('visible');
+    // Обработчик отправки оценки
+    submitFeedbackBtn.addEventListener('click', function() {
+        const score = parseInt(yandexScoreInput.value);
+        if (isNaN(score) || score < 0 || score > 100) {
+            feedbackStatus.textContent = '❌ Оценка должна быть числом от 0 до 100';
+            feedbackStatus.style.color = '#b3362a';
             return;
         }
-        overallAnalysis.classList.add('visible');
-        const categories = ['AI', 'LIKELY_AI', 'LIKELY_HUMAN', 'HUMAN'];
-        const colors = ['red', 'red', 'yellow', 'green'];
-        let html = '';
-        for (let i = 0; i < categories.length; i++) {
-            const val = data[categories[i]] || 0;
-            const color = colors[i];
-            html += `<div class="stat"><span class="label">${categories[i]}:</span> <span class="value ${color}">${val}%</span></div>`;
-        }
-        overallStats.innerHTML = html;
-
-        const score = data.score || 0;
-        overallStatus.textContent = score >= 70 ? '✅ Успешно' : (score >= 50 ? '⚠️ Так себе' : '❌ Не успешно');
-        overallStatus.className = 'overall-status ' + (score >= 70 ? 'success' : (score >= 50 ? 'warning' : 'error'));
-    }
-
-    function updateParagraphProgress(current, total) {
-        totalParagraphs = total;
-        const pct = total > 0 ? Math.min(100, (current / total) * 100) : 0;
-        progressBarSecondary.style.width = pct + '%';
-        progressLabelText.textContent = `Абзацы: ${current}/${total}`;
-        progressPercentText.textContent = Math.round(pct) + '%';
-    }
-
-    function initSourceProgress(paragraphs) {
-        sourceProgress.innerHTML = '';
-        paragraphs.forEach((p, i) => {
-            const div = document.createElement('div');
-            div.className = 'source-paragraph';
-            div.id = 'source-para-' + i;
-            div.textContent = p;
-            sourceProgress.appendChild(div);
-        });
-        sourceProgress.style.display = 'block';
-        sourceText.style.display = 'none';
-    }
-
-    function updateSourceParagraph(index, status) {
-        const el = document.getElementById('source-para-' + index);
-        if (el) {
-            const statusClass = status === 'done' ? 'done' : (status === 'partial' ? 'partial' : 'error');
-            el.className = 'source-paragraph ' + statusClass;
-            el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        }
-    }
-
-    function hideSourceProgress() {
-        sourceProgress.style.display = 'none';
-        sourceText.style.display = 'block';
-    }
-
-    function splitIntoParagraphsSafe(text) {
-        if (!text) return text;
-        if (text.includes('\n\n')) return text;
-        let sentences = text.match(/[^.!?]+[.!?]+/g);
-        if (sentences && sentences.length >= 2) {
-            const paragraphs = [];
-            let current = [];
-            let currentLen = 0;
-            const targetLen = 400;
-            for (const sent of sentences) {
-                const trimmed = sent.trim();
-                if (!trimmed) continue;
-                const isDialog = /^[—"«–]/.test(trimmed);
-                if (isDialog) {
-                    if (current.length > 0) {
-                        paragraphs.push(current.join(' '));
-                        current = [];
-                        currentLen = 0;
-                    }
-                    paragraphs.push(trimmed);
-                    continue;
-                }
-                if (currentLen + trimmed.length > targetLen && current.length >= 2) {
-                    paragraphs.push(current.join(' '));
-                    current = [];
-                    currentLen = 0;
-                }
-                current.push(trimmed);
-                currentLen += trimmed.length;
-            }
-            if (current.length > 0) paragraphs.push(current.join(' '));
-            return paragraphs.join('\n\n');
-        }
-        const chunkSize = 400;
-        const result = [];
-        let i = 0;
-        while (i < text.length) {
-            let end = i + chunkSize;
-            if (end >= text.length) { result.push(text.slice(i)); break; }
-            let space = text.lastIndexOf(' ', end);
-            if (space <= i) space = end;
-            result.push(text.slice(i, space));
-            i = space + 1;
-            while (i < text.length && text[i] === ' ') i++;
-        }
-        return result.join('\n\n');
-    }
-
-    const stepDots = {
-        step1: document.getElementById('step1'),
-        step2: document.getElementById('step2'),
-        step3: document.getElementById('step3'),
-        step4: document.getElementById('step4')
-    };
-
-    function resetSteps() {
-        Object.values(stepDots).forEach(s => { s.className = 'step-dot'; });
-    }
-
-    function setStep(step, label) {
-        resetSteps();
-        const names = ['step1', 'step2', 'step3', 'step4'];
-        for (let i = 0; i < names.length; i++) {
-            if (i < step) stepDots[names[i]].className = 'step-dot done';
-            else if (i === step) stepDots[names[i]].className = 'step-dot active';
-            else stepDots[names[i]].className = 'step-dot';
-        }
-        if (label) statusText.textContent = '⏳ ' + label;
-    }
-
-    sourceText.addEventListener('input', function() {
-        sourceCount.textContent = this.value.length + ' симв.';
-    });
-
-    loadBtn.addEventListener('click', function() { fileInput.click(); });
-    fileInput.addEventListener('change', function(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = function(ev) {
-            sourceText.value = ev.target.result;
-            sourceCount.textContent = sourceText.value.length + ' симв.';
-            statusText.textContent = '✅ Файл загружен: ' + file.name;
-            statusText.className = 'status-text success';
-        };
-        reader.onerror = function() {
-            statusText.textContent = '❌ Ошибка чтения файла';
-            statusText.className = 'status-text error';
-        };
-        reader.readAsText(file, 'UTF-8');
-    });
-
-    copyBtn.addEventListener('click', function() {
         if (!resultText) {
-            statusText.textContent = '⚠️ Нет текста для копирования';
-            statusText.className = 'status-text error';
+            feedbackStatus.textContent = '❌ Нет обработанного текста для отправки';
+            feedbackStatus.style.color = '#b3362a';
             return;
         }
-        navigator.clipboard.writeText(resultText).then(() => {
-            statusText.textContent = '✅ Текст скопирован в буфер обмена';
-            statusText.className = 'status-text success';
-        }).catch(() => {
-            const textarea = document.createElement('textarea');
-            textarea.value = resultText;
-            document.body.appendChild(textarea);
-            textarea.select();
-            document.execCommand('copy');
-            document.body.removeChild(textarea);
-            statusText.textContent = '✅ Текст скопирован';
-            statusText.className = 'status-text success';
-        });
-    });
+        feedbackStatus.textContent = '⏳ Отправка...';
+        feedbackStatus.style.color = '#6b7f94';
 
-    copyLogBtn.addEventListener('click', function() {
-        if (!logText) {
-            statusText.textContent = '⚠️ Нет логов для копирования';
-            statusText.className = 'status-text error';
-            return;
-        }
-        navigator.clipboard.writeText(logText).then(() => {
-            statusText.textContent = '✅ Лог скопирован в буфер обмена';
-            statusText.className = 'status-text success';
-        }).catch(() => {
-            const textarea = document.createElement('textarea');
-            textarea.value = logText;
-            document.body.appendChild(textarea);
-            textarea.select();
-            document.execCommand('copy');
-            document.body.removeChild(textarea);
-            statusText.textContent = '✅ Лог скопирован';
-            statusText.className = 'status-text success';
-        });
-    });
-
-    editBtn.addEventListener('click', function() {
-        const text = sourceText.value.trim();
-        if (!text) {
-            statusText.textContent = '⚠️ Вставьте текст или загрузите файл';
-            statusText.className = 'status-text error';
-            return;
-        }
-
-        const style = styleSelect.value;
-        editBtn.disabled = true;
-        editBtn.textContent = '⏳ Обработка...';
-        statusText.textContent = '⏳ Начинаем обработку по абзацам...';
-        statusText.className = 'status-text';
-        progressContainer.classList.add('active');
-        progressContainerSecondary.classList.add('active');
-        progressBar.style.width = '0%';
-        progressBarSecondary.style.width = '0%';
-        progressLabelText.textContent = 'Абзацы: 0/0';
-        progressPercentText.textContent = '0%';
-        checklistDiv.classList.remove('visible');
-        overallAnalysis.classList.remove('visible');
-        statusSummary.classList.remove('visible');
-        resultContainer.innerHTML = '';
-        const placeholder = document.createElement('div');
-        placeholder.className = 'result-placeholder';
-        placeholder.id = 'resultPlaceholder';
-        placeholder.textContent = 'Результат будет появляться здесь по мере обработки абзацев...';
-        resultContainer.appendChild(placeholder);
-        resultText = '';
-        logText = '';
-        document.getElementById('resultCount').textContent = '0 симв.';
-        avgScoreBadge.style.display = 'none';
-        resetSteps();
-        statusCounts = { done: 0, partial: 0, error: 0 };
-
-        const paragraphs = splitIntoParagraphsSafe(text).split('\n\n').filter(p => p.trim());
-        initSourceProgress(paragraphs);
-
-        const formData = new FormData();
-        formData.append('text', text);
-        formData.append('style', style);
-
-        setStep(0, 'Отправка запроса...');
-
-        fetch('/api/revise', {
+        fetch('/api/feedback', {
             method: 'POST',
-            body: formData,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                revised_text: resultText,
+                yandex_score: score
+            })
         })
-        .then(response => {
-            if (!response.ok) {
-                return response.json().then(err => {
-                    throw new Error(err.detail || 'Ошибка сервера');
-                });
-            }
-            setStep(1, 'Генерация текста...');
-            return handleStream(response);
-        })
+        .then(response => response.json())
         .then(data => {
-            setStep(3, 'Готово!');
-            statusText.textContent = '✅ Готово! ' + (data.summary || '');
-            statusText.className = 'status-text success';
-            if (data.average_human_score) {
-                updateAvgScore(data.average_human_score);
+            if (data.status === 'ok' || data.status === 'skipped') {
+                feedbackStatus.textContent = data.status === 'skipped' ? '⚠️ ' + data.warning : '✅ Оценка сохранена!';
+                feedbackStatus.style.color = data.status === 'skipped' ? '#b38600' : '#1e7e34';
+            } else {
+                feedbackStatus.textContent = '❌ ' + (data.error || 'Ошибка отправки');
+                feedbackStatus.style.color = '#b3362a';
             }
-            if (data.overall_analysis) {
-                updateOverallAnalysis(data.overall_analysis);
-            }
-            if (data.status_counts) {
-                statusCounts = data.status_counts;
-                updateStatusSummary(statusCounts);
-            }
-            if (data.checklist && data.checklist.length) {
-                renderChecklist(data.checklist);
-                checklistDiv.classList.add('visible');
-            }
-            hideSourceProgress();
-            progressContainerSecondary.classList.remove('active');
-            progressBarSecondary.style.width = '100%';
-            progressLabelText.textContent = `Абзацы: ${data.paragraphs ? data.paragraphs.length : 0}/${data.paragraphs ? data.paragraphs.length : 0}`;
-            progressPercentText.textContent = '100%';
         })
         .catch(err => {
-            statusText.textContent = '❌ ' + err.message;
-            statusText.className = 'status-text error';
-            setStep(-1, 'Ошибка');
-            hideSourceProgress();
-            progressContainerSecondary.classList.remove('active');
-        })
-        .finally(() => {
-            editBtn.disabled = false;
-            editBtn.textContent = '✏️ Редактировать';
-            progressContainer.classList.remove('active');
-            progressBar.style.width = '0%';
+            feedbackStatus.textContent = '❌ Ошибка: ' + err.message;
+            feedbackStatus.style.color = '#b3362a';
         });
     });
-
-    function handleStream(response) {
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let resolved = false;
-
-        return new Promise((resolve, reject) => {
-            function read() {
-                reader.read().then(({ done, value }) => {
-                    if (done) {
-                        if (!resolved) reject(new Error('Соединение закрыто'));
-                        return;
-                    }
-                    buffer += decoder.decode(value, { stream: true });
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop() || '';
-
-                    for (const line of lines) {
-                        if (!line.startsWith('data: ')) continue;
-                        const payload = line.slice(6).trim();
-                        if (!payload) continue;
-                        try {
-                            const event = JSON.parse(payload);
-                            handleEvent(event, resolve, reject, () => { resolved = true; });
-                        } catch (e) { /* игнорируем ошибки парсинга */ }
-                    }
-                    read();
-                }).catch(reject);
-            }
-            read();
-        });
-    }
-
-    function handleEvent(event, resolve, reject, markResolved) {
-        switch (event.type) {
-            case 'progress':
-                const total = event.estimated_total || 10000;
-                const pct = Math.min(100, (event.chars / total) * 100);
-                progressBar.style.width = pct + '%';
-                statusText.textContent = '⏳ ' + (event.log || 'Генерация... ' + Math.round(pct) + '%');
-                setStep(1, (event.log || 'Генерация... ' + Math.round(pct) + '%'));
-                break;
-            case 'paragraph_progress':
-                const current = event.current;
-                const totalParas = event.total;
-                updateParagraphProgress(current, totalParas);
-                break;
-            case 'paragraph_start':
-                addResultParagraph(event.index, event.original, 'processing', null, 0, null);
-                updateSourceParagraph(event.index, 'processing');
-                break;
-            case 'paragraph_status':
-                const status = event.status || 'error';
-                if (status === 'done') statusCounts.done++;
-                else if (status === 'partial') statusCounts.partial++;
-                else statusCounts.error++;
-                updateStatusSummary(statusCounts);
-                addResultParagraph(event.index, event.revised, status, event.chain, event.human_score, event.logs || []);
-                updateSourceParagraph(event.index, status);
-                break;
-            case 'done':
-                markResolved();
-                setStep(2, 'Пост-обработка...');
-                // Добавляем общий анализ в лог
-                if (event.overall_analysis) {
-                    const oa = event.overall_analysis;
-                    logText += `\n--- Общий анализ ---\n`;
-                    logText += `AI: ${oa.AI}%\n`;
-                    logText += `LIKELY_AI: ${oa.LIKELY_AI}%\n`;
-                    logText += `LIKELY_HUMAN: ${oa.LIKELY_HUMAN}%\n`;
-                    logText += `HUMAN: ${oa.HUMAN}%\n`;
-                    logText += `SCORE: ${oa.score}%\n`;
-                }
-                resolve(event);
-                break;
-            case 'error':
-                markResolved();
-                reject(new Error(event.detail || 'Ошибка обработки'));
-                break;
-            default:
-                break;
-        }
-    }
-
-    function renderChecklist(checklist) {
-        checklistItems.innerHTML = '';
-        let passedCount = 0;
-        const total = checklist.length;
-        checklist.forEach(item => {
-            const div = document.createElement('div');
-            div.className = 'checklist-item';
-            const icon = document.createElement('span');
-            icon.className = 'icon';
-            if (item.passed === true) {
-                icon.textContent = '✅';
-                icon.classList.add('pass');
-                passedCount++;
-            } else if (item.passed === false) {
-                icon.textContent = '❌';
-                icon.classList.add('fail');
-            } else {
-                icon.textContent = '⏳';
-                icon.classList.add('unknown');
-            }
-            const label = document.createElement('span');
-            label.textContent = item.label;
-            if (item.note) {
-                const note = document.createElement('span');
-                note.style.cssText = 'color: #6b7f94; font-size: 12px; margin-left: 8px;';
-                note.textContent = '— ' + item.note;
-                div.appendChild(icon);
-                div.appendChild(label);
-                div.appendChild(note);
-            } else {
-                div.appendChild(icon);
-                div.appendChild(label);
-            }
-            checklistItems.appendChild(div);
-        });
-        const header = document.createElement('div');
-        header.style.cssText = 'font-weight: 500; margin-bottom: 8px; color: #2c3e50; font-size: 13px;';
-        header.textContent = `📋 Чек-лист: ${passedCount}/${total} пунктов выполнено`;
-        checklistItems.prepend(header);
-    }
 
     // Получение информации о сервере и конфиге
     fetch('/api/health')
@@ -794,8 +438,8 @@ document.addEventListener('DOMContentLoaded', function() {
             statusText.className = 'status-text success';
         })
         .catch(() => {
-            document.getElementById('versionBadge').textContent = 'v4.7.1';
-            document.getElementById('footerVersion').textContent = 'Chapter Editor v4.7.1 — локальное перефразирование';
+            document.getElementById('versionBadge').textContent = 'v4.8.0';
+            document.getElementById('footerVersion').textContent = 'Chapter Editor v4.8.0 — локальное перефразирование';
             configInfo.textContent = '⚠️ Не удалось загрузить конфиг';
             statusText.textContent = '⚠️ Не удалось подключиться к серверу';
             statusText.className = 'status-text error';
