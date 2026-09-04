@@ -1,15 +1,15 @@
 """
-config.py — эксперимент: вставки 0.35 (v1.21)
+config.py — эксперимент: перестановка первых слов 0.4 (v1.22)
 """
 
-CONFIG_VERSION = "v1.21"
-HYPOTHESIS = "Вставки 0.35 (было 0.3) + перестановка первых слов 0.3 + междометия 0.25 + частицы 0.25"
+CONFIG_VERSION = "v1.22"
+HYPOTHESIS = "Перестановка первых слов 0.4 (было 0.3)"
 
 RANDOM_SEED = 42
 
 PROB_SYNONYMS = 0.3
-PROB_INSERTIONS = 0.35           # <-- изменено
-PROB_SWAP_FIRST_WORDS = 0.3
+PROB_INSERTIONS = 0.3
+PROB_SWAP_FIRST_WORDS = 0.4
 PROB_INTERJECTIONS = 0.25
 PROB_PARTICLES = 0.25
 PROB_CANCEL_CANCEL = 0.5
@@ -30,6 +30,8 @@ RU_T5_THRESHOLD = 50
 RU_T5_ATTEMPTS = 2
 RU_T5_TEMPERATURE = 1.0
 MAX_PARAGRAPHS_FOR_RU_T5 = 3
+
+# ===== СЛОВАРИ (без изменений) =====
 
 # ===== СЛОВАРИ =====
 SYNONYMS_DICT = [
