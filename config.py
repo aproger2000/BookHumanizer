@@ -2,7 +2,7 @@
 config.py — эксперимент: удаление AI-маркеров 0.7 (v1.15)
 """
 
-CONFIG_VERSION = "v1.15"
+CONFIG_VERSION = "v1.16"
 HYPOTHESIS = "Удаление AI-маркеров 0.7 (было 0.6) + частицы 0.25 + опечатки 0.3"
 
 RANDOM_SEED = 42
@@ -10,7 +10,7 @@ RANDOM_SEED = 42
 PROB_SYNONYMS = 0.3
 PROB_INSERTIONS = 0.3
 PROB_SWAP_FIRST_WORDS = 0.2
-PROB_INTERJECTIONS = 0.2
+PROB_INTERJECTIONS = 0.25
 PROB_PARTICLES = 0.25
 PROB_CANCEL_CANCEL = 0.5
 PROB_REMOVE_AI_MARKERS = 0.7   # <-- изменено
