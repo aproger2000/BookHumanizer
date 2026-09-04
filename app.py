@@ -203,13 +203,11 @@ def extract_features(text: str) -> dict:
 def get_human_score(text: str) -> int:
     if not text or len(text) < 20:
         return 50
-    # Всегда используем модель, если она загружена
     if MODEL_LOADED and human_model is not None and feature_cols:
         try:
             features = extract_features(text)
             X = [[features.get(col, 0) for col in feature_cols]]
             pred = human_model.predict(X)[0]
-            # Ограничиваем 0-100 и округляем
             return max(0, min(100, int(round(pred))))
         except Exception as e:
             logger.warning(f"Ошибка предсказания: {e}. Использую эвристику.")
@@ -251,7 +249,6 @@ def get_human_score(text: str) -> int:
     return max(0, min(100, int(score)))
 
 # ========== Полная пост-обработка (v1.18) ==========
-# (опущена для краткости, но в вашем файле она должна быть полной)
 def post_process(text: str, logs: list = None) -> str:
     if not text or len(text) < 20:
         return text
@@ -284,181 +281,18 @@ def post_process(text: str, logs: list = None) -> str:
         ops.append('synonyms')
 
     for op in ops:
-        # ... (все блоки операций из v1.18)
-        # Здесь должен быть полный код, но для краткости я его опускаю.
-        # В вашем реальном файле он должен быть полностью скопирован из предыдущей версии.
-        pass
-
-    return text
-
-# ========== Обработка абзаца ==========
-def process_paragraph(paragraph: str) -> dict:
-    if not paragraph:
-        return {
-            "original": paragraph,
-            "revised": paragraph,
-            "status": "error",
-            "chain": "LOCAL",
-            "human_score": 0,
-            "logs": ["Пустой абзац"]
-        }
-
-    logs = []
-    original_score = get_human_score(paragraph)
-    logs.append(f"Оригинальный HUMAN: {original_score}%")
-
-    if original_score >= 50:
-        return {
-            "original": paragraph,
-            "revised": paragraph,
-            "status": "done",
-            "chain": "LOCAL (skipped)",
-            "human_score": original_score,
-            "logs": logs + ["Абзац уже имеет HUMAN >= 50, пропущен"]
-        }
-
-    post_logs = []
-    revised = post_process(paragraph, logs=post_logs)
-    score = get_human_score(revised)
-    logs.extend(post_logs)
-    logs.append(f"Итоговый HUMAN: {score}%")
-
-    return {
-        "original": paragraph,
-        "revised": revised,
-        "status": "done" if score > 50 else "partial",
-        "chain": "LOCAL (post only)",
-        "human_score": score,
-        "logs": logs
-    }
-
-def analyze_overall(text: str) -> dict:
-    # (без изменений)
-    pass
-
-def split_paragraphs(text: str) -> list:
-    # (без изменений)
-    pass
-
-# ========== Flask endpoints ==========
-@app.get("/api/health")
-def health():
-    return jsonify(
-        status="ok",
-        version=APP_VERSION,
-        config_version=config.CONFIG_VERSION,
-        hypothesis=config.HYPOTHESIS
-    )
-
-RETRAIN_TOKEN = os.environ.get("RETRAIN_TOKEN", "your-secret-token")
-
-@app.post("/api/retrain")
-def api_retrain():
-    token = request.headers.get("X-Retrain-Token")
-    if token != RETRAIN_TOKEN:
-        return jsonify({"error": "Unauthorized"}), 401
-    try:
-        retrain_model_sync()
-        return jsonify({"status": "ok", "message": "Retrained successfully"})
-    except Exception as e:
-        logger.error(f"Retrain error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.post("/api/reload_model")
-def reload_model():
-    try:
-        load_model()
-        return jsonify({"status": "ok"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.post("/api/feedback")
-def feedback():
-    data = request.json
-    if not data:
-        return jsonify({"error": "No JSON data"}), 400
-
-    revised_text = data.get('revised_text', '').strip()
-    yandex_score = data.get('yandex_score')
-
-    if not revised_text:
-        return jsonify({"error": "Missing revised_text"}), 400
-    if yandex_score is None:
-        return jsonify({"error": "Missing yandex_score"}), 400
-    try:
-        yandex_score = int(yandex_score)
-        if not (0 <= yandex_score <= 100):
-            raise ValueError
-    except:
-        return jsonify({"error": "yandex_score must be an integer 0-100"}), 400
-
-    csv_path = Path('training_data.csv')
-    # Проверка на дубликат
-    if csv_path.exists():
-        with open(csv_path, 'r', encoding='utf-8') as f:
-            reader = csv.reader(f)
-            header = next(reader, None)
-            for row in reader:
-                if len(row) >= 12 and row[10] == revised_text:
-                    return jsonify({"warning": "This text already exists in training data", "status": "skipped"}), 200
-
-    try:
-        features = extract_features(revised_text)
-    except Exception as e:
-        logger.error(f"Feature extraction failed: {e}")
-        return jsonify({"error": f"Feature extraction failed: {str(e)}"}), 500
-
-    if MODEL_LOADED and feature_cols:
-        feature_order = feature_cols
-    else:
-        feature_order = [
-            'latin_ratio', 'marker_count', 'avg_word_len', 'max_repeat_ratio',
-            'num_sentences', 'avg_sentence_len', 'dialog_ratio',
-            'question_marks', 'exclamation_marks', 'lexical_diversity'
-        ]
-
-    row = [features.get(col, 0) for col in feature_order] + [revised_text, yandex_score]
-
-    # Сохраняем в CSV
-    if not csv_path.exists():
-        with open(csv_path, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            header = feature_order + ['processed_text', 'HUMAN_yandex']
-            writer.writerow(header)
-            writer.writerow(row)
-    else:
-        with open(csv_path, 'a', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerow(row)
-
-    logger.info(f"Added feedback: score={yandex_score}, text length={len(revised_text)}")
-
-    # Запускаем переобучение сразу после сохранения (синхронно в фоне)
-    thread = threading.Thread(target=retrain_model_sync, daemon=True)
-    thread.start()
-    logger.info("Запущено фоновое переобучение после добавления оценки")
-
-    return jsonify({"status": "ok", "message": "Feedback saved, retraining started"})
-
-@app.post("/api/revise")
-def api_revise():
-    # (полная функция из предыдущих версий)
-    # Для краткости оставлю заглушку, но в реальном файле она должна быть полной.
-    pass
-
-@app.get("/")
-def index():
-    return app.send_static_file("index.html")
-
-@app.errorhandler(HTTPException)
-def handle_http_exception(exc):
-    return jsonify(detail=exc.description or str(exc)), exc.code or 500
-
-@app.errorhandler(Exception)
-def handle_exception(exc):
-    logger.exception("Unhandled exception")
-    return jsonify(detail=f"Server error: {str(exc)}"), 500
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+        if op == 'synonyms':
+            replacements = 0
+            for pattern, syn_list in SYNONYMS:
+                if random.random() < config.PROB_SYNONYMS:
+                    matches = list(re.finditer(pattern, text, flags=re.IGNORECASE))
+                    if matches:
+                        match = random.choice(matches)
+                        word = match.group(0)
+                        syn = random.choice(syn_list)
+                        if word[0].isupper():
+                            syn = syn.capitalize()
+                        text = text[:match.start()] + syn + text[match.end():]
+                        replacements += 1
+            if replacements:
+                logs.append(f"
