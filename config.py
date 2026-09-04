@@ -1,9 +1,9 @@
 """
-config.py — эксперимент: разговорные частицы 0.35 (v1.14)
+config.py — эксперимент: удаление AI-маркеров 0.7 (v1.15)
 """
 
-CONFIG_VERSION = "v1.14"
-HYPOTHESIS = "Разговорные частицы 0.35 (было 0.3) + частицы 0.25"
+CONFIG_VERSION = "v1.15"
+HYPOTHESIS = "Удаление AI-маркеров 0.7 (было 0.6) + частицы 0.25 + опечатки 0.3"
 
 RANDOM_SEED = 42
 
@@ -13,9 +13,9 @@ PROB_SWAP_FIRST_WORDS = 0.2
 PROB_INTERJECTIONS = 0.2
 PROB_PARTICLES = 0.25
 PROB_CANCEL_CANCEL = 0.5
-PROB_REMOVE_AI_MARKERS = 0.6
+PROB_REMOVE_AI_MARKERS = 0.7   # <-- изменено
 PROB_SPLIT_LONG_SENTENCES = 0.3
-PROB_ADD_COLLOQUIAL = 0.35   # <-- изменено
+PROB_ADD_COLLOQUIAL = 0.3
 PROB_TYPOS = 0.3
 
 PROB_SWAP_CLAUSES = 0.0
