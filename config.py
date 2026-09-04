@@ -2,7 +2,7 @@
 config.py — эксперимент: перестановка первых слов 0.3 (v1.18)
 """
 
-CONFIG_VERSION = "v1.18"
+CONFIG_VERSION = "v1.19"
 HYPOTHESIS = "Перестановка первых слов 0.3 (было 0.2) + междометия 0.25 + частицы 0.25"
 
 RANDOM_SEED = 42
@@ -14,7 +14,7 @@ PROB_INTERJECTIONS = 0.25
 PROB_PARTICLES = 0.25
 PROB_CANCEL_CANCEL = 0.5           # возвращено к 0.5
 PROB_REMOVE_AI_MARKERS = 0.6
-PROB_SPLIT_LONG_SENTENCES = 0.3
+PROB_SPLIT_LONG_SENTENCES = 0.4
 PROB_ADD_COLLOQUIAL = 0.3
 PROB_TYPOS = 0.3
 
