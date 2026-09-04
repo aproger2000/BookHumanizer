@@ -1,17 +1,17 @@
 """
-config.py — эксперимент: частицы 0.3 (v1.23)
+config.py — эксперимент: междометия 0.3 (v1.24)
 """
 
-CONFIG_VERSION = "v1.23"
-HYPOTHESIS = "Частицы 0.3 (было 0.25) + перестановка первых слов 0.3 + междометия 0.25"
+CONFIG_VERSION = "v1.24"
+HYPOTHESIS = "Междометия 0.3 (было 0.25) + перестановка первых слов 0.3 + частицы 0.25"
 
 RANDOM_SEED = 42
 
 PROB_SYNONYMS = 0.3
 PROB_INSERTIONS = 0.3
 PROB_SWAP_FIRST_WORDS = 0.3
-PROB_INTERJECTIONS = 0.25
-PROB_PARTICLES = 0.3             # <-- изменено
+PROB_INTERJECTIONS = 0.3          # <-- изменено
+PROB_PARTICLES = 0.25             # возвращено к 0.25
 PROB_CANCEL_CANCEL = 0.5
 PROB_REMOVE_AI_MARKERS = 0.6
 PROB_SPLIT_LONG_SENTENCES = 0.3
