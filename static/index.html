@@ -647,6 +647,9 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(response => response.json())
         .then(data => {
             if (data.status === 'ok' || data.status === 'skipped') {
+                // ==== ДОБАВЛЯЕМ ОЦЕНКУ В ЛОГ ====
+                logText += `\n--- Ручная оценка Яндекса ---\nHUMAN: ${score}%\n`;
+                // =================================
                 feedbackStatus.textContent = data.status === 'skipped' ? '⚠️ ' + data.warning : '✅ Оценка сохранена!';
                 feedbackStatus.style.color = data.status === 'skipped' ? '#b38600' : '#1e7e34';
             } else {
