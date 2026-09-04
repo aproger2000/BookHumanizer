@@ -1,9 +1,9 @@
 """
-config.py — эксперимент: опечатки 0.3 (v1.7)
+config.py — эксперимент: опечатки 0.35 (v1.11)
 """
 
-CONFIG_VERSION = "v1.7"
-HYPOTHESIS = "Опечатки 0.3 (было 0.25)"
+CONFIG_VERSION = "v1.11"
+HYPOTHESIS = "Опечатки 0.35 (было 0.3)"
 
 RANDOM_SEED = 42
 
@@ -16,7 +16,7 @@ PROB_CANCEL_CANCEL = 0.5
 PROB_REMOVE_AI_MARKERS = 0.6
 PROB_SPLIT_LONG_SENTENCES = 0.3
 PROB_ADD_COLLOQUIAL = 0.3
-PROB_TYPOS = 0.3
+PROB_TYPOS = 0.35   # <-- изменено
 
 PROB_SWAP_CLAUSES = 0.0
 PROB_CHANGE_WORD_ORDER = 0.0
@@ -30,6 +30,9 @@ RU_T5_THRESHOLD = 50
 RU_T5_ATTEMPTS = 2
 RU_T5_TEMPERATURE = 1.0
 MAX_PARAGRAPHS_FOR_RU_T5 = 3
+
+# ===== СЛОВАРИ =====
+# (скопируйте из предыдущего config.py — они без изменений)
 
 # ===== СЛОВАРИ =====
 SYNONYMS_DICT = [
