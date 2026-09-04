@@ -1,5 +1,5 @@
 """
-Chapter Editor v4.8.0 — с автоматическим дообучением модели и сбором обратной связи
+Chapter Editor v4.8.1 — с автоматическим фоновым переобучением
 """
 import json
 import os
@@ -10,6 +10,8 @@ import random
 import joblib
 import subprocess
 import csv
+import threading
+import time
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, stream_with_context
@@ -24,7 +26,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "4.8.0"
+APP_VERSION = "4.8.1"
 MAX_CHARS = 30_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
@@ -67,6 +69,10 @@ CLAUSE_CONJUNCTIONS = config.CLAUSE_CONJUNCTIONS
 CANCEL_CANCEL_DICT = config.CANCEL_CANCEL_DICT
 AI_MARKERS = config.AI_MARKERS
 COLLOQUIAL_PARTICLES = config.COLLOQUIAL_PARTICLES
+
+# ========== Счётчик для фонового переобучения ==========
+_last_retrain_count = 0
+RETRAIN_EVERY_N = 5  # переобучать каждые 5 новых записей
 
 # ========== Вспомогательные функции ==========
 def _sse(event_type: str, data: dict) -> str:
@@ -140,7 +146,7 @@ def get_human_score(text: str) -> int:
             return max(0, min(100, int(round(pred))))
         except Exception as e:
             logger.warning(f"Ошибка предсказания: {e}. Использую эвристику.")
-    # эвристический fallback (старый код)
+    # эвристический fallback
     letters = sum(1 for ch in text if ch.isalpha())
     if letters == 0:
         return 80
@@ -177,7 +183,7 @@ def get_human_score(text: str) -> int:
         score -= 15
     return max(0, min(100, int(score)))
 
-# ========== Пост-обработка (полная версия из v1.7) ==========
+# ========== Полная пост-обработка (v1.12) ==========
 def post_process(text: str, logs: list = None) -> str:
     if not text or len(text) < 20:
         return text
@@ -379,8 +385,6 @@ def post_process(text: str, logs: list = None) -> str:
             if typo_count:
                 logs.append(f"  - добавлено опечаток: {typo_count}")
 
-        # (отключённые операции не включены)
-
     return text
 
 # ========== Обработка абзаца ==========
@@ -459,6 +463,26 @@ def split_paragraphs(text: str) -> list:
     paragraphs = text.split('\n\n')
     return [p.strip() for p in paragraphs if p.strip()]
 
+# ========== Фоновое переобучение ==========
+def retrain_in_background():
+    """Запускает переобучение в отдельном потоке и перезагружает модель."""
+    try:
+        logger.info("Фоновое переобучение: START")
+        result = subprocess.run(
+            [sys.executable, "retrain_model.py"],
+            capture_output=True,
+            text=True,
+            timeout=300
+        )
+        if result.returncode == 0:
+            logger.info(f"Фоновое переобучение успешно завершено.\n{result.stdout}")
+            # Перезагружаем модель
+            load_model()
+        else:
+            logger.error(f"Фоновое переобучение провалилось (код {result.returncode}): {result.stderr}")
+    except Exception as e:
+        logger.error(f"Ошибка фонового переобучения: {e}")
+
 # ========== Flask endpoints ==========
 @app.get("/api/health")
 def health():
@@ -500,6 +524,7 @@ def reload_model():
 
 @app.post("/api/feedback")
 def feedback():
+    global _last_retrain_count
     data = request.json
     if not data:
         return jsonify({"error": "No JSON data"}), 400
@@ -519,6 +544,7 @@ def feedback():
         return jsonify({"error": "yandex_score must be an integer 0-100"}), 400
 
     csv_path = Path('training_data.csv')
+    # Проверка на дубликат
     if csv_path.exists():
         with open(csv_path, 'r', encoding='utf-8') as f:
             reader = csv.reader(f)
@@ -544,6 +570,7 @@ def feedback():
 
     row = [features.get(col, 0) for col in feature_order] + [revised_text, yandex_score]
 
+    # Сохраняем в CSV
     if not csv_path.exists():
         with open(csv_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
@@ -556,6 +583,24 @@ def feedback():
             writer.writerow(row)
 
     logger.info(f"Added feedback: score={yandex_score}, text length={len(revised_text)}")
+
+    # Считаем количество строк в CSV (приблизительно)
+    try:
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            row_count = sum(1 for _ in f) - 1  # минус заголовок
+    except:
+        row_count = 0
+
+    # Переобучаем, если накопилось достаточно новых записей
+    if row_count > 0 and (row_count - _last_retrain_count) >= RETRAIN_EVERY_N:
+        _last_retrain_count = row_count
+        # Запускаем переобучение в фоне
+        thread = threading.Thread(target=retrain_in_background, daemon=True)
+        thread.start()
+        logger.info(f"Запущено фоновое переобучение (всего строк: {row_count})")
+    else:
+        logger.info(f"Пропускаем переобучение (строк: {row_count}, последний счётчик: {_last_retrain_count})")
+
     return jsonify({"status": "ok", "message": "Feedback saved"})
 
 @app.post("/api/revise")
@@ -588,7 +633,7 @@ def api_revise():
 
         def generate():
             try:
-                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев (v4.8.0)..."})
+                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев (v4.8.1)..."})
 
                 results = []
                 for idx, para in enumerate(paragraphs):
@@ -652,7 +697,7 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": final_text,
                     "original_text": chapter_text,
-                    "summary": f"Обработано {total} абзацев (v4.8.0). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
+                    "summary": f"Обработано {total} абзацев (v4.8.1). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
                     "paragraphs": results,
                     "average_human_score": avg_score,
                     "overall_analysis": overall,
@@ -684,7 +729,7 @@ def handle_http_exception(exc):
 @app.errorhandler(Exception)
 def handle_exception(exc):
     logger.exception("Unhandled exception")
-    return jsonify(detail=f"Server error: {str(e)}"), 500
+    return jsonify(detail=f"Server error: {str(exc)}"), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
