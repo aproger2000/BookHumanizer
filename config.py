@@ -1,19 +1,19 @@
 """
-config.py — эксперимент: междометия 0.3 (v1.24)
+config.py — эксперимент: удаление AI-маркеров 0.65 (v1.25)
 """
 
-CONFIG_VERSION = "v1.24"
-HYPOTHESIS = "Междометия 0.3 (было 0.25) + перестановка первых слов 0.3 + частицы 0.25"
+CONFIG_VERSION = "v1.25"
+HYPOTHESIS = "Удаление AI-маркеров 0.65 (было 0.6) + swap_first_words 0.3 + interjections 0.25 + particles 0.25"
 
 RANDOM_SEED = 42
 
 PROB_SYNONYMS = 0.3
 PROB_INSERTIONS = 0.3
 PROB_SWAP_FIRST_WORDS = 0.3
-PROB_INTERJECTIONS = 0.3          # <-- изменено
-PROB_PARTICLES = 0.25             # возвращено к 0.25
+PROB_INTERJECTIONS = 0.25
+PROB_PARTICLES = 0.25
 PROB_CANCEL_CANCEL = 0.5
-PROB_REMOVE_AI_MARKERS = 0.6
+PROB_REMOVE_AI_MARKERS = 0.65      # <-- изменено
 PROB_SPLIT_LONG_SENTENCES = 0.3
 PROB_ADD_COLLOQUIAL = 0.3
 PROB_TYPOS = 0.3
