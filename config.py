@@ -1,20 +1,20 @@
 """
-config.py — эксперимент: удаление AI-маркеров 0.65 (v1.20)
+config.py — эксперимент: вставки 0.35 (v1.21)
 """
 
-CONFIG_VERSION = "v1.20"
-HYPOTHESIS = "Удаление AI-маркеров 0.65 (было 0.6) + междометия 0.25 + частицы 0.25"
+CONFIG_VERSION = "v1.21"
+HYPOTHESIS = "Вставки 0.35 (было 0.3) + перестановка первых слов 0.3 + междометия 0.25 + частицы 0.25"
 
 RANDOM_SEED = 42
 
 PROB_SYNONYMS = 0.3
-PROB_INSERTIONS = 0.3
+PROB_INSERTIONS = 0.35           # <-- изменено
 PROB_SWAP_FIRST_WORDS = 0.3
 PROB_INTERJECTIONS = 0.25
 PROB_PARTICLES = 0.25
 PROB_CANCEL_CANCEL = 0.5
-PROB_REMOVE_AI_MARKERS = 0.65          # <-- изменено
-PROB_SPLIT_LONG_SENTENCES = 0.3         # возвращено к 0.3
+PROB_REMOVE_AI_MARKERS = 0.6
+PROB_SPLIT_LONG_SENTENCES = 0.3
 PROB_ADD_COLLOQUIAL = 0.3
 PROB_TYPOS = 0.3
 
@@ -30,8 +30,6 @@ RU_T5_THRESHOLD = 50
 RU_T5_ATTEMPTS = 2
 RU_T5_TEMPERATURE = 1.0
 MAX_PARAGRAPHS_FOR_RU_T5 = 3
-
-# ===== СЛОВАРИ (без изменений, скопируйте из предыдущего рабочего config.py) =====
 
 # ===== СЛОВАРИ =====
 SYNONYMS_DICT = [
