@@ -1,5 +1,5 @@
 """
-Chapter Editor v5.0.8 — исправлен revise_internal для случая без абзацев
+Chapter Editor v5.0.9 — с Яндекс.Нейродетектором (Playwright)
 """
 import json
 import os
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "5.0.8"
+APP_VERSION = "5.0.9"
 MAX_CHARS = 30_000
 
 PORT = os.environ.get('PORT', '8000')
@@ -644,7 +644,7 @@ def api_revise():
             logger.warning(f"Truncated text to {MAX_CHARS} chars")
         paragraphs = split_paragraphs(chapter_text)
         if not paragraphs:
-            paragraphs = [chapter_text]  # если нет абзацев, обрабатываем весь текст как один
+            paragraphs = [chapter_text]
         total = len(paragraphs)
         logger.info(f"Split into {total} paragraphs")
         def generate():
@@ -692,7 +692,7 @@ def revise_internal():
     params = data.get('params', {})
     paragraphs = split_paragraphs(text)
     if not paragraphs:
-        paragraphs = [text]  # если нет абзацев, обрабатываем весь текст как один
+        paragraphs = [text]
     results = []
     for para in paragraphs:
         if not para:
@@ -776,14 +776,24 @@ def load_test_text():
     if text_file.exists():
         with open(text_file, 'r', encoding='utf-8') as f:
             TEST_TEXT = f.read()
+        logger.info(f"Загружен тестовый текст из файла, длина: {len(TEST_TEXT)} символов")
         return TEST_TEXT
     else:
         TEST_TEXT = "За восемь лет до «Стеклянного Ливня» Храм Солнца встретил Алексея..."
+        logger.warning("test_text.txt не найден, используется заглушка")
         return TEST_TEXT
 
 def run_auto_loop():
     global auto_experiment_running, current_experiment_info
-    logger.info("Авто-цикл начал работу (v5.0.8)")
+    logger.info("Авто-цикл начал работу (v5.0.9)")
+
+    # Импортируем парсер Яндекс.Нейродетектора
+    try:
+        from yandex_parser import parse_yandex_neuro
+        logger.info("Парсер Яндекс.Нейродетектора загружен")
+    except ImportError as e:
+        parse_yandex_neuro = None
+        logger.warning(f"Не удалось загрузить yandex_parser: {e}")
 
     def get_local_score(text):
         return get_human_score(text)
@@ -869,9 +879,32 @@ def run_auto_loop():
                     likely_human = 0
                     ai = 100 - human
                 else:
-                    human = get_local_score(processed_text)
-                    likely_human = 0
-                    ai = 100 - human
+                    # Пытаемся получить оценку через Яндекс.Нейродетектор
+                    if parse_yandex_neuro:
+                        try:
+                            if len(processed_text) < 150:
+                                logger.warning(f"Текст слишком короткий ({len(processed_text)} символов), используем локальный")
+                                human = get_local_score(processed_text)
+                                likely_human = 0
+                                ai = 100 - human
+                            else:
+                                yandex_result = parse_yandex_neuro(processed_text)
+                                human = yandex_result.get('human', 0)
+                                likely_human = yandex_result.get('likely_human', 0)
+                                likely_ai = yandex_result.get('likely_ai', 0)
+                                ai = yandex_result.get('ai', 0)
+                                logger.info(f"Оценка Яндекса: HUMAN={human}%, LIKELY_HUMAN={likely_human}%")
+                        except Exception as e:
+                            logger.warning(f"Ошибка парсинга Яндекса: {e}, используем локальный")
+                            human = get_local_score(processed_text)
+                            likely_human = 0
+                            likely_ai = 0
+                            ai = 100 - human
+                    else:
+                        human = get_local_score(processed_text)
+                        likely_human = 0
+                        likely_ai = 0
+                        ai = 100 - human
 
             score = human + likely_human
             logger.info(f"Результат: HUMAN={human}%, LIKELY_HUMAN={likely_human}%, сумма={score}%")
@@ -879,7 +912,7 @@ def run_auto_loop():
             save_experiment(
                 config_name=f"auto_{param_name}_{new_value:.2f}",
                 params=params,
-                results={'human': human, 'likely_human': likely_human, 'likely_ai': 0, 'ai': ai},
+                results={'human': human, 'likely_human': likely_human, 'likely_ai': likely_ai if 'likely_ai' in locals() else 0, 'ai': ai},
                 status='done'
             )
 
