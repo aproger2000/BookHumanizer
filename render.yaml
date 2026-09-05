@@ -3,8 +3,12 @@ services:
     name: book-chapter-editor
     env: python
     plan: free
-    buildCommand: pip install -r requirements.txt
+    buildCommand: |
+      pip install -r requirements.txt
+      playwright install chromium
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --timeout 340
     envVars:
       - key: GUNICORN_TIMEOUT
         value: 600
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: /opt/render/project/src/playwright_browsers
