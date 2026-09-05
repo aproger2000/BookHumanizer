@@ -1,3 +1,4 @@
+# yandex_parser.py
 import os
 import time
 from selenium import webdriver
@@ -14,34 +15,41 @@ def parse_yandex_neuro(text):
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--window-size=1920,1080')
     
-    # Путь к Chrome из переменной окружения, либо локальный бинарник
     chrome_bin = os.environ.get('CHROME_BIN', './chrome/chrome-linux64/chrome')
     if os.path.exists(chrome_bin):
         options.binary_location = chrome_bin
     
-    # Для chromedriver используем локальный (он будет в PATH, но можно указать явно)
     chromedriver_path = os.environ.get('CHROMEDRIVER_PATH', './chromedriver-linux64/chromedriver')
     if os.path.exists(chromedriver_path):
         service = Service(executable_path=chromedriver_path)
     else:
-        # fallback — попробуем через webdriver_manager (может скачать)
         from webdriver_manager.chrome import ChromeDriverManager
         service = Service(ChromeDriverManager().install())
     
     driver = webdriver.Chrome(service=service, options=options)
     try:
         driver.get('https://yandex.ru/lab/neurodetector')
+        
+        # Ожидаем появления текстового поля
         textarea = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, 'textarea[placeholder*="текст"]'))
         )
         textarea.clear()
         textarea.send_keys(text)
-        submit_btn = driver.find_element(By.XPATH, '//button[contains(text(), "Проверить")]')
+        
+        # Находим кнопку по ID (более надёжно, чем по тексту)
+        submit_btn = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.ID, "analyze-btn"))
+        )
         submit_btn.click()
+        
+        # Ожидаем появления результатов
         WebDriverWait(driver, 30).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, '.segment-item'))
         )
         time.sleep(2)
+        
+        # Парсим результат
         result = {'human': 0, 'likely_human': 0, 'likely_ai': 0, 'ai': 0}
         blocks = driver.find_elements(By.CSS_SELECTOR, '.distribution-value')
         values = [int(b.text.replace('%', '')) for b in blocks if b.text]
