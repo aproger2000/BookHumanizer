@@ -1,6 +1,7 @@
 # yandex_parser.py
 import os
 import time
+import re
 import logging
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -8,13 +9,13 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
+from selenium.common.exceptions import TimeoutException
 
 logger = logging.getLogger(__name__)
 
 def parse_yandex_neuro(text):
     if len(text) < 150:
-        raise ValueError("Текст слишком короткий для анализа (мин. 150 символов)")
+        raise ValueError("Текст слишком короткий (мин. 150 символов)")
 
     options = Options()
     options.add_argument('--headless')
@@ -47,10 +48,7 @@ def parse_yandex_neuro(text):
     try:
         logger.info("Загружаем страницу Яндекс.Нейродетектора...")
         driver.get('https://yandex.ru/lab/neurodetector')
-        time.sleep(3)
-        
-        # Сохраняем начальный скриншот
-        driver.save_screenshot('/tmp/yandex_start.png')
+        time.sleep(2)
         
         # Поле ввода
         logger.info("Ожидаем поле ввода...")
@@ -69,7 +67,6 @@ def parse_yandex_neuro(text):
             (By.CSS_SELECTOR, "button[type='submit']"),
             (By.XPATH, "//button[contains(translate(text(), 'А-Яа-я', 'a-za-z'), 'проверить')]"),
             (By.XPATH, "//button[contains(@class, 'button') and contains(text(), 'Проверить')]"),
-            (By.XPATH, "//button[contains(@class, 'button')]"),
             (By.CSS_SELECTOR, ".button"),
             (By.CSS_SELECTOR, "button"),
         ]
@@ -91,81 +88,64 @@ def parse_yandex_neuro(text):
         logger.info("Нажимаем кнопку 'Проверить'...")
         submit_btn.click()
         
-        # Ожидаем появления результатов – используем разные признаки
-        logger.info("Ожидаем результаты анализа...")
-        # Ждём появления любых элементов, указывающих на завершение
-        try:
-            WebDriverWait(driver, 45).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, '.segment-item, .analysis-results, .distribution, .result-block, .progress-done'))
-            )
-        except TimeoutException:
-            # Возможно, результаты уже есть, но селектор не тот – попробуем сохранить и проверить
-            pass
+        # Ждём появления чисел с процентами (проверяем каждые 2 секунды, до 45 секунд)
+        logger.info("Ожидаем появления чисел с % в тексте страницы...")
+        found_numbers = None
+        for _ in range(45):  # 45 * 2 = 90 секунд
+            time.sleep(2)
+            body_text = driver.find_element(By.TAG_NAME, 'body').text
+            matches = re.findall(r'(\d+)%', body_text)
+            if matches and len(matches) >= 4:
+                found_numbers = [int(m) for m in matches]
+                logger.info(f"Найдены числа: {found_numbers}")
+                break
+            # Также проверяем элементы с классом distribution
+            blocks = driver.find_elements(By.CSS_SELECTOR, '.distribution-value, .percent, .value, .stat-value, .number')
+            values = []
+            for el in blocks:
+                txt = el.text.replace('%', '').strip()
+                if txt and txt.isdigit():
+                    values.append(int(txt))
+            if len(values) >= 4:
+                found_numbers = values
+                logger.info(f"Найдены числа по блокам: {found_numbers}")
+                break
         
-        time.sleep(3)  # даём время дорисовать
-        
-        # Сохраняем скриншот после анализа
+        # Сохраняем скриншот и HTML
         driver.save_screenshot('/tmp/yandex_result.png')
-        html = driver.page_source
         with open('/tmp/yandex_result.html', 'w', encoding='utf-8') as f:
-            f.write(html)
+            f.write(driver.page_source)
+        logger.info("Скриншот и HTML сохранены в /tmp/")
         
-        # Парсим распределение – ищем цифры с процентами в специальных блоках
-        result = {'human': 0, 'likely_human': 0, 'likely_ai': 0, 'ai': 0}
-        
-        # 1. Ищем элементы с классом distribution-value
-        blocks = driver.find_elements(By.CSS_SELECTOR, '.distribution-value')
-        if blocks:
-            values = [int(b.text.replace('%', '')) for b in blocks if b.text and b.text.replace('%', '').isdigit()]
-            if len(values) == 4:
-                result['ai'] = values[0]
-                result['likely_ai'] = values[1]
-                result['likely_human'] = values[2]
-                result['human'] = values[3]
-                logger.info(f"Распределение найдено (distribution-value): {result}")
-                return result
-            else:
-                logger.warning(f"Найдено distribution-value, но не 4 значения: {values}")
-        
-        # 2. Ищем элементы с классами, содержащими 'percent' или 'value'
-        numbers = driver.find_elements(By.CSS_SELECTOR, '.percent, .value, .stat-value, .number')
-        values = []
-        for el in numbers:
-            txt = el.text.replace('%', '').strip()
-            if txt and txt.isdigit():
-                values.append(int(txt))
-        if len(values) >= 4:
-            # Берём последние 4 (предполагаем порядок AI, Likely AI, Likely Human, Human)
-            vals = values[-4:]
-            result['ai'] = vals[0]
-            result['likely_ai'] = vals[1]
-            result['likely_human'] = vals[2]
-            result['human'] = vals[3]
-            logger.info(f"Распределение найдено (по numbers): {result}")
+        if found_numbers and len(found_numbers) >= 4:
+            vals = found_numbers[-4:]
+            result = {
+                'ai': vals[0],
+                'likely_ai': vals[1],
+                'likely_human': vals[2],
+                'human': vals[3]
+            }
+            logger.info(f"Распределение: {result}")
             return result
         else:
-            logger.warning(f"Найдено numbers: {values}, но недостаточно")
-        
-        # 3. Ищем все числа с процентами на странице (любые)
-        import re
-        text_content = driver.find_element(By.TAG_NAME, 'body').text
-        # Ищем числа с процентами (например, "43%")
-        matches = re.findall(r'(\d+)%', text_content)
-        if matches:
-            nums = [int(m) for m in matches if 0 <= int(m) <= 100]
-            # Берём 4 наиболее вероятных (первые 4 или последние 4)
-            if len(nums) >= 4:
-                vals = nums[-4:]  # часто порядок AI, Likely AI, Likely Human, Human
-                result['ai'] = vals[0] if len(vals)>0 else 0
-                result['likely_ai'] = vals[1] if len(vals)>1 else 0
-                result['likely_human'] = vals[2] if len(vals)>2 else 0
-                result['human'] = vals[3] if len(vals)>3 else 0
-                logger.info(f"Распределение найдено по regex (первые 4 числа): {result}")
-                return result
-        
-        # Если ничего не найдено, сохраняем HTML для отладки и возвращаем нули
-        logger.error("Не удалось найти распределение. HTML сохранён в /tmp/yandex_result.html")
-        return result
+            # Дополнительная попытка: ищем все цифры с % в HTML через JavaScript
+            script = "return document.body.innerHTML.match(/\\d+%/g);"
+            raw = driver.execute_script(script)
+            if raw:
+                nums = [int(m.replace('%', '')) for m in raw if m.endswith('%')]
+                if len(nums) >= 4:
+                    vals = nums[-4:]
+                    result = {
+                        'ai': vals[0],
+                        'likely_ai': vals[1],
+                        'likely_human': vals[2],
+                        'human': vals[3]
+                    }
+                    logger.info(f"Распределение (JS): {result}")
+                    return result
+            
+            logger.error("Не удалось найти распределение. Возвращаем нули.")
+            return {'human': 0, 'likely_human': 0, 'likely_ai': 0, 'ai': 0}
         
     except Exception as e:
         logger.exception(f"Ошибка при парсинге Яндекса: {e}")
