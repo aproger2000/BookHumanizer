@@ -10,6 +10,7 @@ import random
 import joblib
 import csv
 import threading
+import requests
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, stream_with_context
@@ -39,6 +40,9 @@ random.seed(config.RANDOM_SEED)
 
 # Инициализация базы данных
 init_db()
+
+from db import seed_experiments
+seed_experiments()
 
 # ========== Загрузка калибровочной модели ==========
 MODEL_LOADED = False
