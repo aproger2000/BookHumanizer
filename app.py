@@ -1,5 +1,5 @@
 """
-Chapter Editor v5.0.6 — только локальный детектор, без Selenium
+Chapter Editor v5.0.8 — исправлен revise_internal для случая без абзацев
 """
 import json
 import os
@@ -30,10 +30,9 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "5.0.6"
+APP_VERSION = "5.0.8"
 MAX_CHARS = 30_000
 
-# Динамический порт
 PORT = os.environ.get('PORT', '8000')
 BASE_URL = f"http://127.0.0.1:{PORT}"
 
@@ -42,12 +41,11 @@ app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 
 random.seed(config.RANDOM_SEED)
 
-# Инициализация базы данных
 init_db()
 from db import seed_experiments
 seed_experiments()
 
-# ========== Загрузка калибровочной модели ==========
+# ========== Загрузка модели ==========
 MODEL_LOADED = False
 human_model = None
 feature_cols = []
@@ -66,7 +64,7 @@ def load_model():
 
 load_model()
 
-# ========== Используем словари из config ==========
+# ========== Словари ==========
 SYNONYMS = config.SYNONYMS_DICT
 INSERTIONS = config.INSERTIONS_LIST
 INTERJECTIONS = config.INTERJECTIONS_LIST
@@ -78,14 +76,10 @@ CANCEL_CANCEL_DICT = config.CANCEL_CANCEL_DICT
 AI_MARKERS = config.AI_MARKERS
 COLLOQUIAL_PARTICLES = config.COLLOQUIAL_PARTICLES
 
-# ========== Счётчик для фонового переобучения ==========
 _retrain_lock = threading.Lock()
-
-# ========== Глобальный флаг автоматического цикла ==========
 auto_experiment_running = False
 auto_experiment_lock = threading.Lock()
 
-# ========== Глобальные переменные для статуса ==========
 current_experiment_info = {
     'param_name': '',
     'param_value': 0.0,
@@ -97,7 +91,7 @@ current_experiment_info = {
 }
 status_lock = threading.Lock()
 
-# ========== Функция переобучения (синхронная) ==========
+# ========== Функция переобучения ==========
 def retrain_model_sync():
     with _retrain_lock:
         logger.info("=== RETRAIN START (sync) ===")
@@ -105,20 +99,16 @@ def retrain_model_sync():
         if not csv_path.exists():
             logger.warning("training_data.csv не найден, переобучение пропущено.")
             return
-
         try:
             df = pd.read_csv(csv_path)
         except Exception as e:
             logger.error(f"Ошибка чтения training_data.csv: {e}")
             return
-
         df = df.dropna(subset=['HUMAN_yandex'])
         if len(df) == 0:
             logger.info("Нет данных для обучения (0 строк).")
             return
-
         logger.info(f"Найдено {len(df)} записей.")
-
         feature_rows = []
         for idx, row in df.iterrows():
             text = row['processed_text']
@@ -130,31 +120,24 @@ def retrain_model_sync():
             except Exception as e:
                 logger.warning(f"Ошибка извлечения признаков для строки {idx}: {e}")
                 continue
-
         if not feature_rows:
             logger.warning("Не удалось извлечь признаки ни для одной записи.")
             return
-
         feature_names = list(feature_rows[0].keys())
         X = pd.DataFrame(feature_rows)[feature_names]
         y = df['HUMAN_yandex'].values[:len(X)]
-
         if len(X) < 3:
             logger.info(f"Слишком мало примеров ({len(X)}), переобучение пропущено.")
             return
-
         logger.info(f"Обучение на {len(X)} примерах...")
         model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
         model.fit(X, y)
-
         y_pred = model.predict(X)
         mae = mean_absolute_error(y, y_pred)
         logger.info(f"MAE на обучении: {mae:.2f}")
-
         joblib.dump(model, 'human_model.pkl')
         with open('feature_cols.txt', 'w') as f:
             f.write(','.join(feature_names))
-
         load_model()
         logger.info(f"Модель успешно переобучена и перезагружена. Всего строк: {len(df)}")
         logger.info("=== RETRAIN END ===")
@@ -172,7 +155,6 @@ def extract_features(text: str) -> dict:
     else:
         latin_count = sum(1 for ch in text if 'a' <= ch.lower() <= 'z')
         features['latin_ratio'] = latin_count / letters
-
     markers = [
         r'\bI thought so\b', r'\bNo bureaucracy\b', r'\bNo grant fees\b',
         r'\bIn return nothing\b', r'\bfrom the beginning\b',
@@ -189,19 +171,16 @@ def extract_features(text: str) -> dict:
         if re.search(m, text, flags=re.IGNORECASE):
             marker_count += 1
     features['marker_count'] = marker_count
-
     words = re.findall(r'[а-яА-Яa-zA-Z]+', text)
     if words:
         features['avg_word_len'] = sum(len(w) for w in words) / len(words)
     else:
         features['avg_word_len'] = 0
-
     word_counts = {}
     for w in words:
         w_lower = w.lower()
         word_counts[w_lower] = word_counts.get(w_lower, 0) + 1
     features['max_repeat_ratio'] = max(word_counts.values()) / len(words) if words else 0
-
     sentences = re.split(r'(?<=[.!?])\s+', text)
     features['num_sentences'] = len(sentences)
     if sentences:
@@ -209,21 +188,17 @@ def extract_features(text: str) -> dict:
         features['avg_sentence_len'] = sum(sent_word_counts) / len(sent_word_counts)
     else:
         features['avg_sentence_len'] = 0
-
     dialog_count = sum(1 for s in sentences if re.match(r'^[—"«]', s.strip()))
     features['dialog_ratio'] = dialog_count / len(sentences) if sentences else 0
-
     features['question_marks'] = text.count('?')
     features['exclamation_marks'] = text.count('!')
     unique_words = set(w.lower() for w in words)
     features['lexical_diversity'] = len(unique_words) / len(words) if words else 0
-
     return features
 
 def get_human_score(text: str) -> int:
     if not text or len(text) < 20:
         return 50
-
     if MODEL_LOADED and human_model is not None and feature_cols:
         try:
             features = extract_features(text)
@@ -236,7 +211,6 @@ def get_human_score(text: str) -> int:
             logger.warning(f"Ошибка предсказания: {e}. Использую эвристику.")
     else:
         logger.warning("Модель не загружена, используется эвристика.")
-
     # эвристический fallback
     letters = sum(1 for ch in text if ch.isalpha())
     if letters == 0:
@@ -274,13 +248,12 @@ def get_human_score(text: str) -> int:
         score -= 15
     return max(0, min(100, int(score)))
 
-# ========== Полная пост-обработка ==========
+# ========== Пост-обработка ==========
 def post_process(text: str, logs: list = None, params: dict = None) -> str:
     if not text or len(text) < 20:
         return text
     if logs is None:
         logs = []
-
     if params is None:
         params = {
             'PROB_SYNONYMS': config.PROB_SYNONYMS,
@@ -296,7 +269,6 @@ def post_process(text: str, logs: list = None, params: dict = None) -> str:
             'PROB_SWAP_CLAUSES': config.PROB_SWAP_CLAUSES,
             'PROB_DIRECT_INDIRECT': config.PROB_DIRECT_INDIRECT,
         }
-
     ops = []
     if random.random() < params['PROB_SYNONYMS']:
         ops.append('synonyms')
@@ -322,10 +294,8 @@ def post_process(text: str, logs: list = None, params: dict = None) -> str:
         ops.append('swap_clauses')
     if random.random() < params['PROB_DIRECT_INDIRECT']:
         ops.append('direct_indirect')
-
     if not ops:
         ops.append('synonyms')
-
     for op in ops:
         if op == 'synonyms':
             replacements = 0
@@ -342,39 +312,237 @@ def post_process(text: str, logs: list = None, params: dict = None) -> str:
                         replacements += 1
             if replacements:
                 logs.append(f"  - заменено синонимов: {replacements}")
-        # ... остальные операции (полный код как в предыдущих версиях, я его сокращаю для краткости)
-        # Но в финальном файле он должен быть полным. Для экономии места я его не копирую,
-        # но вы можете взять из предыдущих ответов.
-
+        elif op == 'insertions':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            inserted = 0
+            for sent in sentences:
+                if len(sent.split()) > 5 and random.random() < 0.3:
+                    words = sent.split()
+                    pos = random.randint(1, min(3, len(words)-1))
+                    ins = random.choice(INSERTIONS)
+                    words.insert(pos, ins + ',')
+                    sent = ' '.join(words)
+                    inserted += 1
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if inserted:
+                logs.append(f"  - вставлено вводных слов: {inserted}")
+        elif op == 'swap_first_words':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            swapped = 0
+            for sent in sentences:
+                if len(sent.split()) > 4 and random.random() < 0.3:
+                    words = sent.split()
+                    if len(words) >= 3 and not words[0].startswith(('—', '"', '«')):
+                        words[0], words[1] = words[1], words[0]
+                        sent = ' '.join(words)
+                        swapped += 1
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if swapped:
+                logs.append(f"  - перестановок первых слов: {swapped}")
+        elif op == 'interjections':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            inserted_interj = 0
+            for sent in sentences:
+                if re.match(r'^[—"«]', sent) and random.random() < 0.25:
+                    ins = random.choice(INTERJECTIONS)
+                    match = re.search(r'^([—"«])\s*', sent)
+                    if match:
+                        prefix = match.group(0)
+                        rest = sent[len(prefix):]
+                        sent = prefix + ins + ', ' + rest[0].lower() + rest[1:] if rest else prefix + ins
+                        inserted_interj += 1
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if inserted_interj:
+                logs.append(f"  - вставлено междометий: {inserted_interj}")
+        elif op == 'insert_particles':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            inserted_particles = 0
+            for sent in sentences:
+                if len(sent.split()) > 3 and random.random() < 0.3:
+                    words = sent.split()
+                    pos = random.randint(0, min(2, len(words)-1))
+                    part = random.choice(PARTICLES)
+                    words.insert(pos, part)
+                    sent = ' '.join(words)
+                    inserted_particles += 1
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if inserted_particles:
+                logs.append(f"  - вставлено частиц: {inserted_particles}")
+        elif op == 'cancel_cancel':
+            replacements = 0
+            for pattern, replacement in CANCEL_CANCEL_DICT:
+                if re.search(pattern, text, flags=re.IGNORECASE):
+                    text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+                    replacements += 1
+            if replacements:
+                logs.append(f"  - заменено канцеляризмов: {replacements}")
+        elif op == 'remove_ai_markers':
+            removed = 0
+            for marker in AI_MARKERS:
+                pattern = r'\s*' + re.escape(marker) + r'\s*,?\s*'
+                if re.search(pattern, text, flags=re.IGNORECASE):
+                    text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+                    removed += 1
+            if removed:
+                logs.append(f"  - удалено AI-маркеров: {removed}")
+        elif op == 'split_long_sentences':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            split_count = 0
+            for sent in sentences:
+                words = sent.split()
+                if len(words) > 25:
+                    conjunctions = [' и ', ' а ', ' но ', ' что ', ' чтобы ', ' когда ', ' если ', ' потому что ']
+                    best_pos = -1
+                    for conj in conjunctions:
+                        pos = sent.find(conj)
+                        if pos != -1:
+                            best_pos = pos
+                            break
+                    if best_pos != -1:
+                        part1 = sent[:best_pos].strip()
+                        part2 = sent[best_pos + len(conj):].strip()
+                        if len(part1.split()) > 5 and len(part2.split()) > 5:
+                            new_sentences.append(part1 + '.')
+                            new_sentences.append(part2 + '.')
+                            split_count += 1
+                            continue
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if split_count:
+                logs.append(f"  - разбито длинных предложений: {split_count}")
+        elif op == 'add_colloquial':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            added = 0
+            for sent in sentences:
+                if len(sent.split()) > 3 and random.random() < 0.3:
+                    words = sent.split()
+                    pos = random.randint(0, min(2, len(words)-1))
+                    particle = random.choice(COLLOQUIAL_PARTICLES)
+                    words.insert(pos, particle)
+                    sent = ' '.join(words)
+                    added += 1
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if added:
+                logs.append(f"  - добавлено разговорных частиц: {added}")
+        elif op == 'add_typos':
+            chars = list(text)
+            typo_count = 0
+            replacements = {
+                'а': 'о', 'о': 'а', 'е': 'и', 'и': 'е',
+                'н': 'т', 'т': 'н', 'с': 'з', 'з': 'с',
+                'р': 'п', 'п': 'р', 'л': 'м', 'м': 'л',
+                'в': 'б', 'б': 'в', 'к': 'н', 'н': 'к',
+            }
+            for i in range(len(chars)):
+                if chars[i].isalpha() and random.random() < 0.02:
+                    lower_char = chars[i].lower()
+                    if lower_char in replacements:
+                        replacement = replacements[lower_char]
+                        if chars[i].isupper():
+                            replacement = replacement.upper()
+                        chars[i] = replacement
+                        typo_count += 1
+            text = ''.join(chars)
+            if typo_count:
+                logs.append(f"  - добавлено опечаток: {typo_count}")
+        elif op == 'swap_clauses':
+            def swap_clauses(text):
+                patterns = [
+                    (r'(.+?)\s+когда\s+(.+?)([.!?])', r'Когда \2, \1\3'),
+                    (r'(.+?)\s+если\s+(.+?)([.!?])', r'Если \2, \1\3'),
+                    (r'(.+?)\s+потому что\s+(.+?)([.!?])', r'Потому что \2, \1\3'),
+                    (r'(.+?)\s+хотя\s+(.+?)([.!?])', r'Хотя \2, \1\3'),
+                    (r'(.+?)\s+чтобы\s+(.+?)([.!?])', r'Чтобы \2, \1\3'),
+                ]
+                for pattern, repl in patterns:
+                    text = re.sub(pattern, repl, text, flags=re.DOTALL)
+                return text
+            new_text = swap_clauses(text)
+            if new_text != text:
+                logs.append("  - перестановка частей (когда/если/потому что/хотя/чтобы)")
+                text = new_text
+        elif op == 'direct_indirect':
+            def replace_direct_indirect(text):
+                pattern = re.compile(r'—\s*(.+?)\s*,\s*—\s*(' + '|'.join(REPORTING_VERBS) + r')\s+([а-яА-ЯёЁ]+)\.?')
+                def repl(m):
+                    text_part = m.group(1).strip()
+                    verb = m.group(2)
+                    who = m.group(3)
+                    if verb.endswith('а'):
+                        who_form = who
+                        if who in ('он', 'Алексей', 'Масарик', 'Кросс'):
+                            who_form = 'она'
+                    else:
+                        who_form = who
+                    return f"{who_form} {verb}, что {text_part.lower()}."
+                return pattern.sub(repl, text)
+            new_text = replace_direct_indirect(text)
+            if new_text != text:
+                logs.append("  - замена прямой речи на косвенную")
+                text = new_text
     return text
 
 # ========== Обработка абзаца ==========
 def process_paragraph(paragraph: str, params: dict = None) -> dict:
     if not paragraph:
         return {"original": paragraph, "revised": paragraph, "status": "error", "chain": "LOCAL", "human_score": 0, "logs": ["Пустой абзац"]}
-
     logs = []
     original_score = get_human_score(paragraph)
     logs.append(f"Оригинальный HUMAN: {original_score}%")
-
     if original_score >= 50:
         return {"original": paragraph, "revised": paragraph, "status": "done", "chain": "LOCAL (skipped)", "human_score": original_score, "logs": logs + ["Абзац уже имеет HUMAN >= 50, пропущен"]}
-
     post_logs = []
     revised = post_process(paragraph, logs=post_logs, params=params)
     score = get_human_score(revised)
     logs.extend(post_logs)
     logs.append(f"Итоговый HUMAN: {score}%")
-
     return {"original": paragraph, "revised": revised, "status": "done" if score > 50 else "partial", "chain": "LOCAL (post only)", "human_score": score, "logs": logs}
 
 def analyze_overall(text: str) -> dict:
-    # ... (без изменений)
-    return {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0, "score": 0}
+    if not text or len(text) < 100:
+        return {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0, "score": 0}
+    segments = re.split(r'(?<=[.!?])\s+', text)
+    if len(segments) < 3:
+        return {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0, "score": 0}
+    results = {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0}
+    for seg in segments:
+        if len(seg) < 15:
+            continue
+        score = get_human_score(seg)
+        if score < 30:
+            results["AI"] += 1
+        elif score < 50:
+            results["LIKELY_AI"] += 1
+        elif score < 70:
+            results["LIKELY_HUMAN"] += 1
+        else:
+            results["HUMAN"] += 1
+    total = sum(results.values())
+    if total == 0:
+        return {"AI": 0, "LIKELY_AI": 0, "LIKELY_HUMAN": 0, "HUMAN": 0, "score": 0}
+    for k in results:
+        results[k] = int(results[k] / total * 100)
+    score = results["HUMAN"] * 1.0 + results["LIKELY_HUMAN"] * 0.7 + results["LIKELY_AI"] * 0.3
+    results["score"] = int(score)
+    return results
 
 def split_paragraphs(text: str) -> list:
-    # ... (без изменений)
-    return []
+    if not text:
+        return []
+    text = text.replace('\r\n', '\n')
+    paragraphs = text.split('\n\n')
+    return [p.strip() for p in paragraphs if p.strip()]
 
 # ========== Flask endpoints ==========
 @app.get("/api/health")
@@ -385,43 +553,152 @@ RETRAIN_TOKEN = os.environ.get("RETRAIN_TOKEN", "your-secret-token")
 
 @app.post("/api/retrain")
 def api_retrain():
-    # ... (без изменений)
-    return jsonify({"status": "ok"})
+    token = request.headers.get("X-Retrain-Token")
+    if token != RETRAIN_TOKEN:
+        return jsonify({"error": "Unauthorized"}), 401
+    try:
+        retrain_model_sync()
+        return jsonify({"status": "ok", "message": "Retrained successfully"})
+    except Exception as e:
+        logger.error(f"Retrain error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.post("/api/reload_model")
 def reload_model():
-    # ... (без изменений)
-    return jsonify({"status": "ok"})
+    try:
+        load_model()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.post("/api/feedback")
 def feedback():
-    # ... (без изменений)
-    return jsonify({"status": "ok"})
+    data = request.json
+    if not data:
+        return jsonify({"error": "No JSON data"}), 400
+    revised_text = data.get('revised_text', '').strip()
+    yandex_score = data.get('yandex_score')
+    if not revised_text:
+        return jsonify({"error": "Missing revised_text"}), 400
+    if yandex_score is None:
+        return jsonify({"error": "Missing yandex_score"}), 400
+    try:
+        yandex_score = int(yandex_score)
+        if not (0 <= yandex_score <= 100):
+            raise ValueError
+    except:
+        return jsonify({"error": "yandex_score must be an integer 0-100"}), 400
+    csv_path = Path('training_data.csv')
+    if csv_path.exists():
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+            for row in reader:
+                if len(row) >= 12 and row[10] == revised_text:
+                    return jsonify({"warning": "This text already exists in training data", "status": "skipped"}), 200
+    try:
+        features = extract_features(revised_text)
+    except Exception as e:
+        logger.error(f"Feature extraction failed: {e}")
+        return jsonify({"error": f"Feature extraction failed: {str(e)}"}), 500
+    if MODEL_LOADED and feature_cols:
+        feature_order = feature_cols
+    else:
+        feature_order = ['latin_ratio', 'marker_count', 'avg_word_len', 'max_repeat_ratio', 'num_sentences', 'avg_sentence_len', 'dialog_ratio', 'question_marks', 'exclamation_marks', 'lexical_diversity']
+    row = [features.get(col, 0) for col in feature_order] + [revised_text, yandex_score]
+    if not csv_path.exists():
+        with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            header = feature_order + ['processed_text', 'HUMAN_yandex']
+            writer.writerow(header)
+            writer.writerow(row)
+    else:
+        with open(csv_path, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(row)
+    logger.info(f"Added feedback: score={yandex_score}, text length={len(revised_text)}")
+    thread = threading.Thread(target=retrain_model_sync, daemon=True)
+    thread.start()
+    logger.info("Запущено фоновое переобучение после добавления оценки")
+    return jsonify({"status": "ok", "message": "Feedback saved, retraining started"})
 
 @app.post("/api/revise")
 def api_revise():
-    # ... (без изменений)
-    return Response(...)
+    logger.info(f"=== api_revise: START (v{APP_VERSION}) ===")
+    try:
+        file_storage = request.files.get("file")
+        text = request.form.get("text", "")
+        style = request.form.get("style", "neutral")
+        if file_storage and file_storage.filename:
+            raw = file_storage.read()
+            chapter_text = raw.decode("utf-8", errors="replace")
+        elif text.strip():
+            chapter_text = text
+        else:
+            return jsonify(detail="Provide chapter text or upload a file."), 400
+        chapter_text = chapter_text.strip()
+        if not chapter_text:
+            return jsonify(detail="Chapter text is empty."), 400
+        if len(chapter_text) > MAX_CHARS:
+            chapter_text = chapter_text[:MAX_CHARS]
+            logger.warning(f"Truncated text to {MAX_CHARS} chars")
+        paragraphs = split_paragraphs(chapter_text)
+        if not paragraphs:
+            paragraphs = [chapter_text]  # если нет абзацев, обрабатываем весь текст как один
+        total = len(paragraphs)
+        logger.info(f"Split into {total} paragraphs")
+        def generate():
+            try:
+                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев (v{APP_VERSION})..."})
+                results = []
+                for idx, para in enumerate(paragraphs):
+                    yield _sse("paragraph_start", {"index": idx, "original": para, "status": "processing"})
+                    try:
+                        result = process_paragraph(para)
+                    except Exception as e:
+                        logger.error(f"Paragraph {idx} processing error: {e}")
+                        result = {"original": para, "revised": para, "status": "error", "chain": "LOCAL", "human_score": 0, "logs": [f"Ошибка: {str(e)}"]}
+                    results.append(result)
+                    yield _sse("paragraph_status", {"index": idx, "original": result["original"], "revised": result["revised"], "status": result["status"], "chain": result["chain"], "human_score": result.get("human_score", 0), "logs": result.get("logs", [])})
+                    yield _sse("progress", {"chars": idx + 1, "estimated_total": total, "percent": (idx + 1) / total * 100, "log": f"Обработано {idx+1}/{total} абзацев"})
+                    yield _sse("paragraph_progress", {"current": idx + 1, "total": total, "percent": (idx + 1) / total * 100})
+                final_text = "\n\n".join(r["revised"] for r in results)
+                scores = [r.get("human_score", 0) for r in results if r.get("human_score", 0) > 0]
+                avg_score = sum(scores) // len(scores) if scores else 0
+                overall = analyze_overall(final_text)
+                logger.info(f"Overall analysis: {overall}")
+                status_counts = {"done": 0, "partial": 0, "error": 0}
+                for r in results:
+                    status_counts[r.get("status", "error")] += 1
+                logger.info(f"Статусы абзацев: {status_counts}")
+                yield _sse("done", {"revised_text": final_text, "original_text": chapter_text, "summary": f"Обработано {total} абзацев (v{APP_VERSION}). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%", "paragraphs": results, "average_human_score": avg_score, "overall_analysis": overall, "status_counts": status_counts, "checklist": []})
+            except Exception as e:
+                logger.exception("Unexpected error in generate")
+                yield _sse("error", {"detail": f"Unexpected error: {str(e)}"})
+        return Response(stream_with_context(generate()), mimetype="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    except Exception as e:
+        logger.exception("api_revise: Unexpected error")
+        return jsonify(detail=f"Server error: {str(e)}"), 500
 
+# ========== Эндпоинты для экспериментов ==========
 @app.post("/api/revise_internal")
 def revise_internal():
     data = request.json
     if not data:
         return jsonify({"error": "No JSON"}), 400
-
     text = data.get('text', '').strip()
     if not text:
         return jsonify({"error": "No text"}), 400
-
     params = data.get('params', {})
     paragraphs = split_paragraphs(text)
+    if not paragraphs:
+        paragraphs = [text]  # если нет абзацев, обрабатываем весь текст как один
     results = []
     for para in paragraphs:
         if not para:
             continue
         result = process_paragraph(para, params=params)
         results.append(result)
-
     final_text = "\n\n".join(r["revised"] for r in results)
     return jsonify({"revised_text": final_text})
 
@@ -478,7 +755,7 @@ def status_auto():
         }
     return jsonify(info)
 
-# ========== Параметры для оптимизации ==========
+# ========== Параметры оптимизации ==========
 PARAMS_TO_OPTIMIZE = [
     ('PROB_SYNONYMS', 0.3, 0.3, 0.7, 0.05),
     ('PROB_TYPOS', 0.3, 0.2, 0.5, 0.05),
@@ -506,18 +783,10 @@ def load_test_text():
 
 def run_auto_loop():
     global auto_experiment_running, current_experiment_info
-    logger.info("Авто-цикл начал работу (v5.0.7 — с Яндекс.Нейродетектором)")
+    logger.info("Авто-цикл начал работу (v5.0.8)")
 
     def get_local_score(text):
         return get_human_score(text)
-
-    # Импорт парсера Яндекса
-    try:
-        from yandex_parser import parse_yandex_neuro
-        logger.info("Парсер Яндекс.Нейродетектора загружен")
-    except ImportError as e:
-        parse_yandex_neuro = None
-        logger.warning(f"Не удалось загрузить yandex_parser: {e}")
 
     text = load_test_text()
     if not text:
@@ -590,38 +859,19 @@ def run_auto_loop():
                 human = get_local_score(text)
                 likely_human = 0
                 ai = 100 - human
+                processed_text = text
             else:
                 data = resp.json()
                 processed_text = data.get('revised_text')
+                logger.info(f"Длина обработанного текста: {len(processed_text) if processed_text else 0}")
                 if not processed_text:
                     human = get_local_score(text)
                     likely_human = 0
                     ai = 100 - human
                 else:
-                    # Пытаемся получить оценку через Яндекс
-                    if parse_yandex_neuro:
-                        try:
-                            if len(processed_text) < 500:
-                                logger.warning(f"Текст слишком короткий ({len(processed_text)} символов), используем локальный")
-                                human = get_local_score(processed_text)
-                                likely_human = 0
-                                ai = 100 - human
-                            else:
-                                yandex_result = parse_yandex_neuro(processed_text)
-                                human = yandex_result.get('human', 0)
-                                likely_human = yandex_result.get('likely_human', 0)
-                                likely_ai = yandex_result.get('likely_ai', 0)
-                                ai = yandex_result.get('ai', 0)
-                                logger.info(f"Яндекс: HUMAN={human}%, LIKELY_HUMAN={likely_human}%")
-                        except Exception as e:
-                            logger.warning(f"Ошибка парсинга Яндекса: {e}, используем локальный")
-                            human = get_local_score(processed_text)
-                            likely_human = 0
-                            ai = 100 - human
-                    else:
-                        human = get_local_score(processed_text)
-                        likely_human = 0
-                        ai = 100 - human
+                    human = get_local_score(processed_text)
+                    likely_human = 0
+                    ai = 100 - human
 
             score = human + likely_human
             logger.info(f"Результат: HUMAN={human}%, LIKELY_HUMAN={likely_human}%, сумма={score}%")
@@ -629,7 +879,7 @@ def run_auto_loop():
             save_experiment(
                 config_name=f"auto_{param_name}_{new_value:.2f}",
                 params=params,
-                results={'human': human, 'likely_human': likely_human, 'likely_ai': likely_ai if 'likely_ai' in locals() else 0, 'ai': ai},
+                results={'human': human, 'likely_human': likely_human, 'likely_ai': 0, 'ai': ai},
                 status='done'
             )
 
@@ -679,7 +929,7 @@ def run_auto_loop():
 
     logger.info("Авто-цикл завершён")
 
-# ========== Статические страницы ==========
+# ========== Статика ==========
 @app.get("/")
 def index():
     return app.send_static_file("index.html")
