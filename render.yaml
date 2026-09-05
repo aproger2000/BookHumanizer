@@ -5,6 +5,7 @@ services:
     plan: free
     buildCommand: |
       pip install -r requirements.txt
+      # Установка Chrome (необходим для Selenium)
       apt-get update && apt-get install -y wget gnupg
       wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
       echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list
@@ -17,27 +18,5 @@ services:
         value: claude-sonnet-5
       - key: GUNICORN_TIMEOUT
         value: 600
-      - key: CHROME_BIN
-        value: /usr/bin/google-chrome
-
-  # ===== CRON JOB ДЛЯ АВТОМАТИЧЕСКИХ ЭКСПЕРИМЕНТОВ (платный) =====
-  - type: cron
-    name: experiment-runner
-    env: python
-    plan: starter                 # Cron доступен только на платных планах (минимум starter)
-    buildCommand: |
-      pip install -r requirements.txt
-      # Устанавливаем Chrome (необходим для Selenium-парсинга Яндекс.Нейродетектора)
-      apt-get update && apt-get install -y wget gnupg
-      wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
-      echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list
-      apt-get update && apt-get install -y google-chrome-stable
-    startCommand: python experiment_runner.py
-    schedule: "*/15 * * * *"        # Запуск каждые 15 минут (можно изменить)
-    envVars:
-      - key: RETRAIN_TOKEN
-        sync: false                 # Токен для защиты эндпоинта /api/retrain (задаёте вручную)
-      - key: PYTHONUNBUFFERED
-        value: "1"                  # Чтобы логи выводились сразу
       - key: CHROME_BIN
         value: /usr/bin/google-chrome
