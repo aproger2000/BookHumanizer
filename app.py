@@ -601,7 +601,7 @@ def run_auto_loop():
                     # Пытаемся получить оценку через Яндекс
                     if parse_yandex_neuro:
                         try:
-                            if len(processed_text) < 150:
+                            if len(processed_text) < 500:
                                 logger.warning(f"Текст слишком короткий ({len(processed_text)} символов), используем локальный")
                                 human = get_local_score(processed_text)
                                 likely_human = 0
