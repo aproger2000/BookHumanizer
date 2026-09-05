@@ -14,6 +14,9 @@ import requests
 import time
 from pathlib import Path
 
+PORT = os.environ.get('PORT', '8000')
+BASE_URL = f"http://127.0.0.1:{PORT}"
+
 from flask import Flask, Response, jsonify, request, stream_with_context
 from werkzeug.exceptions import HTTPException
 
