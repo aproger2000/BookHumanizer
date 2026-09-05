@@ -24,10 +24,31 @@ from sklearn.metrics import mean_absolute_error
 
 from db import init_db, get_all_experiments, save_experiment, set_state, get_state
 
+# ===== Настройка логирования =====
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Логирование версий при старте
+# ===== Определение констант ДО использования в логах =====
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
+
+APP_VERSION = "5.0.11"
+MAX_CHARS = 30_000
+
+PORT = os.environ.get('PORT', '8000')
+BASE_URL = f"http://127.0.0.1:{PORT}"
+
+app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
+app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
+
+random.seed(config.RANDOM_SEED)
+
+# ===== Инициализация БД и seed =====
+init_db()
+from db import seed_experiments
+seed_experiments()
+
+# ===== Логирование версий (теперь все переменные определены) =====
 logger.info(f"=== Chapter Editor v{APP_VERSION} ===")
 logger.info(f"Config version: {config.CONFIG_VERSION}")
 logger.info(f"Hypothesis: {config.HYPOTHESIS}")
