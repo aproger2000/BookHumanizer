@@ -47,13 +47,15 @@ random.seed(config.RANDOM_SEED)
 init_db()
 from db import seed_experiments
 seed_experiments()
-
-# ===== Логирование версий (теперь все переменные определены) =====
+# ===== Логирование версий (безопасно) =====
 logger.info(f"=== Chapter Editor v{APP_VERSION} ===")
-logger.info(f"Config version: {config.CONFIG_VERSION}")
-logger.info(f"Hypothesis: {config.HYPOTHESIS}")
 logger.info(f"PORT: {PORT}")
 logger.info(f"BASE_URL: {BASE_URL}")
+# Опционально, если атрибуты существуют:
+if hasattr(config, 'CONFIG_VERSION'):
+    logger.info(f"Config version: {config.CONFIG_VERSION}")
+if hasattr(config, 'HYPOTHESIS'):
+    logger.info(f"Hypothesis: {config.HYPOTHESIS}")
 
 test_file = Path('test_text.txt')
 if test_file.exists():
