@@ -1,5 +1,5 @@
 """
-Chapter Editor v5.0.10 — всегда читает test_text.txt из файла
+Chapter Editor v5.0.11 — фикс загрузки test_text.txt (всегда читаем файл)
 """
 import json
 import os
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "5.0.10"
+APP_VERSION = "5.0.11"
 MAX_CHARS = 30_000
 
 PORT = os.environ.get('PORT', '8000')
@@ -312,8 +312,185 @@ def post_process(text: str, logs: list = None, params: dict = None) -> str:
                         replacements += 1
             if replacements:
                 logs.append(f"  - заменено синонимов: {replacements}")
-        # ... (остальные операции — они уже есть в вашем коде, я их сокращаю для экономии места, но в финальном файле они должны быть полностью)
-        # В реальном файле они занимают много строк.
+        elif op == 'insertions':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            inserted = 0
+            for sent in sentences:
+                if len(sent.split()) > 5 and random.random() < 0.3:
+                    words = sent.split()
+                    pos = random.randint(1, min(3, len(words)-1))
+                    ins = random.choice(INSERTIONS)
+                    words.insert(pos, ins + ',')
+                    sent = ' '.join(words)
+                    inserted += 1
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if inserted:
+                logs.append(f"  - вставлено вводных слов: {inserted}")
+        elif op == 'swap_first_words':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            swapped = 0
+            for sent in sentences:
+                if len(sent.split()) > 4 and random.random() < 0.3:
+                    words = sent.split()
+                    if len(words) >= 3 and not words[0].startswith(('—', '"', '«')):
+                        words[0], words[1] = words[1], words[0]
+                        sent = ' '.join(words)
+                        swapped += 1
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if swapped:
+                logs.append(f"  - перестановок первых слов: {swapped}")
+        elif op == 'interjections':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            inserted_interj = 0
+            for sent in sentences:
+                if re.match(r'^[—"«]', sent) and random.random() < 0.25:
+                    ins = random.choice(INTERJECTIONS)
+                    match = re.search(r'^([—"«])\s*', sent)
+                    if match:
+                        prefix = match.group(0)
+                        rest = sent[len(prefix):]
+                        sent = prefix + ins + ', ' + rest[0].lower() + rest[1:] if rest else prefix + ins
+                        inserted_interj += 1
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if inserted_interj:
+                logs.append(f"  - вставлено междометий: {inserted_interj}")
+        elif op == 'insert_particles':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            inserted_particles = 0
+            for sent in sentences:
+                if len(sent.split()) > 3 and random.random() < 0.3:
+                    words = sent.split()
+                    pos = random.randint(0, min(2, len(words)-1))
+                    part = random.choice(PARTICLES)
+                    words.insert(pos, part)
+                    sent = ' '.join(words)
+                    inserted_particles += 1
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if inserted_particles:
+                logs.append(f"  - вставлено частиц: {inserted_particles}")
+        elif op == 'cancel_cancel':
+            replacements = 0
+            for pattern, replacement in CANCEL_CANCEL_DICT:
+                if re.search(pattern, text, flags=re.IGNORECASE):
+                    text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+                    replacements += 1
+            if replacements:
+                logs.append(f"  - заменено канцеляризмов: {replacements}")
+        elif op == 'remove_ai_markers':
+            removed = 0
+            for marker in AI_MARKERS:
+                pattern = r'\s*' + re.escape(marker) + r'\s*,?\s*'
+                if re.search(pattern, text, flags=re.IGNORECASE):
+                    text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+                    removed += 1
+            if removed:
+                logs.append(f"  - удалено AI-маркеров: {removed}")
+        elif op == 'split_long_sentences':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            split_count = 0
+            for sent in sentences:
+                words = sent.split()
+                if len(words) > 25:
+                    conjunctions = [' и ', ' а ', ' но ', ' что ', ' чтобы ', ' когда ', ' если ', ' потому что ']
+                    best_pos = -1
+                    for conj in conjunctions:
+                        pos = sent.find(conj)
+                        if pos != -1:
+                            best_pos = pos
+                            break
+                    if best_pos != -1:
+                        part1 = sent[:best_pos].strip()
+                        part2 = sent[best_pos + len(conj):].strip()
+                        if len(part1.split()) > 5 and len(part2.split()) > 5:
+                            new_sentences.append(part1 + '.')
+                            new_sentences.append(part2 + '.')
+                            split_count += 1
+                            continue
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if split_count:
+                logs.append(f"  - разбито длинных предложений: {split_count}")
+        elif op == 'add_colloquial':
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            new_sentences = []
+            added = 0
+            for sent in sentences:
+                if len(sent.split()) > 3 and random.random() < 0.3:
+                    words = sent.split()
+                    pos = random.randint(0, min(2, len(words)-1))
+                    particle = random.choice(COLLOQUIAL_PARTICLES)
+                    words.insert(pos, particle)
+                    sent = ' '.join(words)
+                    added += 1
+                new_sentences.append(sent)
+            text = '. '.join(new_sentences)
+            if added:
+                logs.append(f"  - добавлено разговорных частиц: {added}")
+        elif op == 'add_typos':
+            chars = list(text)
+            typo_count = 0
+            replacements = {
+                'а': 'о', 'о': 'а', 'е': 'и', 'и': 'е',
+                'н': 'т', 'т': 'н', 'с': 'з', 'з': 'с',
+                'р': 'п', 'п': 'р', 'л': 'м', 'м': 'л',
+                'в': 'б', 'б': 'в', 'к': 'н', 'н': 'к',
+            }
+            for i in range(len(chars)):
+                if chars[i].isalpha() and random.random() < 0.02:
+                    lower_char = chars[i].lower()
+                    if lower_char in replacements:
+                        replacement = replacements[lower_char]
+                        if chars[i].isupper():
+                            replacement = replacement.upper()
+                        chars[i] = replacement
+                        typo_count += 1
+            text = ''.join(chars)
+            if typo_count:
+                logs.append(f"  - добавлено опечаток: {typo_count}")
+        elif op == 'swap_clauses':
+            def swap_clauses(text):
+                patterns = [
+                    (r'(.+?)\s+когда\s+(.+?)([.!?])', r'Когда \2, \1\3'),
+                    (r'(.+?)\s+если\s+(.+?)([.!?])', r'Если \2, \1\3'),
+                    (r'(.+?)\s+потому что\s+(.+?)([.!?])', r'Потому что \2, \1\3'),
+                    (r'(.+?)\s+хотя\s+(.+?)([.!?])', r'Хотя \2, \1\3'),
+                    (r'(.+?)\s+чтобы\s+(.+?)([.!?])', r'Чтобы \2, \1\3'),
+                ]
+                for pattern, repl in patterns:
+                    text = re.sub(pattern, repl, text, flags=re.DOTALL)
+                return text
+            new_text = swap_clauses(text)
+            if new_text != text:
+                logs.append("  - перестановка частей (когда/если/потому что/хотя/чтобы)")
+                text = new_text
+        elif op == 'direct_indirect':
+            def replace_direct_indirect(text):
+                pattern = re.compile(r'—\s*(.+?)\s*,\s*—\s*(' + '|'.join(REPORTING_VERBS) + r')\s+([а-яА-ЯёЁ]+)\.?')
+                def repl(m):
+                    text_part = m.group(1).strip()
+                    verb = m.group(2)
+                    who = m.group(3)
+                    if verb.endswith('а'):
+                        who_form = who
+                        if who in ('он', 'Алексей', 'Масарик', 'Кросс'):
+                            who_form = 'она'
+                    else:
+                        who_form = who
+                    return f"{who_form} {verb}, что {text_part.lower()}."
+                return pattern.sub(repl, text)
+            new_text = replace_direct_indirect(text)
+            if new_text != text:
+                logs.append("  - замена прямой речи на косвенную")
+                text = new_text
     return text
 
 # ========== Обработка абзаца ==========
@@ -447,8 +624,61 @@ def feedback():
 
 @app.post("/api/revise")
 def api_revise():
-    # ... (без изменений, как в вашей версии)
-    pass
+    logger.info(f"=== api_revise: START (v{APP_VERSION}) ===")
+    try:
+        file_storage = request.files.get("file")
+        text = request.form.get("text", "")
+        style = request.form.get("style", "neutral")
+        if file_storage and file_storage.filename:
+            raw = file_storage.read()
+            chapter_text = raw.decode("utf-8", errors="replace")
+        elif text.strip():
+            chapter_text = text
+        else:
+            return jsonify(detail="Provide chapter text or upload a file."), 400
+        chapter_text = chapter_text.strip()
+        if not chapter_text:
+            return jsonify(detail="Chapter text is empty."), 400
+        if len(chapter_text) > MAX_CHARS:
+            chapter_text = chapter_text[:MAX_CHARS]
+            logger.warning(f"Truncated text to {MAX_CHARS} chars")
+        paragraphs = split_paragraphs(chapter_text)
+        if not paragraphs:
+            paragraphs = [chapter_text]
+        total = len(paragraphs)
+        logger.info(f"Split into {total} paragraphs")
+        def generate():
+            try:
+                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев (v{APP_VERSION})..."})
+                results = []
+                for idx, para in enumerate(paragraphs):
+                    yield _sse("paragraph_start", {"index": idx, "original": para, "status": "processing"})
+                    try:
+                        result = process_paragraph(para)
+                    except Exception as e:
+                        logger.error(f"Paragraph {idx} processing error: {e}")
+                        result = {"original": para, "revised": para, "status": "error", "chain": "LOCAL", "human_score": 0, "logs": [f"Ошибка: {str(e)}"]}
+                    results.append(result)
+                    yield _sse("paragraph_status", {"index": idx, "original": result["original"], "revised": result["revised"], "status": result["status"], "chain": result["chain"], "human_score": result.get("human_score", 0), "logs": result.get("logs", [])})
+                    yield _sse("progress", {"chars": idx + 1, "estimated_total": total, "percent": (idx + 1) / total * 100, "log": f"Обработано {idx+1}/{total} абзацев"})
+                    yield _sse("paragraph_progress", {"current": idx + 1, "total": total, "percent": (idx + 1) / total * 100})
+                final_text = "\n\n".join(r["revised"] for r in results)
+                scores = [r.get("human_score", 0) for r in results if r.get("human_score", 0) > 0]
+                avg_score = sum(scores) // len(scores) if scores else 0
+                overall = analyze_overall(final_text)
+                logger.info(f"Overall analysis: {overall}")
+                status_counts = {"done": 0, "partial": 0, "error": 0}
+                for r in results:
+                    status_counts[r.get("status", "error")] += 1
+                logger.info(f"Статусы абзацев: {status_counts}")
+                yield _sse("done", {"revised_text": final_text, "original_text": chapter_text, "summary": f"Обработано {total} абзацев (v{APP_VERSION}). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%", "paragraphs": results, "average_human_score": avg_score, "overall_analysis": overall, "status_counts": status_counts, "checklist": []})
+            except Exception as e:
+                logger.exception("Unexpected error in generate")
+                yield _sse("error", {"detail": f"Unexpected error: {str(e)}"})
+        return Response(stream_with_context(generate()), mimetype="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    except Exception as e:
+        logger.exception("api_revise: Unexpected error")
+        return jsonify(detail=f"Server error: {str(e)}"), 500
 
 # ========== Эндпоинты для экспериментов ==========
 @app.post("/api/revise_internal")
@@ -545,6 +775,7 @@ PARAMS_TO_OPTIMIZE = [
 def load_test_text():
     """Всегда читает файл test_text.txt, не использует кэш."""
     text_file = Path('test_text.txt')
+    logger.info(f"Пытаемся загрузить файл: {text_file.absolute()}")
     if text_file.exists():
         with open(text_file, 'r', encoding='utf-8') as f:
             content = f.read()
@@ -556,7 +787,7 @@ def load_test_text():
 
 def run_auto_loop():
     global auto_experiment_running, current_experiment_info
-    logger.info("Авто-цикл начал работу (v5.0.10)")
+    logger.info("Авто-цикл начал работу (v5.0.11)")
 
     # Импортируем парсер Яндекс.Нейродетектора
     try:
@@ -570,6 +801,7 @@ def run_auto_loop():
         return get_human_score(text)
 
     text = load_test_text()
+    logger.info(f"Текст загружен, длина: {len(text)} символов, первые 100 символов: {repr(text[:100])}")
     if not text:
         logger.error("Не удалось загрузить тестовый текст")
         return
