@@ -22,7 +22,6 @@ from sklearn.metrics import mean_absolute_error
 
 # Новые модули для экспериментов и БД
 from db import init_db, get_all_experiments, save_experiment, set_state, get_state
-from yandex_parser import parse_yandex_neuro
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -927,6 +926,7 @@ def load_test_text():
 def run_auto_loop():
     global auto_experiment_running
     logger.info("Авто-цикл начал работу")
+    from yandex_parser import parse_yandex_neuro
     text = load_test_text()
     if not text:
         logger.error("Не удалось загрузить тестовый текст")
