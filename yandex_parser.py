@@ -1,4 +1,3 @@
-# yandex_parser.py
 import os
 import time
 from selenium import webdriver
@@ -6,7 +5,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service
 
 def parse_yandex_neuro(text):
@@ -16,12 +14,20 @@ def parse_yandex_neuro(text):
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--window-size=1920,1080')
     
-    # Путь к Chrome из переменной окружения
-    chrome_bin = os.environ.get('CHROME_BIN', '/usr/bin/google-chrome-stable')
+    # Путь к Chrome из переменной окружения, либо локальный бинарник
+    chrome_bin = os.environ.get('CHROME_BIN', './chrome/chrome-linux64/chrome')
     if os.path.exists(chrome_bin):
         options.binary_location = chrome_bin
     
-    service = Service(ChromeDriverManager().install())
+    # Для chromedriver используем локальный (он будет в PATH, но можно указать явно)
+    chromedriver_path = os.environ.get('CHROMEDRIVER_PATH', './chromedriver-linux64/chromedriver')
+    if os.path.exists(chromedriver_path):
+        service = Service(executable_path=chromedriver_path)
+    else:
+        # fallback — попробуем через webdriver_manager (может скачать)
+        from webdriver_manager.chrome import ChromeDriverManager
+        service = Service(ChromeDriverManager().install())
+    
     driver = webdriver.Chrome(service=service, options=options)
     try:
         driver.get('https://yandex.ru/lab/neurodetector')
