@@ -952,22 +952,29 @@ def run_auto_loop():
     import requests
     import time
     global auto_experiment_running, current_experiment_info
-    logger.info("Авто-цикл начал работу")
-    from yandex_parser import parse_yandex_neuro
+    logger.info("Авто-цикл начал работу (v5.0.2)")
+    try:
+        from yandex_parser import parse_yandex_neuro
+    except ImportError:
+        logger.warning("yandex_parser не найден, буду использовать локальный детектор")
+        parse_yandex_neuro = None
+
     text = load_test_text()
     if not text:
         logger.error("Не удалось загрузить тестовый текст")
         return
 
-    # Инициализируем общее количество запланированных экспериментов
-    # ИСПРАВЛЕНИЕ: правильная распаковка кортежей (имя, начальное, мин, макс, шаг) -> игнорируем первые два
+    # Рассчитываем общее количество экспериментов
     total_planned = 0
     for _, _, min_val, max_val, step in PARAMS_TO_OPTIMIZE:
         total_planned += int((max_val - min_val) / step) + 1
+    logger.info(f"Всего запланировано экспериментов: {total_planned}")
 
     with status_lock:
         current_experiment_info['total_planned'] = total_planned
         current_experiment_info['total_done'] = 0
+        current_experiment_info['best_score'] = 0
+        current_experiment_info['last_score'] = 0
 
     # Получаем начальное состояние из БД, если есть
     current_idx = int(get_state('current_idx') or 0)
@@ -1060,6 +1067,18 @@ def run_auto_loop():
                 results={'human': human, 'likely_human': likely_human, 'likely_ai': likely_ai, 'ai': ai},
                 status='done'
             )
+            
+            # Сохраняем эксперимент в БД
+            try:
+                save_experiment(
+                    config_name=f"auto_{param_name}_{new_value:.2f}",
+                    params=params,
+                    results={'human': human, 'likely_human': likely_human, 'likely_ai': likely_ai, 'ai': ai},
+                    status='done'
+                )
+                logger.info(f"Эксперимент сохранён в БД: {param_name}={new_value:.2f}")
+            except Exception as e:
+                logger.error(f"Ошибка сохранения эксперимента: {e}")
 
             # Отправляем в feedback для дообучения локального детектора
             try:
