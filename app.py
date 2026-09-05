@@ -928,6 +928,7 @@ def load_test_text():
         return TEST_TEXT
 
 def run_auto_loop():
+    import requests   # <-- явный импорт внутри функции
     global auto_experiment_running
     logger.info("Авто-цикл начал работу")
     from yandex_parser import parse_yandex_neuro
