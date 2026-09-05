@@ -1,5 +1,5 @@
 """
-Chapter Editor v5.0.0 — с автоматизацией экспериментов и БД
+Chapter Editor v5.0.1 — исправление ошибки распаковки PARAMS_TO_OPTIMIZE
 """
 import json
 import os
@@ -22,7 +22,6 @@ import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error
 
-# Новые модули для экспериментов и БД
 from db import init_db, get_all_experiments, save_experiment, set_state, get_state
 
 logging.basicConfig(level=logging.INFO)
@@ -31,7 +30,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "5.0.0"
+APP_VERSION = "5.0.1"   # Увеличил версию
 MAX_CHARS = 30_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
@@ -961,10 +960,11 @@ def run_auto_loop():
         return
 
     # Инициализируем общее количество запланированных экспериментов
-    total_planned = sum(
-        int((max_val - min_val) / step) + 1
-        for _, min_val, max_val, step in PARAMS_TO_OPTIMIZE
-    )
+    # ИСПРАВЛЕНИЕ: правильная распаковка кортежей (имя, начальное, мин, макс, шаг) -> игнорируем первые два
+    total_planned = 0
+    for _, _, min_val, max_val, step in PARAMS_TO_OPTIMIZE:
+        total_planned += int((max_val - min_val) / step) + 1
+
     with status_lock:
         current_experiment_info['total_planned'] = total_planned
         current_experiment_info['total_done'] = 0
