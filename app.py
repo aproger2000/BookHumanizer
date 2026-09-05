@@ -1,5 +1,5 @@
 """
-Chapter Editor v5.0.1 — исправление ошибки распаковки PARAMS_TO_OPTIMIZE
+Chapter Editor v5.0.3 — динамический порт и fallback на локальный детектор
 """
 import json
 import os
@@ -13,9 +13,6 @@ import threading
 import requests
 import time
 from pathlib import Path
-
-PORT = os.environ.get('PORT', '8000')
-BASE_URL = f"http://127.0.0.1:{PORT}"
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 from werkzeug.exceptions import HTTPException
@@ -33,8 +30,12 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "5.0.1"   # Увеличил версию
+APP_VERSION = "5.0.3"
 MAX_CHARS = 30_000
+
+# Динамический порт
+PORT = os.environ.get('PORT', '8000')
+BASE_URL = f"http://127.0.0.1:{PORT}"
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
@@ -952,14 +953,17 @@ def load_test_text():
         return TEST_TEXT
 
 def run_auto_loop():
-    import requests
-    import time
     global auto_experiment_running, current_experiment_info
-    logger.info("Авто-цикл начал работу (v5.0.2)")
+    logger.info("Авто-цикл начал работу (v5.0.3)")
+
+    # Функция для локальной оценки (fallback)
+    def get_local_score(text):
+        return get_human_score(text)
+
+    # Импорт парсера Яндекса (если доступен)
     try:
         from yandex_parser import parse_yandex_neuro
     except ImportError:
-        logger.warning("yandex_parser не найден, буду использовать локальный детектор")
         parse_yandex_neuro = None
 
     text = load_test_text()
@@ -979,14 +983,14 @@ def run_auto_loop():
         current_experiment_info['best_score'] = 0
         current_experiment_info['last_score'] = 0
 
-    # Получаем начальное состояние из БД, если есть
+    # Получаем начальное состояние из БД
     current_idx = int(get_state('current_idx') or 0)
     current_value = float(get_state('current_value') or PARAMS_TO_OPTIMIZE[current_idx][1])
     best_value = float(get_state('best_value') or current_value)
     best_score = float(get_state('best_score') or 0)
 
     while auto_experiment_running:
-        # Проверяем, достигли ли цели
+        # Проверяем цель
         if best_score >= 70:
             logger.info("Достигнута цель HUMAN+LIKELY_HUMAN >= 70%, цикл остановлен.")
             break
@@ -994,7 +998,7 @@ def run_auto_loop():
         param_name, base_val, min_val, max_val, step = PARAMS_TO_OPTIMIZE[current_idx]
         new_value = current_value + step
         if new_value > max_val:
-            # Переходим к следующему параметру
+            # Переход к следующему параметру
             current_idx = (current_idx + 1) % len(PARAMS_TO_OPTIMIZE)
             new_value = PARAMS_TO_OPTIMIZE[current_idx][1]
             set_state('current_idx', str(current_idx))
@@ -1004,7 +1008,7 @@ def run_auto_loop():
             logger.info(f"Переход к параметру {PARAMS_TO_OPTIMIZE[current_idx][0]}")
             continue
 
-        # Формируем словарь параметров (копия базовых из config, но с изменённым)
+        # Формируем параметры
         params = {
             'PROB_SYNONYMS': config.PROB_SYNONYMS,
             'PROB_INSERTIONS': config.PROB_INSERTIONS,
@@ -1028,49 +1032,52 @@ def run_auto_loop():
             current_experiment_info['last_log'] = f"Запуск {param_name} = {new_value:.2f}"
 
         try:
-            # Отправляем запрос на внутренний эндпоинт revise_internal
+            # Пытаемся получить обработанный текст через внутренний API
             resp = requests.post(
-                'http://localhost:8000/api/revise_internal',
+                f"{BASE_URL}/api/revise_internal",
                 json={'text': text, 'params': params, 'style': 'neutral'},
-                timeout=120
+                timeout=60
             )
             if resp.status_code != 200:
-                logger.error(f"Ошибка revise_internal: {resp.status_code}")
-                break
-            data = resp.json()
-            processed_text = data.get('revised_text')
-            if not processed_text:
-                logger.error("Не получен обработанный текст")
-                break
-
-            # Парсим Яндекс-нейродетектор (или используем локальный)
-            try:
-                yandex_result = parse_yandex_neuro(processed_text)
-                human = yandex_result.get('human', 0)
-                likely_human = yandex_result.get('likely_human', 0)
-                likely_ai = yandex_result.get('likely_ai', 0)
-                ai = yandex_result.get('ai', 0)
-            except Exception as e:
-                logger.warning(f"Ошибка парсинга Яндекса: {e}, используем локальный детектор")
-                human = get_human_score(processed_text)
+                logger.error(f"Ошибка revise_internal: {resp.status_code}, используем fallback")
+                human = get_local_score(text)
                 likely_human = 0
                 likely_ai = 0
                 ai = 100 - human
+                processed_text = text
+            else:
+                data = resp.json()
+                processed_text = data.get('revised_text')
+                if not processed_text:
+                    logger.error("Не получен обработанный текст, используем fallback")
+                    human = get_local_score(text)
+                    likely_human = 0
+                    likely_ai = 0
+                    ai = 100 - human
+                else:
+                    # Пытаемся получить оценку через Яндекс, если парсер доступен
+                    if parse_yandex_neuro:
+                        try:
+                            yandex_result = parse_yandex_neuro(processed_text)
+                            human = yandex_result.get('human', 0)
+                            likely_human = yandex_result.get('likely_human', 0)
+                            likely_ai = yandex_result.get('likely_ai', 0)
+                            ai = yandex_result.get('ai', 0)
+                        except Exception as e:
+                            logger.warning(f"Ошибка парсинга Яндекса: {e}, используем локальный")
+                            human = get_local_score(processed_text)
+                            likely_human = 0
+                            likely_ai = 0
+                            ai = 100 - human
+                    else:
+                        human = get_local_score(processed_text)
+                        likely_human = 0
+                        likely_ai = 0
+                        ai = 100 - human
+
             score = human + likely_human
             logger.info(f"Результат: HUMAN={human}%, LIKELY_HUMAN={likely_human}%, сумма={score}%")
-            with status_lock:
-                current_experiment_info['last_score'] = score
-                current_experiment_info['best_score'] = max(best_score, score)
-                current_experiment_info['total_done'] += 1
 
-            # Сохраняем эксперимент в БД
-            save_experiment(
-                config_name=f"auto_{param_name}_{new_value:.2f}",
-                params=params,
-                results={'human': human, 'likely_human': likely_human, 'likely_ai': likely_ai, 'ai': ai},
-                status='done'
-            )
-            
             # Сохраняем эксперимент в БД
             try:
                 save_experiment(
@@ -1083,19 +1090,25 @@ def run_auto_loop():
             except Exception as e:
                 logger.error(f"Ошибка сохранения эксперимента: {e}")
 
-            # Отправляем в feedback для дообучения локального детектора
-            try:
-                feedback_resp = requests.post(
-                    'http://localhost:8000/api/feedback',
-                    json={'revised_text': processed_text, 'yandex_score': human},
-                    timeout=30
-                )
-                if feedback_resp.status_code != 200:
-                    logger.warning("Не удалось отправить feedback")
-            except Exception as e:
-                logger.warning(f"Feedback error: {e}")
+            # Отправляем в feedback для дообучения (если есть обработанный текст)
+            if processed_text and processed_text != text:
+                try:
+                    feedback_resp = requests.post(
+                        f"{BASE_URL}/api/feedback",
+                        json={'revised_text': processed_text, 'yandex_score': human},
+                        timeout=30
+                    )
+                    if feedback_resp.status_code != 200:
+                        logger.warning("Не удалось отправить feedback")
+                except Exception as e:
+                    logger.warning(f"Feedback error: {e}")
 
             # Обновляем состояние
+            with status_lock:
+                current_experiment_info['last_score'] = score
+                current_experiment_info['best_score'] = max(best_score, score)
+                current_experiment_info['total_done'] += 1
+
             if score > best_score:
                 # Улучшение
                 best_score = score
@@ -1106,7 +1119,7 @@ def run_auto_loop():
                 logger.info(f"Улучшение! Новый лучший для {param_name}: {best_value} (score {best_score})")
             else:
                 # Ухудшение – переходим к следующему параметру
-                set_state('current_value', str(best_value))  # откат на лучшее
+                set_state('current_value', str(best_value))
                 current_idx = (current_idx + 1) % len(PARAMS_TO_OPTIMIZE)
                 set_state('current_idx', str(current_idx))
                 new_val = PARAMS_TO_OPTIMIZE[current_idx][1]
@@ -1117,7 +1130,7 @@ def run_auto_loop():
 
         except Exception as e:
             logger.exception(f"Ошибка в цикле: {e}")
-            # Откатываемся и переходим дальше
+            # Откат
             set_state('current_value', str(best_value))
             current_idx = (current_idx + 1) % len(PARAMS_TO_OPTIMIZE)
             set_state('current_idx', str(current_idx))
@@ -1126,7 +1139,7 @@ def run_auto_loop():
             set_state('best_value', str(new_val))
             set_state('best_score', str(best_score))
 
-        # Небольшая пауза, чтобы не перегружать сервер
+        # Пауза между экспериментами
         time.sleep(5)
 
     logger.info("Авто-цикл завершён")
