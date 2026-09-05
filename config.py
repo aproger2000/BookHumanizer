@@ -18,8 +18,8 @@ PROB_ADD_COLLOQUIAL = 0.3
 PROB_TYPOS = 0.3
 
 # ===== НОВЫЕ ОПЕРАЦИИ (ранее отключены) =====
-PROB_SWAP_CLAUSES = 0.0
-PROB_DIRECT_INDIRECT = 0.0
+PROB_SWAP_CLAUSES = 0.2
+PROB_DIRECT_INDIRECT = 0.15
 
 # ===== Остальные отключены =====
 PROB_CHANGE_WORD_ORDER = 0.0
