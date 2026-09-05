@@ -33,6 +33,12 @@ logger.info(f"BASE_URL: {BASE_URL}")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+test_file = Path('test_text.txt')
+if test_file.exists():
+    logger.info(f"test_text.txt существует, размер: {test_file.stat().st_size} байт")
+else:
+    logger.warning("test_text.txt НЕ НАЙДЕН в корне проекта!")
+
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
