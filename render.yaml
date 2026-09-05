@@ -2,32 +2,9 @@ services:
   - type: web
     name: book-chapter-editor
     env: python
-    plan: starter   # или любой платный план
-    buildCommand: |
-      # Установка зависимостей Python
-      pip install -r requirements.txt
-      # Скачиваем и распаковываем Chrome для Linux (без прав root)
-      mkdir -p ./chrome
-      cd ./chrome
-      wget -q -O chrome-linux64.zip https://storage.googleapis.com/chrome-for-testing-public/152.0.7977.82/linux64/chrome-linux64.zip
-      unzip -q chrome-linux64.zip
-      rm chrome-linux64.zip
-      cd ..
-      # Скачиваем chromedriver (для Selenium)
-      wget -q -O chromedriver-linux64.zip https://storage.googleapis.com/chrome-for-testing-public/152.0.7977.82/linux64/chromedriver-linux64.zip
-      unzip -q chromedriver-linux64.zip
-      rm chromedriver-linux64.zip
-      chmod +x ./chrome/chrome-linux64/chrome
-      chmod +x ./chromedriver-linux64/chromedriver
-      # Добавляем в PATH для Selenium
-      export PATH=$PWD/chromedriver-linux64:$PWD/chrome/chrome-linux64:$PATH
+    plan: free
+    buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --timeout 340
     envVars:
-      - key: ANTHROPIC_API_KEY
-        sync: false
-      - key: ANTHROPIC_MODEL
-        value: claude-sonnet-5
       - key: GUNICORN_TIMEOUT
         value: 600
-      - key: CHROME_BIN
-        value: ./chrome/chrome-linux64/chrome
