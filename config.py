@@ -1,27 +1,23 @@
 """
-config.py — эксперимент: синтаксические трансформации (v5.0.0)
+config.py — эксперимент: синтаксические трансформации (v5.0.1)
 """
-
-CONFIG_VERSION = "v5.0.0"
-HYPOTHESIS = "Перестановка частей 0.2 + замена прямой речи 0.15 + базовые параметры v1.18"
-
 RANDOM_SEED = 42
-PROB_SYNONYMS = 0.1          # было 0.3
-PROB_INSERTIONS = 0.3
-PROB_SWAP_FIRST_WORDS = 0.3
-PROB_INTERJECTIONS = 0.25
+PROB_SYNONYMS = 0.05          # Было 0.4! Агрессивная замена убивает смысл.
+PROB_INSERTIONS = 0.15
+PROB_SWAP_FIRST_WORDS = 0.1
+PROB_INTERJECTIONS = 0.15
 PROB_PARTICLES = 0.25
 PROB_CANCEL_CANCEL = 0.5
 PROB_REMOVE_AI_MARKERS = 0.6
-PROB_SPLIT_LONG_SENTENCES = 0.3
-PROB_ADD_COLLOQUIAL = 0.3
-PROB_TYPOS = 0.3
+PROB_SPLIT_LONG_SENTENCES = 0.25
+PROB_ADD_COLLOQUIAL = 0.2
+PROB_TYPOS = 0.05             # Было 0.3! Слишком много ошибок = машина.
 
-# ===== НОВЫЕ ОПЕРАЦИИ (ранее отключены) =====
-PROB_SWAP_CLAUSES = 0.2
-PROB_DIRECT_INDIRECT = 0.15
+# ===== НОВЫЕ ОПЕРАЦИИ (ВКЛЮЧАЕМ ТО, ЧТО ДАВАЛО 50%) =====
+PROB_SWAP_CLAUSES = 0.2       # Было 0.0! Метод v1.22.
+PROB_DIRECT_INDIRECT = 0.15   # Было 0.0! Метод v1.12 (замена прямой речи).
 
-# ===== Остальные отключены =====
+# ===== Остальные отключены (оставляем 0.0) =====
 PROB_CHANGE_WORD_ORDER = 0.0
 PROB_SWAP_SUBJECT_PREDICATE = 0.0
 PROB_INVERSION = 0.0
