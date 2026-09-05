@@ -690,16 +690,22 @@ def revise_internal():
     if not text:
         return jsonify({"error": "No text"}), 400
     params = data.get('params', {})
+    logger.info(f"revise_internal: входной текст длиной {len(text)} символов")
     paragraphs = split_paragraphs(text)
     if not paragraphs:
+        logger.info("split_paragraphs вернул пустой список, обрабатываем весь текст как один абзац")
         paragraphs = [text]
+    logger.info(f"revise_internal: найдено {len(paragraphs)} абзацев")
     results = []
-    for para in paragraphs:
+    for idx, para in enumerate(paragraphs):
         if not para:
             continue
+        logger.info(f"revise_internal: обрабатываем абзац {idx+1} длиной {len(para)} символов")
         result = process_paragraph(para, params=params)
         results.append(result)
+        logger.info(f"revise_internal: абзац {idx+1} обработан, длина результата {len(result['revised'])}")
     final_text = "\n\n".join(r["revised"] for r in results)
+    logger.info(f"revise_internal: итоговый текст длиной {len(final_text)} символов")
     return jsonify({"revised_text": final_text})
 
 @app.get("/api/experiments")
