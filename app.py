@@ -24,14 +24,15 @@ from sklearn.metrics import mean_absolute_error
 
 from db import init_db, get_all_experiments, save_experiment, set_state, get_state
 
-# В самом начале файла, после инициализации app, добавить:
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Логирование версий при старте
 logger.info(f"=== Chapter Editor v{APP_VERSION} ===")
 logger.info(f"Config version: {config.CONFIG_VERSION}")
 logger.info(f"Hypothesis: {config.HYPOTHESIS}")
 logger.info(f"PORT: {PORT}")
 logger.info(f"BASE_URL: {BASE_URL}")
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 test_file = Path('test_text.txt')
 if test_file.exists():
