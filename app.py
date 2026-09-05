@@ -1,5 +1,5 @@
 """
-Chapter Editor v5.0.3 — динамический порт и fallback на локальный детектор
+Chapter Editor v5.0.5 — динамический порт и fallback на локальный детектор
 """
 import json
 import os
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "5.0.3"
+APP_VERSION = "5.0.5"
 MAX_CHARS = 30_000
 
 # Динамический порт
