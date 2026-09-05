@@ -1,5 +1,5 @@
 """
-Chapter Editor v4.8.5 — с синтаксическими трансформациями (v1.24)
+Chapter Editor v5.0.0 — с автоматизацией экспериментов и БД
 """
 import json
 import os
@@ -20,19 +20,26 @@ import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error
 
+# Новые модули для экспериментов и БД
+from db import init_db, get_all_experiments, save_experiment, set_state, get_state
+from yandex_parser import parse_yandex_neuro
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "4.8.5"
+APP_VERSION = "5.0.0"
 MAX_CHARS = 30_000
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 
 random.seed(config.RANDOM_SEED)
+
+# Инициализация базы данных
+init_db()
 
 # ========== Загрузка калибровочной модели ==========
 MODEL_LOADED = False
@@ -72,6 +79,10 @@ COLLOQUIAL_PARTICLES = config.COLLOQUIAL_PARTICLES
 
 # ========== Счётчик для фонового переобучения ==========
 _retrain_lock = threading.Lock()
+
+# ========== Глобальный флаг автоматического цикла ==========
+auto_experiment_running = False
+auto_experiment_lock = threading.Lock()
 
 # ========== Функция переобучения (синхронная) ==========
 def retrain_model_sync():
@@ -254,39 +265,57 @@ def get_human_score(text: str) -> int:
         score -= 15
     return max(0, min(100, int(score)))
 
-# ========== Полная пост-обработка (v1.24) ==========
-def post_process(text: str, logs: list = None) -> str:
+# ========== Полная пост-обработка (поддерживает переданные параметры) ==========
+def post_process(text: str, logs: list = None, params: dict = None) -> str:
+    """
+    params - словарь с параметрами вероятностей (если None, берутся из config)
+    """
     if not text or len(text) < 20:
         return text
     if logs is None:
         logs = []
 
+    # Используем переданные параметры или глобальные
+    if params is None:
+        params = {
+            'PROB_SYNONYMS': config.PROB_SYNONYMS,
+            'PROB_INSERTIONS': config.PROB_INSERTIONS,
+            'PROB_SWAP_FIRST_WORDS': config.PROB_SWAP_FIRST_WORDS,
+            'PROB_INTERJECTIONS': config.PROB_INTERJECTIONS,
+            'PROB_PARTICLES': config.PROB_PARTICLES,
+            'PROB_CANCEL_CANCEL': config.PROB_CANCEL_CANCEL,
+            'PROB_REMOVE_AI_MARKERS': config.PROB_REMOVE_AI_MARKERS,
+            'PROB_SPLIT_LONG_SENTENCES': config.PROB_SPLIT_LONG_SENTENCES,
+            'PROB_ADD_COLLOQUIAL': config.PROB_ADD_COLLOQUIAL,
+            'PROB_TYPOS': config.PROB_TYPOS,
+            'PROB_SWAP_CLAUSES': config.PROB_SWAP_CLAUSES,
+            'PROB_DIRECT_INDIRECT': config.PROB_DIRECT_INDIRECT,
+        }
+
     ops = []
-    if random.random() < config.PROB_SYNONYMS:
+    if random.random() < params['PROB_SYNONYMS']:
         ops.append('synonyms')
-    if random.random() < config.PROB_INSERTIONS:
+    if random.random() < params['PROB_INSERTIONS']:
         ops.append('insertions')
-    if random.random() < config.PROB_SWAP_FIRST_WORDS:
+    if random.random() < params['PROB_SWAP_FIRST_WORDS']:
         ops.append('swap_first_words')
-    if random.random() < config.PROB_INTERJECTIONS:
+    if random.random() < params['PROB_INTERJECTIONS']:
         ops.append('interjections')
-    if random.random() < config.PROB_PARTICLES:
+    if random.random() < params['PROB_PARTICLES']:
         ops.append('insert_particles')
-    if random.random() < config.PROB_CANCEL_CANCEL:
+    if random.random() < params['PROB_CANCEL_CANCEL']:
         ops.append('cancel_cancel')
-    if random.random() < config.PROB_REMOVE_AI_MARKERS:
+    if random.random() < params['PROB_REMOVE_AI_MARKERS']:
         ops.append('remove_ai_markers')
-    if random.random() < config.PROB_SPLIT_LONG_SENTENCES:
+    if random.random() < params['PROB_SPLIT_LONG_SENTENCES']:
         ops.append('split_long_sentences')
-    if random.random() < config.PROB_ADD_COLLOQUIAL:
+    if random.random() < params['PROB_ADD_COLLOQUIAL']:
         ops.append('add_colloquial')
-    if random.random() < config.PROB_TYPOS:
+    if random.random() < params['PROB_TYPOS']:
         ops.append('add_typos')
-    
-    # НОВЫЕ ОПЕРАЦИИ
-    if random.random() < config.PROB_SWAP_CLAUSES:
+    if random.random() < params['PROB_SWAP_CLAUSES']:
         ops.append('swap_clauses')
-    if random.random() < config.PROB_DIRECT_INDIRECT:
+    if random.random() < params['PROB_DIRECT_INDIRECT']:
         ops.append('direct_indirect')
 
     if not ops:
@@ -296,7 +325,7 @@ def post_process(text: str, logs: list = None) -> str:
         if op == 'synonyms':
             replacements = 0
             for pattern, syn_list in SYNONYMS:
-                if random.random() < config.PROB_SYNONYMS:
+                if random.random() < params['PROB_SYNONYMS']:
                     matches = list(re.finditer(pattern, text, flags=re.IGNORECASE))
                     if matches:
                         match = random.choice(matches)
@@ -462,7 +491,6 @@ def post_process(text: str, logs: list = None) -> str:
             if typo_count:
                 logs.append(f"  - добавлено опечаток: {typo_count}")
 
-        # ===== НОВЫЕ ОПЕРАЦИИ =====
         elif op == 'swap_clauses':
             def swap_clauses(text):
                 patterns = [
@@ -502,8 +530,8 @@ def post_process(text: str, logs: list = None) -> str:
 
     return text
 
-# ========== Обработка абзаца ==========
-def process_paragraph(paragraph: str) -> dict:
+# ========== Обработка абзаца (с поддержкой параметров) ==========
+def process_paragraph(paragraph: str, params: dict = None) -> dict:
     if not paragraph:
         return {
             "original": paragraph,
@@ -529,7 +557,7 @@ def process_paragraph(paragraph: str) -> dict:
         }
 
     post_logs = []
-    revised = post_process(paragraph, logs=post_logs)
+    revised = post_process(paragraph, logs=post_logs, params=params)
     score = get_human_score(revised)
     logs.extend(post_logs)
     logs.append(f"Итоговый HUMAN: {score}%")
@@ -631,7 +659,6 @@ def feedback():
         return jsonify({"error": "yandex_score must be an integer 0-100"}), 400
 
     csv_path = Path('training_data.csv')
-    # Проверка на дубликат
     if csv_path.exists():
         with open(csv_path, 'r', encoding='utf-8') as f:
             reader = csv.reader(f)
@@ -657,7 +684,6 @@ def feedback():
 
     row = [features.get(col, 0) for col in feature_order] + [revised_text, yandex_score]
 
-    # Сохраняем в CSV
     if not csv_path.exists():
         with open(csv_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
@@ -671,7 +697,6 @@ def feedback():
 
     logger.info(f"Added feedback: score={yandex_score}, text length={len(revised_text)}")
 
-    # Запускаем переобучение сразу после сохранения (синхронно в фоне)
     thread = threading.Thread(target=retrain_model_sync, daemon=True)
     thread.start()
     logger.info("Запущено фоновое переобучение после добавления оценки")
@@ -708,7 +733,7 @@ def api_revise():
 
         def generate():
             try:
-                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев (v4.8.5)..."})
+                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев (v{APP_VERSION})..."})
 
                 results = []
                 for idx, para in enumerate(paragraphs):
@@ -772,7 +797,7 @@ def api_revise():
                 yield _sse("done", {
                     "revised_text": final_text,
                     "original_text": chapter_text,
-                    "summary": f"Обработано {total} абзацев (v4.8.5). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
+                    "summary": f"Обработано {total} абзацев (v{APP_VERSION}). Успешно: {status_counts['done']}, частично: {status_counts['partial']}, ошибок: {status_counts['error']}. Средний HUMAN: {avg_score}%",
                     "paragraphs": results,
                     "average_human_score": avg_score,
                     "overall_analysis": overall,
@@ -793,6 +818,245 @@ def api_revise():
         logger.exception("api_revise: Unexpected error")
         return jsonify(detail=f"Server error: {str(e)}"), 500
 
+# ========== НОВЫЕ ЭНДПОИНТЫ ДЛЯ ЭКСПЕРИМЕНТОВ ==========
+
+@app.post("/api/revise_internal")
+def revise_internal():
+    """
+    Внутренний эндпоинт для автоматических экспериментов.
+    Принимает JSON с text, params (словарь вероятностей) и style.
+    Возвращает обработанный текст (без SSE).
+    """
+    data = request.json
+    if not data:
+        return jsonify({"error": "No JSON"}), 400
+
+    text = data.get('text', '').strip()
+    if not text:
+        return jsonify({"error": "No text"}), 400
+
+    params = data.get('params', {})
+    style = data.get('style', 'neutral')
+
+    # Разбиваем на абзацы и обрабатываем с переданными параметрами
+    paragraphs = split_paragraphs(text)
+    results = []
+    for para in paragraphs:
+        if not para:
+            continue
+        result = process_paragraph(para, params=params)
+        results.append(result)
+
+    final_text = "\n\n".join(r["revised"] for r in results)
+    return jsonify({"revised_text": final_text})
+
+@app.get("/api/experiments")
+def get_experiments():
+    """Возвращает список всех экспериментов из БД"""
+    rows = get_all_experiments()
+    experiments = []
+    for row in rows:
+        experiments.append({
+            'id': row[0],
+            'config_name': row[1],
+            'params': json.loads(row[2]) if row[2] else {},
+            'human': row[3] or 0,
+            'likely_human': row[4] or 0,
+            'likely_ai': row[5] or 0,
+            'ai': row[6] or 0,
+            'timestamp': row[7],
+            'status': row[8]
+        })
+    return jsonify(experiments)
+
+@app.post("/api/experiments/start")
+def start_auto():
+    global auto_experiment_running
+    with auto_experiment_lock:
+        if auto_experiment_running:
+            return jsonify({"status": "already running"})
+        auto_experiment_running = True
+        thread = threading.Thread(target=run_auto_loop, daemon=True)
+        thread.start()
+        logger.info("Автоматический цикл экспериментов запущен")
+        return jsonify({"status": "started"})
+
+@app.post("/api/experiments/stop")
+def stop_auto():
+    global auto_experiment_running
+    with auto_experiment_lock:
+        auto_experiment_running = False
+        logger.info("Автоматический цикл экспериментов остановлен")
+        return jsonify({"status": "stopped"})
+
+@app.get("/api/experiments/status")
+def status_auto():
+    return jsonify({"running": auto_experiment_running})
+
+# ========== Фоновый цикл автоматических экспериментов ==========
+
+# Список параметров для оптимизации (имя, начальное, мин, макс, шаг)
+PARAMS_TO_OPTIMIZE = [
+    ('PROB_SYNONYMS', 0.3, 0.3, 0.7, 0.05),
+    ('PROB_TYPOS', 0.3, 0.2, 0.5, 0.05),
+    ('PROB_PARTICLES', 0.25, 0.15, 0.4, 0.05),
+    ('PROB_INTERJECTIONS', 0.25, 0.15, 0.4, 0.05),
+    ('PROB_SWAP_FIRST_WORDS', 0.3, 0.2, 0.5, 0.05),
+    ('PROB_INSERTIONS', 0.3, 0.2, 0.5, 0.05),
+    ('PROB_ADD_COLLOQUIAL', 0.3, 0.2, 0.5, 0.05),
+]
+
+TEST_TEXT = None  # будет загружено при первом запуске
+
+def load_test_text():
+    """Загружает тестовый текст из файла или скачивает с URL"""
+    global TEST_TEXT
+    if TEST_TEXT:
+        return TEST_TEXT
+    # Можно загрузить из файла test_text.txt или сгенерировать
+    text_file = Path('test_text.txt')
+    if text_file.exists():
+        with open(text_file, 'r', encoding='utf-8') as f:
+            TEST_TEXT = f.read()
+        return TEST_TEXT
+    else:
+        # Заглушка - используем фиксированный кусок
+        TEST_TEXT = "За восемь лет до «Стеклянного Ливня» Храм Солнца встретил Алексея запахом ржавчины и старой стали... (полный текст главы должен быть здесь)"
+        return TEST_TEXT
+
+def run_auto_loop():
+    global auto_experiment_running
+    logger.info("Авто-цикл начал работу")
+    text = load_test_text()
+    if not text:
+        logger.error("Не удалось загрузить тестовый текст")
+        return
+
+    # Получаем начальное состояние из БД, если есть
+    current_idx = int(get_state('current_idx') or 0)
+    current_value = float(get_state('current_value') or PARAMS_TO_OPTIMIZE[current_idx][1])
+    best_value = float(get_state('best_value') or current_value)
+    best_score = float(get_state('best_score') or 0)
+
+    while auto_experiment_running:
+        # Проверяем, достигли ли цели
+        if best_score >= 70:
+            logger.info("Достигнута цель HUMAN+LIKELY_HUMAN >= 70%, цикл остановлен.")
+            break
+
+        param_name, base_val, min_val, max_val, step = PARAMS_TO_OPTIMIZE[current_idx]
+        new_value = current_value + step
+        if new_value > max_val:
+            # Переходим к следующему параметру
+            current_idx = (current_idx + 1) % len(PARAMS_TO_OPTIMIZE)
+            new_value = PARAMS_TO_OPTIMIZE[current_idx][1]
+            set_state('current_idx', str(current_idx))
+            set_state('current_value', str(new_value))
+            set_state('best_value', str(new_value))
+            set_state('best_score', str(best_score))
+            logger.info(f"Переход к параметру {PARAMS_TO_OPTIMIZE[current_idx][0]}")
+            continue
+
+        # Формируем словарь параметров (копия базовых из config, но с изменённым)
+        params = {
+            'PROB_SYNONYMS': config.PROB_SYNONYMS,
+            'PROB_INSERTIONS': config.PROB_INSERTIONS,
+            'PROB_SWAP_FIRST_WORDS': config.PROB_SWAP_FIRST_WORDS,
+            'PROB_INTERJECTIONS': config.PROB_INTERJECTIONS,
+            'PROB_PARTICLES': config.PROB_PARTICLES,
+            'PROB_CANCEL_CANCEL': config.PROB_CANCEL_CANCEL,
+            'PROB_REMOVE_AI_MARKERS': config.PROB_REMOVE_AI_MARKERS,
+            'PROB_SPLIT_LONG_SENTENCES': config.PROB_SPLIT_LONG_SENTENCES,
+            'PROB_ADD_COLLOQUIAL': config.PROB_ADD_COLLOQUIAL,
+            'PROB_TYPOS': config.PROB_TYPOS,
+            'PROB_SWAP_CLAUSES': 0.0,
+            'PROB_DIRECT_INDIRECT': 0.0,
+        }
+        params[param_name] = new_value
+
+        logger.info(f"Запуск эксперимента: {param_name} = {new_value:.2f}")
+
+        try:
+            # Отправляем запрос на внутренний эндпоинт revise_internal
+            resp = requests.post(
+                'http://localhost:8000/api/revise_internal',
+                json={'text': text, 'params': params, 'style': 'neutral'},
+                timeout=120
+            )
+            if resp.status_code != 200:
+                logger.error(f"Ошибка revise_internal: {resp.status_code}")
+                break
+            data = resp.json()
+            processed_text = data.get('revised_text')
+            if not processed_text:
+                logger.error("Не получен обработанный текст")
+                break
+
+            # Парсим Яндекс-нейродетектор
+            yandex_result = parse_yandex_neuro(processed_text)
+            human = yandex_result.get('human', 0)
+            likely_human = yandex_result.get('likely_human', 0)
+            likely_ai = yandex_result.get('likely_ai', 0)
+            ai = yandex_result.get('ai', 0)
+            score = human + likely_human
+            logger.info(f"Результат: HUMAN={human}%, LIKELY_HUMAN={likely_human}%, сумма={score}%")
+
+            # Сохраняем эксперимент в БД
+            save_experiment(
+                config_name=f"auto_{param_name}_{new_value:.2f}",
+                params=params,
+                results={'human': human, 'likely_human': likely_human, 'likely_ai': likely_ai, 'ai': ai},
+                status='done'
+            )
+
+            # Отправляем в feedback для дообучения локального детектора
+            feedback_resp = requests.post(
+                'http://localhost:8000/api/feedback',
+                json={'revised_text': processed_text, 'yandex_score': human},
+                timeout=30
+            )
+            if feedback_resp.status_code != 200:
+                logger.warning("Не удалось отправить feedback")
+
+            # Обновляем состояние
+            if score > best_score:
+                # Улучшение
+                best_score = score
+                best_value = new_value
+                set_state('best_value', str(best_value))
+                set_state('best_score', str(best_score))
+                # Продолжаем увеличивать этот же параметр
+                set_state('current_value', str(new_value))
+                logger.info(f"Улучшение! Новый лучший для {param_name}: {best_value} (score {best_score})")
+            else:
+                # Ухудшение – переходим к следующему параметру
+                set_state('current_value', str(best_value))  # откат на лучшее
+                current_idx = (current_idx + 1) % len(PARAMS_TO_OPTIMIZE)
+                set_state('current_idx', str(current_idx))
+                new_val = PARAMS_TO_OPTIMIZE[current_idx][1]
+                set_state('current_value', str(new_val))
+                set_state('best_value', str(new_val))
+                set_state('best_score', str(best_score))
+                logger.info(f"Ухудшение, переходим к {PARAMS_TO_OPTIMIZE[current_idx][0]}")
+
+        except Exception as e:
+            logger.exception(f"Ошибка в цикле: {e}")
+            # Откатываемся и переходим дальше
+            set_state('current_value', str(best_value))
+            current_idx = (current_idx + 1) % len(PARAMS_TO_OPTIMIZE)
+            set_state('current_idx', str(current_idx))
+            new_val = PARAMS_TO_OPTIMIZE[current_idx][1]
+            set_state('current_value', str(new_val))
+            set_state('best_value', str(new_val))
+            set_state('best_score', str(best_score))
+
+        # Небольшая пауза, чтобы не перегружать сервер
+        import time
+        time.sleep(5)
+
+    logger.info("Авто-цикл завершён")
+
+# ========== Статические страницы и обработчики ошибок ==========
 @app.get("/")
 def index():
     return app.send_static_file("index.html")
@@ -804,7 +1068,7 @@ def handle_http_exception(exc):
 @app.errorhandler(Exception)
 def handle_exception(exc):
     logger.exception("Unhandled exception")
-    return jsonify(detail=f"Server error: {str(e)}"), 500
+    return jsonify(detail=f"Server error: {str(exc)}"), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
