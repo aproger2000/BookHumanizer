@@ -1,101 +1,92 @@
+# yandex_parser.py
 import os
-import time
 import re
 import logging
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.common.exceptions import TimeoutException
+from playwright.sync_api import sync_playwright
 
 logger = logging.getLogger(__name__)
 
 def parse_yandex_neuro(text):
     if len(text) < 150:
-        raise ValueError("Текст слишком короткий")
+        raise ValueError("Текст слишком короткий (мин. 150 символов)")
 
-    options = Options()
-    options.add_argument('--headless')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--window-size=1920,1080')
-    options.add_argument('--disable-gpu')
-    options.add_argument('user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36')
-
-    chrome_bin = os.environ.get('CHROME_BIN', './chrome/chrome-linux64/chrome')
-    if os.path.exists(chrome_bin):
-        options.binary_location = chrome_bin
-
-    chromedriver_path = os.environ.get('CHROMEDRIVER_PATH', './chromedriver-linux64/chromedriver')
-    if os.path.exists(chromedriver_path):
-        service = Service(executable_path=chromedriver_path)
-    else:
-        from webdriver_manager.chrome import ChromeDriverManager
-        service = Service(ChromeDriverManager().install())
-
-    driver = webdriver.Chrome(service=service, options=options)
-    try:
-        driver.get('https://yandex.ru/lab/neurodetector')
-        time.sleep(2)
-
-        textarea = WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, 'textarea[placeholder*="текст"]'))
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=['--no-sandbox', '--disable-dev-shm-usage']
         )
-        textarea.clear()
-        textarea.send_keys(text)
-        time.sleep(1)
+        context = browser.new_context(
+            user_agent='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36'
+        )
+        page = context.new_page()
+        try:
+            logger.info("Загружаем страницу Яндекс.Нейродетектора...")
+            page.goto('https://yandex.ru/lab/neurodetector', timeout=30000)
+            page.wait_for_load_state('networkidle')
 
-        submit_btn = None
-        for by, selector in [
-            (By.ID, "analyze-btn"),
-            (By.CSS_SELECTOR, "button[type='submit']"),
-            (By.XPATH, "//button[contains(text(), 'Проверить')]"),
-        ]:
-            try:
-                submit_btn = WebDriverWait(driver, 5).until(
-                    EC.element_to_be_clickable((by, selector))
-                )
-                break
-            except:
-                continue
+            # Вставляем текст
+            logger.info("Вставляем текст...")
+            textarea = page.locator('textarea[placeholder*="текст"]').first
+            textarea.fill(text)
+            logger.info(f"Текст вставлен, длина: {len(text)} символов")
 
-        if not submit_btn:
-            raise Exception("Кнопка не найдена")
+            # Нажимаем кнопку "Проверить"
+            logger.info("Ищем кнопку 'Проверить'...")
+            submit_btn = page.locator('button:has-text("Проверить")').first
+            if not submit_btn.is_visible():
+                # альтернативный селектор
+                submit_btn = page.locator('#analyze-btn').first
+            submit_btn.click()
+            logger.info("Кнопка нажата, ждём результаты...")
 
-        submit_btn.click()
-        time.sleep(30)  # даём время на анализ
+            # Ждём появления чисел с процентами
+            # Проверяем каждые 2 секунды, максимум 60 секунд
+            result = None
+            for _ in range(30):
+                page.wait_for_timeout(2000)
+                # Ищем все числа с % в тексте страницы
+                body = page.locator('body').text_content()
+                matches = re.findall(r'(\d+)%', body)
+                if matches and len(matches) >= 4:
+                    vals = [int(m) for m in matches[-4:]]
+                    result = {
+                        'ai': vals[0],
+                        'likely_ai': vals[1],
+                        'likely_human': vals[2],
+                        'human': vals[3]
+                    }
+                    logger.info(f"Найдены результаты: {result}")
+                    break
+                else:
+                    # Попробуем поискать в конкретных блоках
+                    blocks = page.locator('.distribution-value').all()
+                    values = []
+                    for el in blocks:
+                        txt = el.text_content()
+                        if txt and txt.strip().endswith('%'):
+                            try:
+                                values.append(int(txt.replace('%', '').strip()))
+                            except:
+                                pass
+                    if len(values) >= 4:
+                        vals = values[-4:]
+                        result = {
+                            'ai': vals[0],
+                            'likely_ai': vals[1],
+                            'likely_human': vals[2],
+                            'human': vals[3]
+                        }
+                        logger.info(f"Найдены результаты (по блокам): {result}")
+                        break
 
-        # Сохраняем результат для отладки
-        driver.save_screenshot('/tmp/yandex_result.png')
-        with open('/tmp/yandex_result.html', 'w', encoding='utf-8') as f:
-            f.write(driver.page_source)
+            if result is None:
+                logger.error("Не удалось найти результаты анализа.")
+                # Сохраняем скриншот для отладки
+                screenshot_path = '/tmp/yandex_fail.png'
+                page.screenshot(path=screenshot_path)
+                logger.info(f"Скриншот сохранён: {screenshot_path}")
+                raise Exception("Не удалось найти распределение процентов")
 
-        # Ищем все числа с % в тексте страницы
-        body = driver.find_element(By.TAG_NAME, 'body').text
-        nums = re.findall(r'(\d+)%', body)
-        if len(nums) >= 4:
-            vals = [int(n) for n in nums[-4:]]
-            return {
-                'ai': vals[0],
-                'likely_ai': vals[1],
-                'likely_human': vals[2],
-                'human': vals[3]
-            }
-        else:
-            # Попробуем найти в блоках
-            blocks = driver.find_elements(By.CSS_SELECTOR, '.distribution-value')
-            values = [int(el.text.replace('%', '')) for el in blocks if el.text]
-            if len(values) >= 4:
-                vals = values[-4:]
-                return {
-                    'ai': vals[0],
-                    'likely_ai': vals[1],
-                    'likely_human': vals[2],
-                    'human': vals[3]
-                }
-            raise Exception("Не удалось найти распределение")
-
-    finally:
-        driver.quit()
+            return result
+        finally:
+            browser.close()
