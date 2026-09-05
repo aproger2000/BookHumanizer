@@ -1,4 +1,5 @@
 # yandex_parser.py
+import os
 import time
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -9,15 +10,16 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service
 
 def parse_yandex_neuro(text):
-    """
-    Открывает страницу, вставляет текст, ждёт результат,
-    возвращает словарь с ключами: human, likely_human, likely_ai, ai (в процентах)
-    """
     options = Options()
     options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--window-size=1920,1080')
+    
+    # Путь к Chrome из переменной окружения
+    chrome_bin = os.environ.get('CHROME_BIN', '/usr/bin/google-chrome-stable')
+    if os.path.exists(chrome_bin):
+        options.binary_location = chrome_bin
     
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
@@ -34,7 +36,6 @@ def parse_yandex_neuro(text):
             EC.presence_of_element_located((By.CSS_SELECTOR, '.segment-item'))
         )
         time.sleep(2)
-        # Парсим распределение
         result = {'human': 0, 'likely_human': 0, 'likely_ai': 0, 'ai': 0}
         blocks = driver.find_elements(By.CSS_SELECTOR, '.distribution-value')
         values = [int(b.text.replace('%', '')) for b in blocks if b.text]
