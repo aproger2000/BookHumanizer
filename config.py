@@ -2,12 +2,11 @@
 config.py — эксперимент: синтаксические трансформации (v1.24)
 """
 
-CONFIG_VERSION = "v1.24"
+CONFIG_VERSION = "v1.25"
 HYPOTHESIS = "Перестановка частей 0.2 + замена прямой речи 0.15 + базовые параметры v1.18"
 
 RANDOM_SEED = 42
-
-PROB_SYNONYMS = 0.3
+PROB_SYNONYMS = 0.4          # было 0.3
 PROB_INSERTIONS = 0.3
 PROB_SWAP_FIRST_WORDS = 0.3
 PROB_INTERJECTIONS = 0.25
@@ -19,8 +18,8 @@ PROB_ADD_COLLOQUIAL = 0.3
 PROB_TYPOS = 0.3
 
 # ===== НОВЫЕ ОПЕРАЦИИ (ранее отключены) =====
-PROB_SWAP_CLAUSES = 0.2          # перестановка частей (было 0.0)
-PROB_DIRECT_INDIRECT = 0.15      # замена прямой/косвенной речи (было 0.0)
+PROB_SWAP_CLAUSES = 0.0
+PROB_DIRECT_INDIRECT = 0.0
 
 # ===== Остальные отключены =====
 PROB_CHANGE_WORD_ORDER = 0.0
