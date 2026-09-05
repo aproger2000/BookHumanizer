@@ -954,9 +954,9 @@ def load_test_text():
 
 def run_auto_loop():
     global auto_experiment_running, current_experiment_info
-    logger.info("Авто-цикл начал работу (v5.0.3)")
+    logger.info("Авто-цикл начал работу (v5.0.5 — Яндекс.Нейродетектор)")
 
-    # Функция для локальной оценки (fallback)
+    # Функция локальной оценки (fallback)
     def get_local_score(text):
         return get_human_score(text)
 
@@ -965,6 +965,7 @@ def run_auto_loop():
         from yandex_parser import parse_yandex_neuro
     except ImportError:
         parse_yandex_neuro = None
+        logger.warning("yandex_parser не найден, буду использовать только локальный детектор")
 
     text = load_test_text()
     if not text:
@@ -1032,7 +1033,7 @@ def run_auto_loop():
             current_experiment_info['last_log'] = f"Запуск {param_name} = {new_value:.2f}"
 
         try:
-            # Пытаемся получить обработанный текст через внутренний API
+            # Получаем обработанный текст через внутренний API
             resp = requests.post(
                 f"{BASE_URL}/api/revise_internal",
                 json={'text': text, 'params': params, 'style': 'neutral'},
@@ -1055,14 +1056,23 @@ def run_auto_loop():
                     likely_ai = 0
                     ai = 100 - human
                 else:
-                    # Пытаемся получить оценку через Яндекс, если парсер доступен
+                    # Пытаемся получить оценку через Яндекс.Нейродетектор
                     if parse_yandex_neuro:
                         try:
-                            yandex_result = parse_yandex_neuro(processed_text)
-                            human = yandex_result.get('human', 0)
-                            likely_human = yandex_result.get('likely_human', 0)
-                            likely_ai = yandex_result.get('likely_ai', 0)
-                            ai = yandex_result.get('ai', 0)
+                            # Проверяем длину текста (Яндекс требует >=150 символов)
+                            if len(processed_text) < 150:
+                                logger.warning(f"Текст слишком короткий ({len(processed_text)} символов), используем локальный детектор")
+                                human = get_local_score(processed_text)
+                                likely_human = 0
+                                likely_ai = 0
+                                ai = 100 - human
+                            else:
+                                yandex_result = parse_yandex_neuro(processed_text)
+                                human = yandex_result.get('human', 0)
+                                likely_human = yandex_result.get('likely_human', 0)
+                                likely_ai = yandex_result.get('likely_ai', 0)
+                                ai = yandex_result.get('ai', 0)
+                                logger.info(f"Оценка Яндекса: HUMAN={human}%, LIKELY_HUMAN={likely_human}%")
                         except Exception as e:
                             logger.warning(f"Ошибка парсинга Яндекса: {e}, используем локальный")
                             human = get_local_score(processed_text)
