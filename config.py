@@ -6,7 +6,7 @@ CONFIG_VERSION = "v5.0.0"
 HYPOTHESIS = "Перестановка частей 0.2 + замена прямой речи 0.15 + базовые параметры v1.18"
 
 RANDOM_SEED = 42
-PROB_SYNONYMS = 0.4          # было 0.3
+PROB_SYNONYMS = 0.1          # было 0.3
 PROB_INSERTIONS = 0.3
 PROB_SWAP_FIRST_WORDS = 0.3
 PROB_INTERJECTIONS = 0.25
