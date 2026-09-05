@@ -11,6 +11,7 @@ import joblib
 import csv
 import threading
 import requests
+import time
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, stream_with_context
@@ -40,7 +41,6 @@ random.seed(config.RANDOM_SEED)
 
 # Инициализация базы данных
 init_db()
-
 from db import seed_experiments
 seed_experiments()
 
@@ -86,6 +86,18 @@ _retrain_lock = threading.Lock()
 # ========== Глобальный флаг автоматического цикла ==========
 auto_experiment_running = False
 auto_experiment_lock = threading.Lock()
+
+# ========== Глобальные переменные для статуса ==========
+current_experiment_info = {
+    'param_name': '',
+    'param_value': 0.0,
+    'last_score': 0,
+    'best_score': 0,
+    'total_done': 0,
+    'total_planned': 0,
+    'last_log': ''
+}
+status_lock = threading.Lock()
 
 # ========== Функция переобучения (синхронная) ==========
 def retrain_model_sync():
@@ -894,7 +906,18 @@ def stop_auto():
 
 @app.get("/api/experiments/status")
 def status_auto():
-    return jsonify({"running": auto_experiment_running})
+    with status_lock:
+        info = {
+            "running": auto_experiment_running,
+            "param_name": current_experiment_info.get('param_name', ''),
+            "param_value": current_experiment_info.get('param_value', 0.0),
+            "last_score": current_experiment_info.get('last_score', 0),
+            "best_score": current_experiment_info.get('best_score', 0),
+            "total_done": current_experiment_info.get('total_done', 0),
+            "total_planned": current_experiment_info.get('total_planned', 0),
+            "last_log": current_experiment_info.get('last_log', '')
+        }
+    return jsonify(info)
 
 # ========== Фоновый цикл автоматических экспериментов ==========
 
@@ -916,7 +939,6 @@ def load_test_text():
     global TEST_TEXT
     if TEST_TEXT:
         return TEST_TEXT
-    # Можно загрузить из файла test_text.txt или сгенерировать
     text_file = Path('test_text.txt')
     if text_file.exists():
         with open(text_file, 'r', encoding='utf-8') as f:
@@ -928,14 +950,24 @@ def load_test_text():
         return TEST_TEXT
 
 def run_auto_loop():
-    import requests   # <-- явный импорт внутри функции
-    global auto_experiment_running
+    import requests
+    import time
+    global auto_experiment_running, current_experiment_info
     logger.info("Авто-цикл начал работу")
     from yandex_parser import parse_yandex_neuro
     text = load_test_text()
     if not text:
         logger.error("Не удалось загрузить тестовый текст")
         return
+
+    # Инициализируем общее количество запланированных экспериментов
+    total_planned = sum(
+        int((max_val - min_val) / step) + 1
+        for _, min_val, max_val, step in PARAMS_TO_OPTIMIZE
+    )
+    with status_lock:
+        current_experiment_info['total_planned'] = total_planned
+        current_experiment_info['total_done'] = 0
 
     # Получаем начальное состояние из БД, если есть
     current_idx = int(get_state('current_idx') or 0)
@@ -980,6 +1012,10 @@ def run_auto_loop():
         params[param_name] = new_value
 
         logger.info(f"Запуск эксперимента: {param_name} = {new_value:.2f}")
+        with status_lock:
+            current_experiment_info['param_name'] = param_name
+            current_experiment_info['param_value'] = new_value
+            current_experiment_info['last_log'] = f"Запуск {param_name} = {new_value:.2f}"
 
         try:
             # Отправляем запрос на внутренний эндпоинт revise_internal
@@ -997,14 +1033,25 @@ def run_auto_loop():
                 logger.error("Не получен обработанный текст")
                 break
 
-            # Парсим Яндекс-нейродетектор
-            yandex_result = parse_yandex_neuro(processed_text)
-            human = yandex_result.get('human', 0)
-            likely_human = yandex_result.get('likely_human', 0)
-            likely_ai = yandex_result.get('likely_ai', 0)
-            ai = yandex_result.get('ai', 0)
+            # Парсим Яндекс-нейродетектор (или используем локальный)
+            try:
+                yandex_result = parse_yandex_neuro(processed_text)
+                human = yandex_result.get('human', 0)
+                likely_human = yandex_result.get('likely_human', 0)
+                likely_ai = yandex_result.get('likely_ai', 0)
+                ai = yandex_result.get('ai', 0)
+            except Exception as e:
+                logger.warning(f"Ошибка парсинга Яндекса: {e}, используем локальный детектор")
+                human = get_human_score(processed_text)
+                likely_human = 0
+                likely_ai = 0
+                ai = 100 - human
             score = human + likely_human
             logger.info(f"Результат: HUMAN={human}%, LIKELY_HUMAN={likely_human}%, сумма={score}%")
+            with status_lock:
+                current_experiment_info['last_score'] = score
+                current_experiment_info['best_score'] = max(best_score, score)
+                current_experiment_info['total_done'] += 1
 
             # Сохраняем эксперимент в БД
             save_experiment(
@@ -1015,13 +1062,16 @@ def run_auto_loop():
             )
 
             # Отправляем в feedback для дообучения локального детектора
-            feedback_resp = requests.post(
-                'http://localhost:8000/api/feedback',
-                json={'revised_text': processed_text, 'yandex_score': human},
-                timeout=30
-            )
-            if feedback_resp.status_code != 200:
-                logger.warning("Не удалось отправить feedback")
+            try:
+                feedback_resp = requests.post(
+                    'http://localhost:8000/api/feedback',
+                    json={'revised_text': processed_text, 'yandex_score': human},
+                    timeout=30
+                )
+                if feedback_resp.status_code != 200:
+                    logger.warning("Не удалось отправить feedback")
+            except Exception as e:
+                logger.warning(f"Feedback error: {e}")
 
             # Обновляем состояние
             if score > best_score:
@@ -1030,7 +1080,6 @@ def run_auto_loop():
                 best_value = new_value
                 set_state('best_value', str(best_value))
                 set_state('best_score', str(best_score))
-                # Продолжаем увеличивать этот же параметр
                 set_state('current_value', str(new_value))
                 logger.info(f"Улучшение! Новый лучший для {param_name}: {best_value} (score {best_score})")
             else:
@@ -1056,7 +1105,6 @@ def run_auto_loop():
             set_state('best_score', str(best_score))
 
         # Небольшая пауза, чтобы не перегружать сервер
-        import time
         time.sleep(5)
 
     logger.info("Авто-цикл завершён")
