@@ -75,16 +75,17 @@ def get_state(key):
 
 def seed_experiments():
     """Заполняет таблицу экспериментов историческими данными, если она пуста."""
+    import logging
+    logger = logging.getLogger(__name__)
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    # Проверяем, есть ли записи
     c.execute('SELECT COUNT(*) FROM experiments')
     count = c.fetchone()[0]
     if count > 0:
         conn.close()
+        logger.info("Таблица экспериментов уже содержит данные, пропускаем seed.")
         return
 
-    # Исторические данные из таблицы DOE (ключевые эксперименты)
     history = [
         ('v1.18 (база)', {'PROB_SYNONYMS': 0.3, 'PROB_TYPOS': 0.3, 'PROB_PARTICLES': 0.25, 'PROB_INTERJECTIONS': 0.25, 'PROB_SWAP_FIRST_WORDS': 0.3}, 50, 0, 0, 50, 'done'),
         ('v1.24 (синтаксис)', {'PROB_SWAP_CLAUSES': 0.2, 'PROB_DIRECT_INDIRECT': 0.15}, 43, 5, 10, 42, 'done'),
@@ -112,4 +113,4 @@ def seed_experiments():
         ))
     conn.commit()
     conn.close()
-    print(f"Добавлено {len(history)} исторических экспериментов в БД.")
+    logger.info(f"Добавлено {len(history)} исторических экспериментов в БД.")
