@@ -6,7 +6,7 @@ RANDOM_SEED = 42
 # Базовая конфигурация по умолчанию (v2.0)
 PROB_SYNONYMS = 0.3
 PROB_INSERTIONS = 0.3
-PROB_SWAP_FIRST_WORDS = 0.4      # теперь 0.4
+PROB_SWAP_FIRST_WORDS = 0.4      # теперь 0.4 (но для экспериментов мы будем менять)
 PROB_INTERJECTIONS = 0.25
 PROB_PARTICLES = 0.25
 PROB_CANCEL_CANCEL = 0.5
@@ -106,13 +106,13 @@ AI_MARKERS = [
 
 COLLOQUIAL_PARTICLES = ['же', 'ведь', 'вот', 'ну', 'типа', 'прямо', 'просто', 'так', 'это']
 
-# ===== ПАРАМЕТРЫ ДЛЯ АВТОМАТИЧЕСКОГО ПОИСКА =====
+# ===== ПАРАМЕТРЫ ДЛЯ АВТОМАТИЧЕСКОГО ПОИСКА (НОВЫЙ ЭТАП) =====
 # Каждый кортеж: (имя_параметра, начальное_значение, минимальное_значение, максимальное_значение, шаг)
 EXPERIMENT_PARAMS = [
-    ('PROB_INTERJECTIONS', 0.35, 0.35, 0.75, 0.05),
-    ('PROB_TYPOS', 0.3, 0.3, 0.7, 0.05),
-    ('PROB_INSERTIONS', 0.3, 0.3, 0.65, 0.05),
-    ('PROB_SWAP_FIRST_WORDS', 0.3, 0.3, 0.6, 0.05),
-    ('PROB_PARTICLES', 0.25, 0.25, 0.5, 0.05),
-    ('PROB_ADD_COLLOQUIAL', 0.3, 0.3, 0.5, 0.05),
+    ('PROB_INTERJECTIONS', 0.35, 0.35, 0.80, 0.05),
+    ('PROB_TYPOS', 0.3, 0.3, 0.75, 0.05),
+    ('PROB_SWAP_FIRST_WORDS', 0.3, 0.3, 0.70, 0.05),
+    ('PROB_PARTICLES', 0.25, 0.25, 0.60, 0.05),
+    ('PROB_REMOVE_AI_MARKERS', 0.6, 0.6, 0.9, 0.05),
+    ('PROB_SWAP_CLAUSES', 0.0, 0.0, 0.25, 0.05),
 ]
