@@ -577,7 +577,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     experimentBody.appendChild(tr);
                     return;
                 }
-                data.slice(-10).forEach(exp => { // показываем последние 10
+                data.forEach(exp => {
                     const tr = document.createElement('tr');
                     const sum = (exp.human || 0) + (exp.likely_human || 0);
                     let color = 'red';
