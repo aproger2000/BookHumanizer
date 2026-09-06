@@ -800,11 +800,11 @@ def status_auto():
 # ========== Параметры оптимизации ==========
 PARAMS_TO_OPTIMIZE = [
     ('PROB_SYNONYMS', 0.3, 0.3, 0.7, 0.05),
-    ('PROB_TYPOS', 0.3, 0.2, 0.5, 0.05),
-    ('PROB_PARTICLES', 0.25, 0.15, 0.4, 0.05),
-    ('PROB_INTERJECTIONS', 0.25, 0.15, 0.4, 0.05),
-    ('PROB_SWAP_FIRST_WORDS', 0.3, 0.2, 0.5, 0.05),
-    ('PROB_INSERTIONS', 0.3, 0.2, 0.5, 0.05),
+    ('PROB_TYPOS', 0.3, 0.2, 0.7, 0.05),   # было 0.5, увеличили до 0.7
+    ('PROB_PARTICLES', 0.25, 0.15, 0.5, 0.05),
+    ('PROB_INTERJECTIONS', 0.25, 0.15, 0.5, 0.05),
+    ('PROB_SWAP_FIRST_WORDS', 0.3, 0.2, 0.6, 0.05),
+    ('PROB_INSERTIONS', 0.3, 0.2, 0.5, 0.05),   # добавили
     ('PROB_ADD_COLLOQUIAL', 0.3, 0.2, 0.5, 0.05),
 ]
 
