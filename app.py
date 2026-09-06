@@ -796,14 +796,8 @@ def status_auto():
     return jsonify(info)
 
 # ========== Параметры оптимизации ==========
-PARAMS_TO_OPTIMIZE = [
-    ('PROB_INTERJECTIONS', 0.35, 0.35, 0.75, 0.05),   # был 0.25–0.6, теперь 0.35–0.75
-    ('PROB_TYPOS', 0.3, 0.3, 0.7, 0.05),              # был 0.2–0.7, оставляем, но можно начать с 0.3
-    ('PROB_INSERTIONS', 0.3, 0.3, 0.65, 0.05),        # был 0.2–0.6, начинаем с 0.3
-    ('PROB_SWAP_FIRST_WORDS', 0.3, 0.3, 0.6, 0.05),   # был 0.2–0.6, начинаем с 0.3
-    ('PROB_PARTICLES', 0.25, 0.25, 0.5, 0.05),        # без изменений
-    ('PROB_ADD_COLLOQUIAL', 0.3, 0.3, 0.5, 0.05),     # без изменений
-]
+# Вместо объявления PARAMS_TO_OPTIMIZE внутри app.py
+PARAMS_TO_OPTIMIZE = config.EXPERIMENT_PARAMS
 
 TEST_TEXT = None
 
