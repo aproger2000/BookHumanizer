@@ -947,6 +947,7 @@ def run_auto_loop():
 
             score = human + likely_human
             logger.info(f"Результат: HUMAN={human}%, LIKELY_HUMAN={likely_human}%, сумма={score}%")
+            logger.info(f"Before save_experiment: {param_name}={new_value:.2f}, human={human}, likely_human={likely_human}")
 
             save_experiment(
                 config_name=f"auto_{param_name}_{new_value:.2f}",
