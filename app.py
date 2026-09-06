@@ -1,5 +1,5 @@
 """
-Chapter Editor v5.0.11 — фикс загрузки test_text.txt (всегда читаем файл)
+Chapter Editor v5.1.0 — расширенный поиск, сохранение лучшего текста
 """
 import json
 import os
@@ -22,17 +22,15 @@ import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error
 
-from db import init_db, get_all_experiments, save_experiment, set_state, get_state
+from db import init_db, get_all_experiments, save_experiment, set_state, get_state, get_best_experiment, save_best_text
 
-# ===== Настройка логирования =====
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ===== Определение констант ДО использования в логах =====
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "5.0.11"
+APP_VERSION = "5.1.0"
 MAX_CHARS = 30_000
 
 PORT = os.environ.get('PORT', '8000')
@@ -43,43 +41,15 @@ app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 
 random.seed(config.RANDOM_SEED)
 
-# ===== Инициализация БД и seed =====
 init_db()
 from db import seed_experiments
 seed_experiments()
-# ===== Логирование версий (безопасно) =====
+
 logger.info(f"=== Chapter Editor v{APP_VERSION} ===")
+logger.info(f"Config version: {config.CONFIG_VERSION}")
+logger.info(f"Hypothesis: {config.HYPOTHESIS}")
 logger.info(f"PORT: {PORT}")
 logger.info(f"BASE_URL: {BASE_URL}")
-# Опционально, если атрибуты существуют:
-if hasattr(config, 'CONFIG_VERSION'):
-    logger.info(f"Config version: {config.CONFIG_VERSION}")
-if hasattr(config, 'HYPOTHESIS'):
-    logger.info(f"Hypothesis: {config.HYPOTHESIS}")
-
-test_file = Path('test_text.txt')
-if test_file.exists():
-    logger.info(f"test_text.txt существует, размер: {test_file.stat().st_size} байт")
-else:
-    logger.warning("test_text.txt НЕ НАЙДЕН в корне проекта!")
-
-BASE_DIR = Path(__file__).resolve().parent
-STATIC_DIR = BASE_DIR / "static"
-
-APP_VERSION = "5.0.11"
-MAX_CHARS = 30_000
-
-PORT = os.environ.get('PORT', '8000')
-BASE_URL = f"http://127.0.0.1:{PORT}"
-
-app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
-app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
-
-random.seed(config.RANDOM_SEED)
-
-init_db()
-from db import seed_experiments
-seed_experiments()
 
 # ========== Загрузка модели ==========
 MODEL_LOADED = False
@@ -123,7 +93,8 @@ current_experiment_info = {
     'best_score': 0,
     'total_done': 0,
     'total_planned': 0,
-    'last_log': ''
+    'last_log': '',
+    'best_text': ''   # текст лучшего эксперимента
 }
 status_lock = threading.Lock()
 
@@ -762,6 +733,25 @@ def get_experiments():
         })
     return jsonify(experiments)
 
+@app.get("/api/experiments/best")
+def get_best_experiment():
+    """Возвращает лучший эксперимент по сумме human+likely_human"""
+    best = get_best_experiment()
+    if best:
+        return jsonify({
+            'id': best[0],
+            'config_name': best[1],
+            'params': json.loads(best[2]) if best[2] else {},
+            'human': best[3] or 0,
+            'likely_human': best[4] or 0,
+            'likely_ai': best[5] or 0,
+            'ai': best[6] or 0,
+            'timestamp': best[7],
+            'status': best[8],
+            'revised_text': best[9] if len(best) > 9 else ''
+        })
+    return jsonify(None)
+
 @app.post("/api/experiments/start")
 def start_auto():
     global auto_experiment_running
@@ -793,20 +783,23 @@ def status_auto():
             "best_score": current_experiment_info.get('best_score', 0),
             "total_done": current_experiment_info.get('total_done', 0),
             "total_planned": current_experiment_info.get('total_planned', 0),
-            "last_log": current_experiment_info.get('last_log', '')
+            "last_log": current_experiment_info.get('last_log', ''),
+            "best_text": current_experiment_info.get('best_text', '')  # добавили
         }
     return jsonify(info)
 
 # ========== Параметры оптимизации ==========
 PARAMS_TO_OPTIMIZE = [
     ('PROB_SYNONYMS', 0.3, 0.3, 0.7, 0.05),
-    ('PROB_TYPOS', 0.3, 0.2, 0.7, 0.05),      # было 0.5 – увеличиваем до 0.7
+    ('PROB_TYPOS', 0.3, 0.2, 0.7, 0.05),      # расширили до 0.7
     ('PROB_PARTICLES', 0.25, 0.15, 0.5, 0.05),
     ('PROB_INTERJECTIONS', 0.25, 0.15, 0.5, 0.05),
     ('PROB_SWAP_FIRST_WORDS', 0.3, 0.2, 0.6, 0.05),
-    ('PROB_INSERTIONS', 0.3, 0.2, 0.5, 0.05),  # было 0.5, можно увеличить до 0.6
+    ('PROB_INSERTIONS', 0.3, 0.2, 0.6, 0.05),  # расширили до 0.6
     ('PROB_ADD_COLLOQUIAL', 0.3, 0.2, 0.5, 0.05),
 ]
+
+TEST_TEXT = None
 
 def load_test_text():
     """Всегда читает файл test_text.txt, не использует кэш."""
@@ -823,7 +816,7 @@ def load_test_text():
 
 def run_auto_loop():
     global auto_experiment_running, current_experiment_info
-    logger.info("Авто-цикл начал работу (v5.0.11)")
+    logger.info("Авто-цикл начал работу (v5.1.0)")
 
     # Импортируем парсер Яндекс.Нейродетектора
     try:
@@ -852,6 +845,7 @@ def run_auto_loop():
         current_experiment_info['total_done'] = 0
         current_experiment_info['best_score'] = 0
         current_experiment_info['last_score'] = 0
+        current_experiment_info['best_text'] = ''
 
     current_idx = int(get_state('current_idx') or 0)
     current_value = float(get_state('current_value') or PARAMS_TO_OPTIMIZE[current_idx][1])
@@ -947,15 +941,21 @@ def run_auto_loop():
 
             score = human + likely_human
             logger.info(f"Результат: HUMAN={human}%, LIKELY_HUMAN={likely_human}%, сумма={score}%")
-            logger.info(f"Before save_experiment: {param_name}={new_value:.2f}, human={human}, likely_human={likely_human}")
 
-            save_experiment(
-                config_name=f"auto_{param_name}_{new_value:.2f}",
-                params=params,
-                results={'human': human, 'likely_human': likely_human, 'likely_ai': likely_ai if 'likely_ai' in locals() else 0, 'ai': ai},
-                status='done'
-            )
+            # Сохраняем в БД
+            try:
+                save_experiment(
+                    config_name=f"auto_{param_name}_{new_value:.2f}",
+                    params=params,
+                    results={'human': human, 'likely_human': likely_human, 'likely_ai': likely_ai if 'likely_ai' in locals() else 0, 'ai': ai},
+                    status='done',
+                    revised_text=processed_text if processed_text else ''
+                )
+                logger.info(f"Эксперимент сохранён в БД: {param_name}={new_value:.2f}")
+            except Exception as e:
+                logger.error(f"Ошибка сохранения эксперимента: {e}")
 
+            # Отправляем feedback для дообучения локального детектора
             if processed_text and processed_text != text:
                 try:
                     requests.post(
@@ -968,9 +968,12 @@ def run_auto_loop():
 
             with status_lock:
                 current_experiment_info['last_score'] = score
-                current_experiment_info['best_score'] = max(best_score, score)
+                if score > best_score:
+                    current_experiment_info['best_score'] = score
+                    current_experiment_info['best_text'] = processed_text if processed_text else ''
                 current_experiment_info['total_done'] += 1
 
+            # Обновляем лучший результат
             if score > best_score:
                 best_score = score
                 best_value = new_value
