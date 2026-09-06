@@ -754,7 +754,8 @@ def get_best_experiment():
 
 @app.get("/api/experiments/best")
 def get_best_experiment_route():
-    best = db_get_best_experiment()
+    from db import get_best_experiment as db_get_best
+    best = db_get_best()
     if best:
         params = {}
         if best[2]:
