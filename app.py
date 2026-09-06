@@ -752,6 +752,27 @@ def get_best_experiment():
         })
     return jsonify(None)
 
+@app.get("/api/experiments/best")
+def get_best_experiment_route():
+    best = get_best_experiment()
+    if best:
+        revised_text = best[9] if len(best) > 9 else ''
+        if len(revised_text) > 3000:
+            revised_text = revised_text[:3000] + '... (обрезано)'
+        return jsonify({
+            'id': best[0],
+            'config_name': best[1],
+            'params': json.loads(best[2]) if best[2] else {},
+            'human': best[3] or 0,
+            'likely_human': best[4] or 0,
+            'likely_ai': best[5] or 0,
+            'ai': best[6] or 0,
+            'timestamp': best[7],
+            'status': best[8],
+            'revised_text': revised_text
+        })
+    return jsonify(None)
+
 @app.post("/api/experiments/start")
 def start_auto():
     global auto_experiment_running
@@ -791,11 +812,11 @@ def status_auto():
 # ========== Параметры оптимизации ==========
 PARAMS_TO_OPTIMIZE = [
     ('PROB_SYNONYMS', 0.3, 0.3, 0.7, 0.05),
-    ('PROB_TYPOS', 0.3, 0.2, 0.7, 0.05),      # расширили до 0.7
+    ('PROB_TYPOS', 0.3, 0.2, 0.7, 0.05),
     ('PROB_PARTICLES', 0.25, 0.15, 0.5, 0.05),
-    ('PROB_INTERJECTIONS', 0.25, 0.15, 0.5, 0.05),
+    ('PROB_INTERJECTIONS', 0.25, 0.15, 0.6, 0.05),   # теперь до 0.6
     ('PROB_SWAP_FIRST_WORDS', 0.3, 0.2, 0.6, 0.05),
-    ('PROB_INSERTIONS', 0.3, 0.2, 0.6, 0.05),  # расширили до 0.6
+    ('PROB_INSERTIONS', 0.3, 0.2, 0.6, 0.05),
     ('PROB_ADD_COLLOQUIAL', 0.3, 0.2, 0.5, 0.05),
 ]
 
