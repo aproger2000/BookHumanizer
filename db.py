@@ -1,17 +1,19 @@
-# db.py
 import os
 import sqlite3
 import json
 import logging
 from datetime import datetime
 
+# Определяем абсолютный путь к БД в папке проекта (которая должна быть примонтирована через Persistent Disk)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'experiments.db')
 
 logger = logging.getLogger(__name__)
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    # Включаем WAL режим для многопоточности
+    conn.execute('PRAGMA journal_mode=WAL')
     c = conn.cursor()
     c.execute('''
         CREATE TABLE IF NOT EXISTS experiments (
@@ -35,19 +37,24 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
-    logger.info(f"Database initialized at {DB_PATH}")
+    logger.info(f"Database initialized at {DB_PATH} (WAL mode)")
 
 def save_experiment(config_name, params, results, status='done', revised_text=''):
     logger.info(f"SAVE_EXPERIMENT called: {config_name}, DB_PATH={DB_PATH}")
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     c = conn.cursor()
     try:
+        # Проверяем количество записей до вставки
+        c.execute('SELECT COUNT(*) FROM experiments')
+        count_before = c.fetchone()[0]
+        logger.info(f"Count before insert: {count_before}")
+
         c.execute('''
             INSERT INTO experiments (config_name, params, human, likely_human, likely_ai, ai, timestamp, status, revised_text)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             config_name,
-            json.dumps(params),
+            json.dumps(params, ensure_ascii=False),
             results.get('human', 0),
             results.get('likely_human', 0),
             results.get('likely_ai', 0),
@@ -58,7 +65,20 @@ def save_experiment(config_name, params, results, status='done', revised_text=''
         ))
         conn.commit()
         last_id = c.lastrowid
-        logger.info(f"SAVE_EXPERIMENT success, lastrowid: {last_id}")
+        # Проверяем, что запись действительно появилась
+        c.execute('SELECT COUNT(*) FROM experiments')
+        count_after = c.fetchone()[0]
+        logger.info(f"Count after insert: {count_after}, lastrowid: {last_id}")
+        if count_after == count_before:
+            logger.error("Count did not increase! Rollback may have occurred.")
+        else:
+            # Дополнительная проверка: читаем запись по id
+            c.execute('SELECT id, config_name FROM experiments WHERE id = ?', (last_id,))
+            row = c.fetchone()
+            if row:
+                logger.info(f"Verified: record with id {row[0]} exists: {row[1]}")
+            else:
+                logger.error(f"Record with id {last_id} not found after commit!")
         return last_id
     except Exception as e:
         logger.error(f"SAVE_EXPERIMENT failed: {e}")
@@ -94,6 +114,7 @@ def set_state(key, value):
     c.execute('REPLACE INTO experiment_state (key, value) VALUES (?, ?)', (key, value))
     conn.commit()
     conn.close()
+    logger.debug(f"State set: {key}={value}")
 
 def get_state(key):
     conn = sqlite3.connect(DB_PATH)
@@ -104,6 +125,7 @@ def get_state(key):
     return row[0] if row else None
 
 def seed_experiments():
+    """Заполняет таблицу экспериментов историческими данными, если она пуста."""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('SELECT COUNT(*) FROM experiments')
