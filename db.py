@@ -1,9 +1,13 @@
 # db.py
 import sqlite3
 import json
+import logging
 from datetime import datetime
 
 DB_PATH = 'experiments.db'
+
+# Настройка логгера (если не настроен глобально)
+logger = logging.getLogger(__name__)
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -30,25 +34,39 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
+    logger.info("Database initialized")
 
 def save_experiment(config_name, params, results, status='done'):
+    """
+    Сохраняет эксперимент в БД с полным логированием.
+    """
+    logger.info(f"SAVE_EXPERIMENT called: {config_name}, params: {params}, results: {results}, status: {status}")
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute('''
-        INSERT INTO experiments (config_name, params, human, likely_human, likely_ai, ai, timestamp, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        config_name,
-        json.dumps(params),
-        results.get('human', 0),
-        results.get('likely_human', 0),
-        results.get('likely_ai', 0),
-        results.get('ai', 0),
-        datetime.now().isoformat(),
-        status
-    ))
-    conn.commit()
-    conn.close()
+    try:
+        c.execute('''
+            INSERT INTO experiments (config_name, params, human, likely_human, likely_ai, ai, timestamp, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            config_name,
+            json.dumps(params),
+            results.get('human', 0),
+            results.get('likely_human', 0),
+            results.get('likely_ai', 0),
+            results.get('ai', 0),
+            datetime.now().isoformat(),
+            status
+        ))
+        conn.commit()
+        last_id = c.lastrowid
+        logger.info(f"SAVE_EXPERIMENT success, lastrowid: {last_id}")
+        return last_id
+    except Exception as e:
+        logger.error(f"SAVE_EXPERIMENT failed: {e}")
+        conn.rollback()
+        return None
+    finally:
+        conn.close()
 
 def get_all_experiments():
     conn = sqlite3.connect(DB_PATH)
@@ -64,6 +82,7 @@ def set_state(key, value):
     c.execute('REPLACE INTO experiment_state (key, value) VALUES (?, ?)', (key, value))
     conn.commit()
     conn.close()
+    logger.debug(f"State set: {key}={value}")
 
 def get_state(key):
     conn = sqlite3.connect(DB_PATH)
@@ -75,8 +94,6 @@ def get_state(key):
 
 def seed_experiments():
     """Заполняет таблицу экспериментов историческими данными, если она пуста."""
-    import logging
-    logger = logging.getLogger(__name__)
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('SELECT COUNT(*) FROM experiments')
