@@ -734,14 +734,21 @@ def get_experiments():
     return jsonify(experiments)
 
 @app.get("/api/experiments/best")
-def get_best_experiment():
-    """Возвращает лучший эксперимент по сумме human+likely_human"""
-    best = get_best_experiment()
+def api_best_experiment():
+    # Импортируем функцию из db.py с другим именем
+    from db import get_best_experiment as db_get_best
+    best = db_get_best()
     if best:
+        params = {}
+        if best[2]:
+            try:
+                params = json.loads(best[2])
+            except:
+                params = {}
         return jsonify({
             'id': best[0],
             'config_name': best[1],
-            'params': json.loads(best[2]) if best[2] else {},
+            'params': params,
             'human': best[3] or 0,
             'likely_human': best[4] or 0,
             'likely_ai': best[5] or 0,
