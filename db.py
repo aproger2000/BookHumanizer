@@ -1,10 +1,13 @@
 # db.py
+import os
 import sqlite3
 import json
 import logging
 from datetime import datetime
 
-DB_PATH = 'experiments.db'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, 'experiments.db')
+
 logger = logging.getLogger(__name__)
 
 def init_db():
@@ -32,10 +35,10 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
-    logger.info("Database initialized")
+    logger.info(f"Database initialized at {DB_PATH}")
 
 def save_experiment(config_name, params, results, status='done', revised_text=''):
-    logger.info(f"SAVE_EXPERIMENT called: {config_name}")
+    logger.info(f"SAVE_EXPERIMENT called: {config_name}, DB_PATH={DB_PATH}")
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     try:
@@ -73,7 +76,6 @@ def get_all_experiments():
     return rows
 
 def get_best_experiment():
-    """Возвращает запись с максимальной суммой human+likely_human"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('''
@@ -92,7 +94,6 @@ def set_state(key, value):
     c.execute('REPLACE INTO experiment_state (key, value) VALUES (?, ?)', (key, value))
     conn.commit()
     conn.close()
-    logger.debug(f"State set: {key}={value}")
 
 def get_state(key):
     conn = sqlite3.connect(DB_PATH)
@@ -103,7 +104,6 @@ def get_state(key):
     return row[0] if row else None
 
 def seed_experiments():
-    """Заполняет таблицу экспериментами, если она пуста"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('SELECT COUNT(*) FROM experiments')
