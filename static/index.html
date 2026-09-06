@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chapter Editor v5.0.6</title>
+    <title>Chapter Editor v5.1.0</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -35,8 +35,6 @@
         .btn-success:hover { background: #218838; }
         .btn-danger { background: #dc3545; color: white; }
         .btn-danger:hover { background: #c82333; }
-        .btn-warning { background: #ffc107; color: #212529; }
-        .btn-warning:hover { background: #e0a800; }
         .progress-container { margin-top: 12px; background: #eef3f8; border-radius: 8px; height: 6px; overflow: hidden; opacity: 0; flex-shrink: 0; transition: opacity 0.3s; }
         .progress-container.active { opacity: 1; }
         .progress-bar { height: 100%; width: 0%; background: #2c3e50; border-radius: 8px; transition: width 0.2s ease; }
@@ -287,6 +285,31 @@
             border: 1px solid #d0d9e4;
             display: none;
         }
+        .best-result-block {
+            margin-top: 12px;
+            padding: 12px 16px;
+            background: #f0f8ff;
+            border-radius: 8px;
+            border: 1px solid #b8d4e8;
+            display: none;
+        }
+        .best-result-block .btn {
+            padding: 4px 12px;
+            font-size: 12px;
+        }
+        #bestTextContainer {
+            display: none;
+            margin-top: 8px;
+            padding: 8px;
+            background: #fff;
+            border: 1px solid #d0d9e4;
+            border-radius: 6px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-size: 13px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
         #currentStatus .status-row {
             display: flex;
             justify-content: space-between;
@@ -323,7 +346,7 @@
 <div class="container">
     <header>
         <div class="logo"><h1>Chapter Editor <span class="sub">— текст как живой</span></h1></div>
-        <span class="version-badge" id="versionBadge">v5.0.6</span>
+        <span class="version-badge" id="versionBadge">v5.1.0</span>
     </header>
 
     <div class="main-grid">
@@ -399,6 +422,21 @@
                 </div>
             </div>
 
+            <!-- Блок лучшего результата -->
+            <div class="best-result-block" id="bestResultBlock">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-weight: 600; font-size: 14px;">🏆 Лучший результат</span>
+                    <button class="btn btn-secondary" id="showBestTextBtn" style="padding: 4px 12px; font-size: 12px;">Показать текст</button>
+                </div>
+                <div id="bestResultInfo" style="font-size: 13px; margin-top: 6px;">
+                    <span id="bestResultConfig">—</span>
+                    <span id="bestResultScore" style="font-weight: 600; color: #1e7e34; margin-left: 12px;">—</span>
+                </div>
+                <div id="bestTextContainer">
+                    <div id="bestTextContent"></div>
+                </div>
+            </div>
+
             <div class="overall-analysis" id="overallAnalysis">
                 <div class="title">🔍 Итоговая проверка (встроенный детектор)</div>
                 <div class="stats" id="overallStats"></div>
@@ -456,7 +494,7 @@
 
     <div class="footer">
         <span id="footerVersion">Chapter Editor — локальное перефразирование с HUMAN score</span>
-        <span id="configInfo" class="config-info">Конфиг: v5.0.6 | Гипотеза: автоматический поиск</span>
+        <span id="configInfo" class="config-info">Конфиг: v5.1.0 | Гипотеза: расширенный поиск</span>
         <span><a href="#" onclick="location.reload()">Перезагрузить</a></span>
     </div>
 </div>
@@ -513,6 +551,14 @@ document.addEventListener('DOMContentLoaded', function() {
     const statusProgressText = document.getElementById('statusProgressText');
     const statusLog = document.getElementById('statusLog');
 
+    // Блок лучшего результата
+    const bestResultBlock = document.getElementById('bestResultBlock');
+    const bestResultConfig = document.getElementById('bestResultConfig');
+    const bestResultScore = document.getElementById('bestResultScore');
+    const bestTextContainer = document.getElementById('bestTextContainer');
+    const bestTextContent = document.getElementById('bestTextContent');
+    const showBestTextBtn = document.getElementById('showBestTextBtn');
+
     // ===== Глобальные переменные =====
     let resultText = '';
     let logText = '';
@@ -531,7 +577,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     experimentBody.appendChild(tr);
                     return;
                 }
-                data.forEach(exp => {
+                data.slice(-10).forEach(exp => { // показываем последние 10
                     const tr = document.createElement('tr');
                     const sum = (exp.human || 0) + (exp.likely_human || 0);
                     let color = 'red';
@@ -584,6 +630,27 @@ document.addEventListener('DOMContentLoaded', function() {
             .catch(() => {});
     }
 
+    // Загрузка лучшего эксперимента
+    function loadBestExperiment() {
+        fetch('/api/experiments/best')
+            .then(res => res.json())
+            .then(data => {
+                if (data && data.id) {
+                    bestResultBlock.style.display = 'block';
+                    bestResultConfig.textContent = data.config_name + ' (HUMAN=' + data.human + '%, LIKELY=' + data.likely_human + '%)';
+                    bestResultScore.textContent = 'Сумма: ' + (data.human + data.likely_human) + '%';
+                    if (data.revised_text) {
+                        bestTextContent.textContent = data.revised_text;
+                    } else {
+                        bestTextContent.textContent = 'Текст не сохранён в БД. Запустите новый эксперимент.';
+                    }
+                } else {
+                    bestResultBlock.style.display = 'none';
+                }
+            })
+            .catch(err => console.warn('Не удалось загрузить лучший эксперимент:', err));
+    }
+
     // Запуск/остановка авто-цикла
     startAutoBtn.addEventListener('click', function() {
         fetch('/api/experiments/start', { method: 'POST' })
@@ -618,12 +685,24 @@ document.addEventListener('DOMContentLoaded', function() {
     setInterval(() => {
         fetchExperiments();
         updateStatus();
+        loadBestExperiment();
     }, 5000);
     fetchExperiments();
     updateStatus();
+    loadBestExperiment();
 
-    // ===== Старый код (копирование, обратная связь, редактирование) =====
-    // Копирование текста и логов
+    // Показать/скрыть текст лучшего результата
+    showBestTextBtn.addEventListener('click', function() {
+        if (bestTextContainer.style.display === 'none') {
+            bestTextContainer.style.display = 'block';
+            this.textContent = 'Скрыть текст';
+        } else {
+            bestTextContainer.style.display = 'none';
+            this.textContent = 'Показать текст';
+        }
+    });
+
+    // ===== Копирование текста и логов =====
     copyBtn.addEventListener('click', function() {
         if (!resultText) {
             statusText.textContent = '⚠️ Нет текста для копирования';
@@ -631,7 +710,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         navigator.clipboard.writeText(resultText).then(() => {
-            statusText.textContent = '✅ Текст скопирован в буфер обмена';
+            statusText.textContent = '✅ Текст скопирован';
             statusText.className = 'status-text success';
         }).catch(() => {
             const textarea = document.createElement('textarea');
@@ -652,7 +731,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         navigator.clipboard.writeText(logText).then(() => {
-            statusText.textContent = '✅ Лог скопирован в буфер обмена';
+            statusText.textContent = '✅ Лог скопирован';
             statusText.className = 'status-text success';
         }).catch(() => {
             const textarea = document.createElement('textarea');
@@ -666,7 +745,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    // Обратная связь
+    // ===== Обратная связь =====
     submitFeedbackBtn.addEventListener('click', function() {
         const score = parseInt(yandexScoreInput.value);
         if (isNaN(score) || score < 0 || score > 100) {
@@ -707,7 +786,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    // Загрузка файла
+    // ===== Загрузка файла =====
     loadBtn.addEventListener('click', function() { fileInput.click(); });
     fileInput.addEventListener('change', function(e) {
         const file = e.target.files[0];
@@ -727,19 +806,341 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // ===== Кнопка "Редактировать" =====
-    // (полный код редактирования – такой же как раньше, для краткости опущен,
-    // но в реальном файле он должен быть)
-    // В целях экономии места я не дублирую его здесь, но при сборке проекта обязательно добавьте.
-    // Весь код из предыдущей версии сохраняется.
+    editBtn.addEventListener('click', function() {
+        const text = sourceText.value.trim();
+        if (!text) {
+            statusText.textContent = '⚠️ Вставьте текст или загрузите файл';
+            statusText.className = 'status-text error';
+            return;
+        }
+        const style = styleSelect.value;
+        editBtn.disabled = true;
+        editBtn.textContent = '⏳ Обработка...';
+        statusText.textContent = '⏳ Начинаем обработку...';
+        statusText.className = 'status-text';
+        progressContainer.classList.add('active');
+        progressContainerSecondary.classList.add('active');
+        progressBar.style.width = '0%';
+        progressBarSecondary.style.width = '0%';
+        progressLabelText.textContent = 'Абзацы: 0/0';
+        progressPercentText.textContent = '0%';
+        checklistDiv.classList.remove('visible');
+        overallAnalysis.classList.remove('visible');
+        statusSummary.classList.remove('visible');
+        resultContainer.innerHTML = '';
+        const placeholder = document.createElement('div');
+        placeholder.className = 'result-placeholder';
+        placeholder.id = 'resultPlaceholder';
+        placeholder.textContent = 'Результат будет появляться здесь по мере обработки абзацев...';
+        resultContainer.appendChild(placeholder);
+        resultText = '';
+        logText = '';
+        document.getElementById('resultCount').textContent = '0 симв.';
+        avgScoreBadge.style.display = 'none';
+        statusCounts = { done: 0, partial: 0, error: 0 };
+
+        const formData = new FormData();
+        formData.append('text', text);
+        formData.append('style', style);
+
+        setStep(0, 'Отправка запроса...');
+
+        fetch('/api/revise', {
+            method: 'POST',
+            body: formData,
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(err => {
+                    throw new Error(err.detail || 'Ошибка сервера');
+                });
+            }
+            setStep(1, 'Генерация текста...');
+            return handleStream(response);
+        })
+        .then(data => {
+            setStep(3, 'Готово!');
+            statusText.textContent = '✅ Готово! ' + (data.summary || '');
+            statusText.className = 'status-text success';
+            if (data.average_human_score) {
+                updateAvgScore(data.average_human_score);
+            }
+            if (data.overall_analysis) {
+                updateOverallAnalysis(data.overall_analysis);
+            }
+            if (data.status_counts) {
+                statusCounts = data.status_counts;
+                updateStatusSummary(statusCounts);
+            }
+            if (data.checklist && data.checklist.length) {
+                renderChecklist(data.checklist);
+                checklistDiv.classList.add('visible');
+            }
+            progressContainerSecondary.classList.remove('active');
+            progressBarSecondary.style.width = '100%';
+            progressLabelText.textContent = `Абзацы: ${data.paragraphs ? data.paragraphs.length : 0}/${data.paragraphs ? data.paragraphs.length : 0}`;
+            progressPercentText.textContent = '100%';
+        })
+        .catch(err => {
+            statusText.textContent = '❌ ' + err.message;
+            statusText.className = 'status-text error';
+            setStep(-1, 'Ошибка');
+            progressContainerSecondary.classList.remove('active');
+        })
+        .finally(() => {
+            editBtn.disabled = false;
+            editBtn.textContent = '✏️ Редактировать';
+            progressContainer.classList.remove('active');
+            progressBar.style.width = '0%';
+        });
+    });
+
+    function handleStream(response) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let resolved = false;
+
+        return new Promise((resolve, reject) => {
+            function read() {
+                reader.read().then(({ done, value }) => {
+                    if (done) {
+                        if (!resolved) reject(new Error('Соединение закрыто'));
+                        return;
+                    }
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        const payload = line.slice(6).trim();
+                        if (!payload) continue;
+                        try {
+                            const event = JSON.parse(payload);
+                            handleEvent(event, resolve, reject, () => { resolved = true; });
+                        } catch (e) { /* игнорируем ошибки парсинга */ }
+                    }
+                    read();
+                }).catch(reject);
+            }
+            read();
+        });
+    }
+
+    function handleEvent(event, resolve, reject, markResolved) {
+        switch (event.type) {
+            case 'progress':
+                const total = event.estimated_total || 10000;
+                const pct = Math.min(100, (event.chars / total) * 100);
+                progressBar.style.width = pct + '%';
+                statusText.textContent = '⏳ ' + (event.log || 'Генерация... ' + Math.round(pct) + '%');
+                setStep(1, (event.log || 'Генерация... ' + Math.round(pct) + '%'));
+                break;
+            case 'paragraph_progress':
+                const current = event.current;
+                const totalParas = event.total;
+                updateParagraphProgress(current, totalParas);
+                break;
+            case 'paragraph_start':
+                addResultParagraph(event.index, event.original, 'processing', null, 0, null);
+                break;
+            case 'paragraph_status':
+                const status = event.status || 'error';
+                if (status === 'done') statusCounts.done++;
+                else if (status === 'partial') statusCounts.partial++;
+                else statusCounts.error++;
+                updateStatusSummary(statusCounts);
+                addResultParagraph(event.index, event.revised, status, event.chain, event.human_score, event.logs || []);
+                break;
+            case 'done':
+                markResolved();
+                setStep(2, 'Пост-обработка...');
+                if (event.overall_analysis) {
+                    const oa = event.overall_analysis;
+                    logText += `\n--- Общий анализ ---\n`;
+                    logText += `AI: ${oa.AI}%\n`;
+                    logText += `LIKELY_AI: ${oa.LIKELY_AI}%\n`;
+                    logText += `LIKELY_HUMAN: ${oa.LIKELY_HUMAN}%\n`;
+                    logText += `HUMAN: ${oa.HUMAN}%\n`;
+                    logText += `SCORE: ${oa.score}%\n`;
+                }
+                resolve(event);
+                break;
+            case 'error':
+                markResolved();
+                reject(new Error(event.detail || 'Ошибка обработки'));
+                break;
+            default:
+                break;
+        }
+    }
+
+    function renderChecklist(checklist) {
+        checklistItems.innerHTML = '';
+        let passedCount = 0;
+        const total = checklist.length;
+        checklist.forEach(item => {
+            const div = document.createElement('div');
+            div.className = 'checklist-item';
+            const icon = document.createElement('span');
+            icon.className = 'icon';
+            if (item.passed === true) {
+                icon.textContent = '✅';
+                icon.classList.add('pass');
+                passedCount++;
+            } else if (item.passed === false) {
+                icon.textContent = '❌';
+                icon.classList.add('fail');
+            } else {
+                icon.textContent = '⏳';
+                icon.classList.add('unknown');
+            }
+            const label = document.createElement('span');
+            label.textContent = item.label;
+            if (item.note) {
+                const note = document.createElement('span');
+                note.style.cssText = 'color: #6b7f94; font-size: 12px; margin-left: 8px;';
+                note.textContent = '— ' + item.note;
+                div.appendChild(icon);
+                div.appendChild(label);
+                div.appendChild(note);
+            } else {
+                div.appendChild(icon);
+                div.appendChild(label);
+            }
+            checklistItems.appendChild(div);
+        });
+        const header = document.createElement('div');
+        header.style.cssText = 'font-weight: 500; margin-bottom: 8px; color: #2c3e50; font-size: 13px;';
+        header.textContent = `📋 Чек-лист: ${passedCount}/${total} пунктов выполнено`;
+        checklistItems.prepend(header);
+    }
+
+    function addResultParagraph(index, text, status, chain, humanScore, logs) {
+        if (resultPlaceholder) resultPlaceholder.style.display = 'none';
+        let el = document.getElementById('para-' + index);
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'para-' + index;
+            el.className = 'result-paragraph';
+            resultContainer.appendChild(el);
+        }
+        const statusClass = status === 'done' ? 'done' : (status === 'partial' ? 'partial' : 'error');
+        el.className = 'result-paragraph ' + statusClass;
+        const scoreText = humanScore !== undefined ? `<span class="score">${humanScore}%</span>` : '';
+        const chainBadge = chain ? `<span class="chain">${chain}</span>` : '';
+        const statusIcon = status === 'done' ? '✅' : (status === 'partial' ? '⚠️' : '❌');
+        el.innerHTML = `<span class="text">${text}</span><span class="meta"><span class="status-icon">${statusIcon}</span>${chainBadge} ${scoreText}</span>`;
+        updateResultCount();
+        if (logs && logs.length) {
+            logText += `\n--- Абзац ${index+1} ---\n`;
+            logs.forEach(line => {
+                logText += line + '\n';
+            });
+        }
+    }
+
+    function updateResultCount() {
+        let fullText = '';
+        const paras = resultContainer.querySelectorAll('.result-paragraph');
+        paras.forEach(p => {
+            const textNode = p.querySelector('.text');
+            if (textNode) fullText += textNode.textContent + '\n\n';
+        });
+        resultText = fullText.trim();
+        document.getElementById('resultCount').textContent = resultText.length + ' симв.';
+    }
+
+    function updateAvgScore(avgScore) {
+        if (avgScore > 0) {
+            avgScoreBadge.style.display = 'inline';
+            avgScoreBadge.textContent = 'Средний HUMAN: ' + avgScore + '%';
+        }
+    }
+
+    function updateOverallAnalysis(data) {
+        if (!data || data.score === undefined) {
+            overallAnalysis.classList.remove('visible');
+            return;
+        }
+        overallAnalysis.classList.add('visible');
+        const categories = ['AI', 'LIKELY_AI', 'LIKELY_HUMAN', 'HUMAN'];
+        const colors = ['red', 'red', 'yellow', 'green'];
+        let html = '';
+        for (let i = 0; i < categories.length; i++) {
+            const val = data[categories[i]] || 0;
+            const color = colors[i];
+            html += `<div class="stat"><span class="label">${categories[i]}:</span> <span class="value ${color}">${val}%</span></div>`;
+        }
+        overallStats.innerHTML = html;
+        const score = data.score || 0;
+        overallStatus.textContent = score >= 70 ? '✅ Успешно' : (score >= 50 ? '⚠️ Так себе' : '❌ Не успешно');
+        overallStatus.className = 'overall-status ' + (score >= 70 ? 'success' : (score >= 50 ? 'warning' : 'error'));
+    }
+
+    function updateParagraphProgress(current, total) {
+        totalParagraphs = total;
+        const pct = total > 0 ? Math.min(100, (current / total) * 100) : 0;
+        progressBarSecondary.style.width = pct + '%';
+        progressLabelText.textContent = `Абзацы: ${current}/${total}`;
+        progressPercentText.textContent = Math.round(pct) + '%';
+    }
+
+    function updateStatusSummary(counts) {
+        statusDone.textContent = '✅ ' + (counts.done || 0);
+        statusPartial.textContent = '⚠️ ' + (counts.partial || 0);
+        statusError.textContent = '❌ ' + (counts.error || 0);
+        statusSummary.classList.add('visible');
+    }
+
+    const stepDots = {
+        step1: document.getElementById('step1'),
+        step2: document.getElementById('step2'),
+        step3: document.getElementById('step3'),
+        step4: document.getElementById('step4')
+    };
+
+    function resetSteps() {
+        Object.values(stepDots).forEach(s => { s.className = 'step-dot'; });
+    }
+
+    function setStep(step, label) {
+        resetSteps();
+        const names = ['step1', 'step2', 'step3', 'step4'];
+        for (let i = 0; i < names.length; i++) {
+            if (i < step) stepDots[names[i]].className = 'step-dot done';
+            else if (i === step) stepDots[names[i]].className = 'step-dot active';
+            else stepDots[names[i]].className = 'step-dot';
+        }
+        if (label) statusText.textContent = '⏳ ' + label;
+    }
 
     // Обновление счётчика символов
     sourceText.addEventListener('input', function() {
         sourceCount.textContent = this.value.length + ' симв.';
     });
 
-    // Инициализация
-    statusText.textContent = '✅ Сервер версии 5.0.6 готов';
-    statusText.className = 'status-text success';
+    // Загрузка информации о сервере
+    fetch('/api/health')
+        .then(res => res.json())
+        .then(data => {
+            const version = 'v' + data.version;
+            document.getElementById('versionBadge').textContent = version;
+            document.getElementById('footerVersion').textContent = 'Chapter Editor ' + version + ' — локальное перефразирование';
+            if (data.config_version && data.hypothesis) {
+                configInfo.textContent = `Конфиг: ${data.config_version} | Гипотеза: ${data.hypothesis}`;
+            }
+            statusText.textContent = '✅ Сервер версии ' + data.version + ' готов';
+            statusText.className = 'status-text success';
+        })
+        .catch(() => {
+            document.getElementById('versionBadge').textContent = 'v5.1.0';
+            document.getElementById('footerVersion').textContent = 'Chapter Editor v5.1.0 — локальное перефразирование';
+            configInfo.textContent = '⚠️ Не удалось загрузить конфиг';
+            statusText.textContent = '⚠️ Не удалось подключиться к серверу';
+            statusText.className = 'status-text error';
+        });
 });
 </script>
 </body>
