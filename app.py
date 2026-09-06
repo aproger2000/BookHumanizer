@@ -835,11 +835,13 @@ def run_auto_loop():
         logger.error("Не удалось загрузить тестовый текст")
         return
 
+    # Рассчитываем общее количество экспериментов на основе текущего списка параметров
     total_planned = 0
     for _, _, min_val, max_val, step in PARAMS_TO_OPTIMIZE:
         total_planned += int((max_val - min_val) / step) + 1
     logger.info(f"Всего запланировано экспериментов: {total_planned}")
 
+    # Сбрасываем счётчики при старте (или можно сохранять состояние, но мы обнуляем для чистоты)
     with status_lock:
         current_experiment_info['total_planned'] = total_planned
         current_experiment_info['total_done'] = 0
@@ -847,12 +849,20 @@ def run_auto_loop():
         current_experiment_info['last_score'] = 0
         current_experiment_info['best_text'] = ''
 
+    # Получаем состояние из БД (чтобы продолжить с прерванного места)
     current_idx = int(get_state('current_idx') or 0)
     current_value = float(get_state('current_value') or PARAMS_TO_OPTIMIZE[current_idx][1])
     best_value = float(get_state('best_value') or current_value)
     best_score = float(get_state('best_score') or 0)
 
     while auto_experiment_running:
+        # ===== ЗАЩИТА ОТ БЕСКОНЕЧНЫХ ЭКСПЕРИМЕНТОВ =====
+        # Если выполнено больше или равно запланированному, останавливаем цикл
+        if current_experiment_info['total_done'] >= current_experiment_info['total_planned']:
+            logger.info(f"Достигнут лимит экспериментов: {current_experiment_info['total_done']} из {current_experiment_info['total_planned']}. Цикл остановлен.")
+            break
+
+        # Проверяем, достигнута ли цель (70%)
         if best_score >= 70:
             logger.info("Достигнута цель HUMAN+LIKELY_HUMAN >= 70%, цикл остановлен.")
             break
@@ -860,15 +870,17 @@ def run_auto_loop():
         param_name, base_val, min_val, max_val, step = PARAMS_TO_OPTIMIZE[current_idx]
         new_value = current_value + step
         if new_value > max_val:
+            # Переход к следующему параметру
             current_idx = (current_idx + 1) % len(PARAMS_TO_OPTIMIZE)
             new_value = PARAMS_TO_OPTIMIZE[current_idx][1]
             set_state('current_idx', str(current_idx))
             set_state('current_value', str(new_value))
-            set_state('best_value', str(new_value))
+            set_state('best_value', str(best_value))
             set_state('best_score', str(best_score))
             logger.info(f"Переход к параметру {PARAMS_TO_OPTIMIZE[current_idx][0]}")
             continue
 
+        # Формируем словарь параметров
         params = {
             'PROB_SYNONYMS': config.PROB_SYNONYMS,
             'PROB_INSERTIONS': config.PROB_INSERTIONS,
@@ -880,8 +892,8 @@ def run_auto_loop():
             'PROB_SPLIT_LONG_SENTENCES': config.PROB_SPLIT_LONG_SENTENCES,
             'PROB_ADD_COLLOQUIAL': config.PROB_ADD_COLLOQUIAL,
             'PROB_TYPOS': config.PROB_TYPOS,
-            'PROB_SWAP_CLAUSES': 0.0,
-            'PROB_DIRECT_INDIRECT': 0.0,
+            'PROB_SWAP_CLAUSES': config.PROB_SWAP_CLAUSES,
+            'PROB_DIRECT_INDIRECT': config.PROB_DIRECT_INDIRECT,
         }
         params[param_name] = new_value
 
@@ -966,6 +978,7 @@ def run_auto_loop():
                 except Exception as e:
                     logger.warning(f"Feedback error: {e}")
 
+            # Обновляем информацию о текущем эксперименте
             with status_lock:
                 current_experiment_info['last_score'] = score
                 if score > best_score:
@@ -987,7 +1000,7 @@ def run_auto_loop():
                 set_state('current_idx', str(current_idx))
                 new_val = PARAMS_TO_OPTIMIZE[current_idx][1]
                 set_state('current_value', str(new_val))
-                set_state('best_value', str(new_val))
+                set_state('best_value', str(best_value))
                 set_state('best_score', str(best_score))
                 logger.info(f"Ухудшение, переходим к {PARAMS_TO_OPTIMIZE[current_idx][0]}")
 
@@ -998,7 +1011,7 @@ def run_auto_loop():
             set_state('current_idx', str(current_idx))
             new_val = PARAMS_TO_OPTIMIZE[current_idx][1]
             set_state('current_value', str(new_val))
-            set_state('best_value', str(new_val))
+            set_state('best_value', str(best_value))
             set_state('best_score', str(best_score))
 
         time.sleep(5)
