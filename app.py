@@ -22,7 +22,7 @@ import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error
 
-from db import init_db, get_all_experiments, save_experiment, set_state, get_state, get_best_experiment, save_best_text
+from db import init_db, get_all_experiments, save_experiment, set_state, get_state, get_best_experiment
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
