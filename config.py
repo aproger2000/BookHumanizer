@@ -1,27 +1,20 @@
-"""
-config.py — эксперимент: синтаксические трансформации (v5.0.1)
-"""
+CONFIG_VERSION = "v1.24"
+HYPOTHESIS = "Расширенный поиск (v5.1.0)"
+
 RANDOM_SEED = 42
-PROB_SYNONYMS = 0.5          # ВЕРНУЛИ 0.5 (как в v1.25, даёт 48%)
-PROB_INSERTIONS = 0.15
+
+PROB_SYNONYMS = 0.3
+PROB_INSERTIONS = 0.3
 PROB_SWAP_FIRST_WORDS = 0.3
-PROB_INTERJECTIONS = 0.25    # ВКЛЮЧИЛИ (как в v1.16, даёт 50%)
+PROB_INTERJECTIONS = 0.25
 PROB_PARTICLES = 0.25
-PROB_CANCEL_CANCEL = 0.5     # (как в v1.25, даёт 48%)
-PROB_REMOVE_AI_MARKERS = 0.6 # (как в v1.15, даёт 36%)
+PROB_CANCEL_CANCEL = 0.5
+PROB_REMOVE_AI_MARKERS = 0.6
 PROB_SPLIT_LONG_SENTENCES = 0.3
 PROB_ADD_COLLOQUIAL = 0.3
-PROB_TYPOS = 0.1             # Снизили с 0.3, так как v1.7 давал только 43%
-
-# ===== НОВЫЕ ОПЕРАЦИИ (ВКЛЮЧАЕМ ГЛАВНЫХ ПОБЕДИТЕЛЕЙ) =====
-PROB_SWAP_CLAUSES = 0.2      # ВКЛЮЧИЛИ (v1.22, даёт 50%)
-PROB_DIRECT_INDIRECT = 0.15
-
-# ===== Остальные отключены =====
-PROB_CHANGE_WORD_ORDER = 0.0
-PROB_SWAP_SUBJECT_PREDICATE = 0.0
-PROB_INVERSION = 0.0
-PROB_SWAP_MID_WORDS = 0.0
+PROB_TYPOS = 0.3
+PROB_SWAP_CLAUSES = 0.0
+PROB_DIRECT_INDIRECT = 0.0
 
 USE_RU_T5 = False
 MIN_PARAGRAPH_LENGTH = 30
