@@ -1,5 +1,5 @@
 """
-Chapter Editor v5.1.0 — расширенный поиск, сохранение лучшего текста
+Chapter Editor v5.2.0 — расширенный поиск, комбинации параметров, интеграция Gemini
 """
 import json
 import os
@@ -22,10 +22,18 @@ import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error
 
-from gemini_processor import GeminiProcessor
-gemini_processor = GeminiProcessor()
-
 from db import init_db, get_all_experiments, save_experiment, set_state, get_state, get_best_experiment as db_get_best_experiment
+
+# Импорт Gemini процессора (если доступен)
+try:
+    from gemini_processor import GeminiProcessor
+    gemini_processor = GeminiProcessor()
+    logger_temp = logging.getLogger(__name__)
+    logger_temp.info("GeminiProcessor загружен")
+except ImportError as e:
+    gemini_processor = None
+    logger_temp = logging.getLogger(__name__)
+    logger_temp.warning(f"Не удалось загрузить gemini_processor: {e}")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -33,7 +41,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-APP_VERSION = "5.1.0"
+APP_VERSION = "5.2.0"
 MAX_CHARS = 30_000
 
 PORT = os.environ.get('PORT', '8000')
@@ -97,7 +105,7 @@ current_experiment_info = {
     'total_done': 0,
     'total_planned': 0,
     'last_log': '',
-    'best_text': ''   # текст лучшего эксперимента
+    'best_text': ''
 }
 status_lock = threading.Lock()
 
@@ -503,17 +511,8 @@ def post_process(text: str, logs: list = None, params: dict = None) -> str:
                 text = new_text
     return text
 
-# ========== Обработка абзаца ==========
+# ========== Обработка абзаца (с Gemini) ==========
 def process_paragraph(paragraph: str, params: dict = None, style: str = "neutral", use_gemini: bool = None) -> dict:
-    """
-    Обрабатывает один абзац:
-    - оценивает оригинальный HUMAN
-    - если >= 50, пропускает
-    - иначе применяет пост-обработку (синонимы, вставки и т.д.)
-    - оценивает результат
-    - если включён Gemini и результат < 60, пробует улучшить через Gemini
-    - возвращает словарь с original, revised, статусом, score, logs
-    """
     if not paragraph:
         return {"original": paragraph, "revised": paragraph, "status": "error", "chain": "LOCAL", "human_score": 0, "logs": ["Пустой абзац"]}
 
@@ -525,7 +524,6 @@ def process_paragraph(paragraph: str, params: dict = None, style: str = "neutral
     original_score = get_human_score(paragraph)
     logs.append(f"Оригинальный HUMAN: {original_score}%")
 
-    # Если оригинал уже хороший — пропускаем
     if original_score >= 50:
         return {"original": paragraph, "revised": paragraph, "status": "done", "chain": "LOCAL (skipped)", "human_score": original_score, "logs": logs + ["Абзац уже имеет HUMAN >= 50, пропущен"]}
 
@@ -537,7 +535,8 @@ def process_paragraph(paragraph: str, params: dict = None, style: str = "neutral
     logs.append(f"После локальной обработки: {score}%")
 
     # 2. Если Gemini включён и результат не очень высокий — пробуем улучшить
-    if use_gemini and gemini_processor.enabled and score < 60:
+    gemini_used = False
+    if use_gemini and gemini_processor is not None and gemini_processor.enabled and score < 60:
         logger.info(f"Пробуем Gemini для абзаца (HUMAN={score}%)")
         try:
             gemini_revised = gemini_processor.process(revised, style=style)
@@ -547,6 +546,7 @@ def process_paragraph(paragraph: str, params: dict = None, style: str = "neutral
                 logger.info(f"Gemini улучшил: {score}% -> {gemini_score}%")
                 revised = gemini_revised
                 score = gemini_score
+                gemini_used = True
             else:
                 logger.info(f"Gemini не улучшил: {score}% -> {gemini_score}%")
         except Exception as e:
@@ -555,7 +555,7 @@ def process_paragraph(paragraph: str, params: dict = None, style: str = "neutral
 
     logs.append(f"Итоговый HUMAN: {score}%")
     status = "done" if score > 50 else "partial"
-    chain = "LOCAL + GEMINI" if (use_gemini and gemini_processor.enabled and 'gemini_revised' in locals() and gemini_score > score) else "LOCAL (post only)"
+    chain = "LOCAL + GEMINI" if gemini_used else "LOCAL (post only)"
 
     return {
         "original": paragraph,
@@ -686,6 +686,7 @@ def api_revise():
         file_storage = request.files.get("file")
         text = request.form.get("text", "")
         style = request.form.get("style", "neutral")
+        use_gemini = request.form.get("use_gemini", "false").lower() == "true" or config.USE_GEMINI
         if file_storage and file_storage.filename:
             raw = file_storage.read()
             chapter_text = raw.decode("utf-8", errors="replace")
@@ -706,12 +707,12 @@ def api_revise():
         logger.info(f"Split into {total} paragraphs")
         def generate():
             try:
-                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем локальную обработку {total} абзацев (v{APP_VERSION})..."})
+                yield _sse("progress", {"chars": 0, "estimated_total": total, "percent": 0, "log": f"Начинаем обработку {total} абзацев (v{APP_VERSION})..."})
                 results = []
                 for idx, para in enumerate(paragraphs):
                     yield _sse("paragraph_start", {"index": idx, "original": para, "status": "processing"})
                     try:
-                        result = process_paragraph(para)
+                        result = process_paragraph(para, style=style, use_gemini=use_gemini)
                     except Exception as e:
                         logger.error(f"Paragraph {idx} processing error: {e}")
                         result = {"original": para, "revised": para, "status": "error", "chain": "LOCAL", "human_score": 0, "logs": [f"Ошибка: {str(e)}"]}
@@ -747,6 +748,8 @@ def revise_internal():
     if not text:
         return jsonify({"error": "No text"}), 400
     params = data.get('params', {})
+    style = data.get('style', 'neutral')
+    use_gemini = data.get('use_gemini', config.USE_GEMINI)
     logger.info(f"revise_internal: входной текст длиной {len(text)} символов")
     paragraphs = split_paragraphs(text)
     if not paragraphs:
@@ -758,7 +761,7 @@ def revise_internal():
         if not para:
             continue
         logger.info(f"revise_internal: обрабатываем абзац {idx+1} длиной {len(para)} символов")
-        result = process_paragraph(para, params=params)
+        result = process_paragraph(para, params=params, style=style, use_gemini=use_gemini)
         results.append(result)
         logger.info(f"revise_internal: абзац {idx+1} обработан, длина результата {len(result['revised'])}")
     final_text = "\n\n".join(r["revised"] for r in results)
@@ -785,7 +788,6 @@ def get_experiments():
 
 @app.get("/api/experiments/best")
 def api_best_experiment():
-    # Импортируем функцию из db.py с другим именем
     from db import get_best_experiment as db_get_best
     best = db_get_best()
     if best:
@@ -841,18 +843,14 @@ def status_auto():
             "total_done": current_experiment_info.get('total_done', 0),
             "total_planned": current_experiment_info.get('total_planned', 0),
             "last_log": current_experiment_info.get('last_log', ''),
-            "best_text": current_experiment_info.get('best_text', '')  # добавили
+            "best_text": current_experiment_info.get('best_text', '')
         }
     return jsonify(info)
 
-# ========== Параметры оптимизации ==========
-# Вместо объявления PARAMS_TO_OPTIMIZE внутри app.py
-PARAMS_TO_OPTIMIZE = config.EXPERIMENT_PARAMS
-
-TEST_TEXT = None
+# ========== Параметры оптимизации (используются, если нет комбинаций) ==========
+PARAMS_TO_OPTIMIZE = getattr(config, 'EXPERIMENT_PARAMS', [])
 
 def load_test_text():
-    """Всегда читает файл test_text.txt, не использует кэш."""
     text_file = Path('test_text.txt')
     logger.info(f"Пытаемся загрузить файл: {text_file.absolute()}")
     if text_file.exists():
@@ -864,6 +862,7 @@ def load_test_text():
         logger.warning("test_text.txt не найден, используется заглушка")
         return "За восемь лет до «Стеклянного Ливня» Храм Солнца встретил Алексея..."
 
+# ========== Фоновый цикл автоматических экспериментов ==========
 def run_auto_loop():
     global auto_experiment_running, current_experiment_info
     logger.info("Авто-цикл начал работу (v5.2.0)")
@@ -885,22 +884,18 @@ def run_auto_loop():
         logger.error("Не удалось загрузить тестовый текст")
         return
 
-    # ===== Определяем режим работы =====
-    # Если в конфиге есть COMBINATIONS и он не пуст, используем режим комбинаций
+    # ===== Определяем режим работы: комбинации или параметры =====
     use_combinations = hasattr(config, 'COMBINATIONS') and config.COMBINATIONS and len(config.COMBINATIONS) > 0
 
     if use_combinations:
         combinations = config.COMBINATIONS
         total_planned = len(combinations)
         logger.info(f"Режим комбинаций: всего {total_planned} комбинаций")
-        # Состояние: current_idx хранит индекс текущей комбинации
         current_idx = int(get_state('current_idx') or 0)
         if current_idx >= total_planned:
             current_idx = 0
             set_state('current_idx', '0')
-        # best_score хранится как обычно
         best_score = float(get_state('best_score') or 0)
-        best_value = None  # не используется в этом режиме
     else:
         combinations = None
         total_planned = 0
@@ -908,7 +903,7 @@ def run_auto_loop():
             total_planned += int((max_val - min_val) / step) + 1
         logger.info(f"Режим параметров: всего {total_planned} экспериментов")
         current_idx = int(get_state('current_idx') or 0)
-        current_value = float(get_state('current_value') or PARAMS_TO_OPTIMIZE[current_idx][1])
+        current_value = float(get_state('current_value') or PARAMS_TO_OPTIMIZE[current_idx][1] if PARAMS_TO_OPTIMIZE else 0)
         best_value = float(get_state('best_value') or current_value)
         best_score = float(get_state('best_score') or 0)
 
@@ -919,7 +914,6 @@ def run_auto_loop():
         current_experiment_info['last_score'] = 0
         current_experiment_info['best_text'] = ''
 
-    # Основной цикл
     while auto_experiment_running:
         # Защита от переполнения
         if current_experiment_info['total_done'] >= current_experiment_info['total_planned']:
@@ -937,7 +931,6 @@ def run_auto_loop():
                 break
 
             combo = combinations[current_idx]
-            # Формируем параметры: базовые из config + переопределения из combo
             params = {
                 'PROB_SYNONYMS': config.PROB_SYNONYMS,
                 'PROB_INSERTIONS': config.PROB_INSERTIONS,
@@ -955,21 +948,19 @@ def run_auto_loop():
             for key, val in combo.items():
                 params[key] = val
 
-            # Формируем имя для БД
             combo_name = "_".join([f"{k}={v}" for k, v in combo.items()])
             config_name = f"combo_{combo_name}"
 
             logger.info(f"Запуск комбинации {current_idx+1}/{len(combinations)}: {combo_name}")
             with status_lock:
                 current_experiment_info['param_name'] = combo_name
-                current_experiment_info['param_value'] = 0  # не используется
+                current_experiment_info['param_value'] = 0
                 current_experiment_info['last_log'] = f"Запуск комбинации {combo_name}"
 
-            # Выполняем эксперимент
             try:
                 resp = requests.post(
                     f"{BASE_URL}/api/revise_internal",
-                    json={'text': text, 'params': params, 'style': 'neutral'},
+                    json={'text': text, 'params': params, 'style': 'neutral', 'use_gemini': config.USE_GEMINI},
                     timeout=60
                 )
                 if resp.status_code != 200:
@@ -1016,7 +1007,6 @@ def run_auto_loop():
                 score = human + likely_human
                 logger.info(f"Результат: HUMAN={human}%, LIKELY_HUMAN={likely_human}%, сумма={score}%")
 
-                # Сохраняем в БД
                 try:
                     save_experiment(
                         config_name=config_name,
@@ -1029,7 +1019,6 @@ def run_auto_loop():
                 except Exception as e:
                     logger.error(f"Ошибка сохранения эксперимента: {e}")
 
-                # Отправляем feedback
                 if processed_text and processed_text != text:
                     try:
                         requests.post(
@@ -1040,7 +1029,6 @@ def run_auto_loop():
                     except Exception as e:
                         logger.warning(f"Feedback error: {e}")
 
-                # Обновляем состояние
                 with status_lock:
                     current_experiment_info['last_score'] = score
                     if score > best_score:
@@ -1055,7 +1043,6 @@ def run_auto_loop():
                 else:
                     logger.info(f"Результат {score}% не превзошёл лучший {best_score}%")
 
-                # Переход к следующей комбинации
                 current_idx += 1
                 set_state('current_idx', str(current_idx))
 
@@ -1063,10 +1050,12 @@ def run_auto_loop():
                 logger.exception(f"Ошибка при выполнении комбинации: {e}")
                 current_idx += 1
                 set_state('current_idx', str(current_idx))
-                # Не останавливаем цикл, переходим к следующей комбинации
 
         # ----- Режим параметров (старый) -----
         else:
+            if not PARAMS_TO_OPTIMIZE:
+                logger.error("PARAMS_TO_OPTIMIZE пуст, цикл остановлен.")
+                break
             param_name, base_val, min_val, max_val, step = PARAMS_TO_OPTIMIZE[current_idx]
             new_value = current_value + step
             if new_value > max_val:
@@ -1102,16 +1091,111 @@ def run_auto_loop():
                 current_experiment_info['last_log'] = f"Запуск {param_name} = {new_value:.2f}"
 
             try:
-                # ... (остальной код для режима параметров такой же, как в предыдущей версии)
-                # Здесь нужно вставить всю логику выполнения эксперимента, аналогичную комбинациям,
-                # но с использованием params[param_name] и обновлением состояния для этого режима.
-                # Для краткости я не дублирую, но вы можете взять из вашей существующей функции.
-                # Однако я приведу полный код в итоговом варианте, чтобы не было пропусков.
-                pass
-            except:
-                pass
+                resp = requests.post(
+                    f"{BASE_URL}/api/revise_internal",
+                    json={'text': text, 'params': params, 'style': 'neutral', 'use_gemini': config.USE_GEMINI},
+                    timeout=60
+                )
+                if resp.status_code != 200:
+                    logger.error(f"Ошибка revise_internal: {resp.status_code}")
+                    human = get_local_score(text)
+                    likely_human = 0
+                    ai = 100 - human
+                    processed_text = text
+                else:
+                    data = resp.json()
+                    processed_text = data.get('revised_text')
+                    logger.info(f"Длина обработанного текста: {len(processed_text) if processed_text else 0}")
+                    if not processed_text:
+                        human = get_local_score(text)
+                        likely_human = 0
+                        ai = 100 - human
+                    else:
+                        if parse_yandex_neuro:
+                            try:
+                                if len(processed_text) < 150:
+                                    logger.warning(f"Текст слишком короткий ({len(processed_text)} символов), используем локальный")
+                                    human = get_local_score(processed_text)
+                                    likely_human = 0
+                                    ai = 100 - human
+                                else:
+                                    yandex_result = parse_yandex_neuro(processed_text)
+                                    human = yandex_result.get('human', 0)
+                                    likely_human = yandex_result.get('likely_human', 0)
+                                    likely_ai = yandex_result.get('likely_ai', 0)
+                                    ai = yandex_result.get('ai', 0)
+                                    logger.info(f"Оценка Яндекса: HUMAN={human}%, LIKELY_HUMAN={likely_human}%")
+                            except Exception as e:
+                                logger.warning(f"Ошибка парсинга Яндекса: {e}, используем локальный")
+                                human = get_local_score(processed_text)
+                                likely_human = 0
+                                likely_ai = 0
+                                ai = 100 - human
+                        else:
+                            human = get_local_score(processed_text)
+                            likely_human = 0
+                            likely_ai = 0
+                            ai = 100 - human
 
-        # Пауза между экспериментами
+                score = human + likely_human
+                logger.info(f"Результат: HUMAN={human}%, LIKELY_HUMAN={likely_human}%, сумма={score}%")
+
+                try:
+                    save_experiment(
+                        config_name=f"auto_{param_name}_{new_value:.2f}",
+                        params=params,
+                        results={'human': human, 'likely_human': likely_human, 'likely_ai': likely_ai if 'likely_ai' in locals() else 0, 'ai': ai},
+                        status='done',
+                        revised_text=processed_text if processed_text else ''
+                    )
+                    logger.info(f"Эксперимент сохранён в БД: {param_name}={new_value:.2f}")
+                except Exception as e:
+                    logger.error(f"Ошибка сохранения эксперимента: {e}")
+
+                if processed_text and processed_text != text:
+                    try:
+                        requests.post(
+                            f"{BASE_URL}/api/feedback",
+                            json={'revised_text': processed_text, 'yandex_score': human},
+                            timeout=30
+                        )
+                    except Exception as e:
+                        logger.warning(f"Feedback error: {e}")
+
+                with status_lock:
+                    current_experiment_info['last_score'] = score
+                    if score > best_score:
+                        current_experiment_info['best_score'] = score
+                        current_experiment_info['best_text'] = processed_text if processed_text else ''
+                    current_experiment_info['total_done'] += 1
+
+                if score > best_score:
+                    best_score = score
+                    best_value = new_value
+                    set_state('best_value', str(best_value))
+                    set_state('best_score', str(best_score))
+                    set_state('current_value', str(new_value))
+                    logger.info(f"Улучшение! Новый лучший для {param_name}: {best_value} (score {best_score})")
+                else:
+                    set_state('current_value', str(best_value))
+                    current_idx = (current_idx + 1) % len(PARAMS_TO_OPTIMIZE)
+                    set_state('current_idx', str(current_idx))
+                    new_val = PARAMS_TO_OPTIMIZE[current_idx][1]
+                    set_state('current_value', str(new_val))
+                    set_state('best_value', str(best_value))
+                    set_state('best_score', str(best_score))
+                    logger.info(f"Ухудшение, переходим к {PARAMS_TO_OPTIMIZE[current_idx][0]}")
+
+            except Exception as e:
+                logger.exception(f"Ошибка в цикле: {e}")
+                set_state('current_value', str(best_value))
+                current_idx = (current_idx + 1) % len(PARAMS_TO_OPTIMIZE)
+                set_state('current_idx', str(current_idx))
+                new_val = PARAMS_TO_OPTIMIZE[current_idx][1]
+                set_state('current_value', str(new_val))
+                set_state('best_value', str(best_value))
+                set_state('best_score', str(best_score))
+
         time.sleep(5)
 
     logger.info("Авто-цикл завершён")
