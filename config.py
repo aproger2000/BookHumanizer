@@ -1,9 +1,9 @@
 CONFIG_VERSION = "v1.25"
-HYPOTHESIS = "Расширенный поиск (v5.1.1) – проверка комбинаций"
+HYPOTHESIS = "Расширенный поиск (v5.2.0) – полный факторный эксперимент"
 
 RANDOM_SEED = 42
 
-# Базовая конфигурация по умолчанию (v2.0)
+# ===== БАЗОВЫЕ ВЕРОЯТНОСТИ =====
 PROB_SYNONYMS = 0.3
 PROB_INSERTIONS = 0.3
 PROB_SWAP_FIRST_WORDS = 0.4
@@ -17,15 +17,18 @@ PROB_TYPOS = 0.3
 PROB_SWAP_CLAUSES = 0.0
 PROB_DIRECT_INDIRECT = 0.0
 
+# ===== НАСТРОЙКИ МОДЕЛЕЙ =====
 USE_RU_T5 = False
 MIN_PARAGRAPH_LENGTH = 30
 RU_T5_THRESHOLD = 50
 RU_T5_ATTEMPTS = 2
 RU_T5_TEMPERATURE = 1.0
 MAX_PARAGRAPHS_FOR_RU_T5 = 3
-USE_GEMINI = True  # или False для отключения
+
+USE_GEMINI = True
 GEMINI_MODEL = "gemini-2.0-flash"
-GEMINI_TEMPERATURE = 0.85
+GEMINI_TEMPERATURE = 0.9
+GEMINI_MAX_OUTPUT_TOKENS = 2000
 
 # ===== СЛОВАРИ =====
 SYNONYMS_DICT = [
@@ -119,23 +122,83 @@ EXPERIMENT_PARAMS = [
     ('PROB_SWAP_CLAUSES', 0.0, 0.0, 0.25, 0.05),
 ]
 
-# ===== СПИСОК КОМБИНАЦИЙ ДЛЯ ПРОВЕРКИ (режим комбинаций) =====
-# Если этот список не пуст, цикл перебирает комбинации последовательно.
-# Каждая комбинация — словарь параметров, которые переопределяют базовые.
-COMBINATIONS = [
-    # Пары (перспективные)
-    {'PROB_INTERJECTIONS': 0.35, 'PROB_PARTICLES': 0.40},
-    {'PROB_INTERJECTIONS': 0.35, 'PROB_SWAP_FIRST_WORDS': 0.40},
-    {'PROB_INTERJECTIONS': 0.35, 'PROB_TYPOS': 0.35},
-    {'PROB_INTERJECTIONS': 0.35, 'PROB_REMOVE_AI_MARKERS': 0.70},
-    {'PROB_INTERJECTIONS': 0.40, 'PROB_PARTICLES': 0.40},
-    {'PROB_INTERJECTIONS': 0.35, 'PROB_PARTICLES': 0.45},
-    {'PROB_INTERJECTIONS': 0.40, 'PROB_PARTICLES': 0.45},
-    {'PROB_INTERJECTIONS': 0.35, 'PROB_SWAP_FIRST_WORDS': 0.45},
-    {'PROB_INTERJECTIONS': 0.35, 'PROB_TYPOS': 0.40},
-    {'PROB_INTERJECTIONS': 0.35, 'PROB_REMOVE_AI_MARKERS': 0.80},
-    # Тройки
-    {'PROB_INTERJECTIONS': 0.35, 'PROB_PARTICLES': 0.40, 'PROB_SWAP_FIRST_WORDS': 0.40},
-    {'PROB_INTERJECTIONS': 0.35, 'PROB_PARTICLES': 0.40, 'PROB_TYPOS': 0.35},
-    {'PROB_INTERJECTIONS': 0.40, 'PROB_PARTICLES': 0.40, 'PROB_SWAP_FIRST_WORDS': 0.40},
-]
+# ===== ГЕНЕРАЦИЯ КОМБИНАЦИЙ ДЛЯ АВТОМАТИЧЕСКОГО ПОИСКА =====
+def gen_vals(start, stop, step):
+    """Генерирует список значений от start до stop с шагом step"""
+    vals = []
+    cur = start
+    while cur <= stop + 0.001:
+        vals.append(round(cur, 2))
+        cur += step
+    return vals
+
+# Ключевые параметры для полного факторного эксперимента
+interjections_vals = gen_vals(0.25, 0.55, 0.05)   # 7 значений
+particles_vals = gen_vals(0.25, 0.45, 0.05)       # 5 значений
+swap_first_vals = gen_vals(0.25, 0.55, 0.05)      # 7 значений
+typos_vals = [0.35, 0.40]                         # 2 значения (для дополнительного измерения)
+remove_ai_vals = [0.65, 0.70, 0.75]               # 3 значения
+
+# Генерируем комбинации для трёх основных параметров + вариации TYPOS и REMOVE_AI
+COMBINATIONS = []
+for i in interjections_vals:
+    for p in particles_vals:
+        for s in swap_first_vals:
+            # Базовая комбинация
+            combo = {
+                'PROB_INTERJECTIONS': i,
+                'PROB_PARTICLES': p,
+                'PROB_SWAP_FIRST_WORDS': s,
+                # Остальные параметры остаются на базовых значениях
+            }
+            COMBINATIONS.append(combo)
+            
+            # Добавляем вариант с увеличенными TYPOS
+            combo_typos = combo.copy()
+            combo_typos['PROB_TYPOS'] = 0.40
+            COMBINATIONS.append(combo_typos)
+            
+            # Добавляем вариант с увеличенным REMOVE_AI_MARKERS
+            combo_remove = combo.copy()
+            combo_remove['PROB_REMOVE_AI_MARKERS'] = 0.75
+            COMBINATIONS.append(combo_remove)
+
+# Общее количество комбинаций: 7*5*7 = 245 базовых, *3 (с вариациями) = 735
+# Это многовато, оставим только базовые и одну вариацию
+COMBINATIONS = []
+for i in interjections_vals:
+    for p in particles_vals:
+        for s in swap_first_vals:
+            combo = {
+                'PROB_INTERJECTIONS': i,
+                'PROB_PARTICLES': p,
+                'PROB_SWAP_FIRST_WORDS': s,
+                'PROB_TYPOS': 0.35,
+                'PROB_REMOVE_AI_MARKERS': 0.7,
+            }
+            COMBINATIONS.append(combo)
+
+# Добавим небольшое разнообразие для TYPOS и REMOVE_AI (по одному дополнительному значению)
+for i in interjections_vals:
+    for p in particles_vals:
+        for s in swap_first_vals:
+            combo2 = {
+                'PROB_INTERJECTIONS': i,
+                'PROB_PARTICLES': p,
+                'PROB_SWAP_FIRST_WORDS': s,
+                'PROB_TYPOS': 0.40,
+                'PROB_REMOVE_AI_MARKERS': 0.7,
+            }
+            COMBINATIONS.append(combo2)
+            
+            combo3 = {
+                'PROB_INTERJECTIONS': i,
+                'PROB_PARTICLES': p,
+                'PROB_SWAP_FIRST_WORDS': s,
+                'PROB_TYPOS': 0.35,
+                'PROB_REMOVE_AI_MARKERS': 0.8,
+            }
+            COMBINATIONS.append(combo3)
+
+# Итоговое количество комбинаций: 7*5*7 * 3 = 735
+# Это ~12 часов работы (при 1 минуте на комбинацию)
