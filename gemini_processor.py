@@ -13,15 +13,12 @@ class GeminiProcessor:
             return
         self.client = genai.Client(api_key=self.api_key)
         self.enabled = True
-        self.model = "gemini-2.0-flash"  # или gemini-3.5-flash, gemini-3.7-flash[reference:1]
+        self.model = "gemini-2.0-flash"
+        logger.info(f"GeminiProcessor инициализирован. Модель: {self.model}")
 
     def process(self, text: str, style: str = "neutral") -> str:
-        """
-        Отправляет текст в Gemini для перефразирования с сохранением смысла.
-        """
         if not self.enabled or len(text) < 100:
             return text
-
         prompt = self._build_prompt(text, style)
         try:
             response = self.client.models.generate_content(
@@ -29,7 +26,7 @@ class GeminiProcessor:
                 contents=prompt,
                 config={
                     "temperature": 0.85,
-                    "max_output_tokens": len(text) * 2,  # запас для генерации
+                    "max_output_tokens": len(text) * 2,
                 }
             )
             result = response.text
