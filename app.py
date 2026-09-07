@@ -1,5 +1,5 @@
 """
-Chapter Editor v5.2.0 — расширенный поиск, комбинации параметров, интеграция Gemini
+Chapter Editor v5.2.1 — расширенный поиск, комбинации параметров, интеграция Gemini
 """
 import json
 import os
@@ -37,6 +37,11 @@ except ImportError as e:
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Логирование статуса Gemini
+logger.info(f"gemini_processor loaded: {gemini_processor is not None}")
+if gemini_processor:
+    logger.info(f"gemini_processor.enabled: {gemini_processor.enabled}")
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
@@ -536,6 +541,10 @@ def process_paragraph(paragraph: str, params: dict = None, style: str = "neutral
 
     # 2. Если Gemini включён и результат не очень высокий — пробуем улучшить
     gemini_used = False
+
+    # Детальное логирование для диагностики
+    logger.info(f"DEBUG: use_gemini={use_gemini}, gemini_processor exists={gemini_processor is not None}, enabled={gemini_processor.enabled if gemini_processor else False}, score={score}")
+
     if use_gemini and gemini_processor is not None and gemini_processor.enabled and score < 60:
         logger.info(f"Пробуем Gemini для абзаца (HUMAN={score}%)")
         try:
