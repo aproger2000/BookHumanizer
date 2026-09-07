@@ -22,6 +22,9 @@ import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error
 
+from gemini_processor import GeminiProcessor
+gemini_processor = GeminiProcessor()
+
 from db import init_db, get_all_experiments, save_experiment, set_state, get_state, get_best_experiment as db_get_best_experiment
 
 logging.basicConfig(level=logging.INFO)
@@ -501,20 +504,67 @@ def post_process(text: str, logs: list = None, params: dict = None) -> str:
     return text
 
 # ========== Обработка абзаца ==========
-def process_paragraph(paragraph: str, params: dict = None) -> dict:
+def process_paragraph(paragraph: str, params: dict = None, style: str = "neutral", use_gemini: bool = None) -> dict:
+    """
+    Обрабатывает один абзац:
+    - оценивает оригинальный HUMAN
+    - если >= 50, пропускает
+    - иначе применяет пост-обработку (синонимы, вставки и т.д.)
+    - оценивает результат
+    - если включён Gemini и результат < 60, пробует улучшить через Gemini
+    - возвращает словарь с original, revised, статусом, score, logs
+    """
     if not paragraph:
         return {"original": paragraph, "revised": paragraph, "status": "error", "chain": "LOCAL", "human_score": 0, "logs": ["Пустой абзац"]}
+
+    # Если use_gemini не передан явно, берём из глобальной переменной или из config
+    if use_gemini is None:
+        use_gemini = getattr(config, 'USE_GEMINI', False)
+
     logs = []
     original_score = get_human_score(paragraph)
     logs.append(f"Оригинальный HUMAN: {original_score}%")
+
+    # Если оригинал уже хороший — пропускаем
     if original_score >= 50:
         return {"original": paragraph, "revised": paragraph, "status": "done", "chain": "LOCAL (skipped)", "human_score": original_score, "logs": logs + ["Абзац уже имеет HUMAN >= 50, пропущен"]}
+
+    # 1. Локальная пост-обработка
     post_logs = []
     revised = post_process(paragraph, logs=post_logs, params=params)
     score = get_human_score(revised)
     logs.extend(post_logs)
+    logs.append(f"После локальной обработки: {score}%")
+
+    # 2. Если Gemini включён и результат не очень высокий — пробуем улучшить
+    if use_gemini and gemini_processor.enabled and score < 60:
+        logger.info(f"Пробуем Gemini для абзаца (HUMAN={score}%)")
+        try:
+            gemini_revised = gemini_processor.process(revised, style=style)
+            gemini_score = get_human_score(gemini_revised)
+            logs.append(f"После Gemini: {gemini_score}%")
+            if gemini_score > score:
+                logger.info(f"Gemini улучшил: {score}% -> {gemini_score}%")
+                revised = gemini_revised
+                score = gemini_score
+            else:
+                logger.info(f"Gemini не улучшил: {score}% -> {gemini_score}%")
+        except Exception as e:
+            logger.error(f"Ошибка при вызове Gemini: {e}")
+            logs.append(f"Ошибка Gemini: {str(e)}")
+
     logs.append(f"Итоговый HUMAN: {score}%")
-    return {"original": paragraph, "revised": revised, "status": "done" if score > 50 else "partial", "chain": "LOCAL (post only)", "human_score": score, "logs": logs}
+    status = "done" if score > 50 else "partial"
+    chain = "LOCAL + GEMINI" if (use_gemini and gemini_processor.enabled and 'gemini_revised' in locals() and gemini_score > score) else "LOCAL (post only)"
+
+    return {
+        "original": paragraph,
+        "revised": revised,
+        "status": status,
+        "chain": chain,
+        "human_score": score,
+        "logs": logs
+    }
 
 def analyze_overall(text: str) -> dict:
     if not text or len(text) < 100:
