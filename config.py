@@ -23,6 +23,9 @@ RU_T5_THRESHOLD = 50
 RU_T5_ATTEMPTS = 2
 RU_T5_TEMPERATURE = 1.0
 MAX_PARAGRAPHS_FOR_RU_T5 = 3
+USE_GEMINI = True  # или False для отключения
+GEMINI_MODEL = "gemini-2.0-flash"
+GEMINI_TEMPERATURE = 0.85
 
 # ===== СЛОВАРИ =====
 SYNONYMS_DICT = [
