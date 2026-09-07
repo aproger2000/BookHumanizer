@@ -1,3 +1,4 @@
+# db.py
 import os
 import sqlite3
 import json
@@ -11,10 +12,12 @@ DB_PATH = os.path.join(BASE_DIR, 'experiments.db')
 logger = logging.getLogger(__name__)
 
 def init_db():
+    """Инициализирует БД и выполняет миграцию (добавляет колонку revised_text, если её нет)"""
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    # Включаем WAL режим для многопоточности
     conn.execute('PRAGMA journal_mode=WAL')
     c = conn.cursor()
+    
+    # Создаём таблицу, если её нет
     c.execute('''
         CREATE TABLE IF NOT EXISTS experiments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -25,16 +28,27 @@ def init_db():
             likely_ai INTEGER,
             ai INTEGER,
             timestamp TEXT,
-            status TEXT,
-            revised_text TEXT
+            status TEXT
         )
     ''')
+    
+    # Проверяем, есть ли колонка revised_text
+    c.execute("PRAGMA table_info(experiments)")
+    columns = [col[1] for col in c.fetchall()]
+    if 'revised_text' not in columns:
+        logger.info("Добавляем колонку revised_text в таблицу experiments")
+        c.execute('ALTER TABLE experiments ADD COLUMN revised_text TEXT')
+        conn.commit()
+        logger.info("Колонка revised_text добавлена")
+    
+    # Создаём таблицу состояния, если её нет
     c.execute('''
         CREATE TABLE IF NOT EXISTS experiment_state (
             key TEXT PRIMARY KEY,
             value TEXT
         )
     ''')
+    
     conn.commit()
     conn.close()
     logger.info(f"Database initialized at {DB_PATH} (WAL mode)")
